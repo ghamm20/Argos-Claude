@@ -106,7 +106,7 @@ export function HUD({ argosRoot }: HUDProps) {
   } else if (lastHitCount > 0) {
     retrievalLabel = `Last: ${lastHitCount} hit${lastHitCount === 1 ? "" : "s"}`;
   } else {
-    retrievalLabel = `ON (${vault.docs} ${vault.docs === 1 ? "doc" : "docs"}, ${vault.chunks} chunks)`;
+    retrievalLabel = `ON (${vault.docs} ${vault.docs === 1 ? "doc" : "docs"}, ${vault.chunks} ${vault.chunks === 1 ? "chunk" : "chunks"})`;
   }
 
   // Citations used in the last assistant message

@@ -152,10 +152,34 @@ export function ChatPane() {
   const setHudMetric = useArgos((s) => s.setHudMetric);
   const pushLatency = useArgos((s) => s.pushLatency);
   const setActiveCitation = useArgos((s) => s.setActiveCitation);
+  const setVaultCounts = useArgos((s) => s.setVaultCounts);
 
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Hydrate vault counts on mount so retrieval is enabled even if the user
+  // never visits the Vault tab.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/api/vault/list", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as {
+          documents: unknown[];
+          totalChunks: number;
+        };
+        if (!cancelled)
+          setVaultCounts(j.documents.length, j.totalChunks);
+      } catch {
+        /* offline, ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setVaultCounts]);
 
   useEffect(() => {
     if (!scrollerRef.current) return;
