@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter, usePathname } from "next/navigation";
 import { PERSONAS } from "@/lib/personas";
 import { useArgos, type Tab } from "@/lib/store";
 import {
@@ -9,6 +10,7 @@ import {
   Mic,
   Database,
   Wrench,
+  Settings,
 } from "lucide-react";
 
 interface NavItem {
@@ -17,6 +19,7 @@ interface NavItem {
   icon: typeof MessageSquare;
   active: boolean;
   tab?: Tab;
+  route?: string;
 }
 
 const NAV: NavItem[] = [
@@ -26,6 +29,7 @@ const NAV: NavItem[] = [
   { id: "voice", label: "Voice", icon: Mic, active: false },
   { id: "memory", label: "Memory", icon: Database, active: false },
   { id: "tools", label: "Tools", icon: Wrench, active: false },
+  { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 
 const WORKSPACES = [
@@ -39,6 +43,26 @@ export function LeftRail() {
   const switchPersona = useArgos((s) => s.switchPersona);
   const currentTab = useArgos((s) => s.currentTab);
   const setTab = useArgos((s) => s.setTab);
+  const router = useRouter();
+  const pathname = usePathname();
+  const onSettings = pathname?.startsWith("/settings") ?? false;
+
+  function handleNav(n: NavItem) {
+    if (!n.active) return;
+    if (n.route) {
+      router.push(n.route);
+      return;
+    }
+    if (n.tab) {
+      if (onSettings) {
+        // navigate back to root, then set tab
+        setTab(n.tab);
+        router.push("/");
+      } else {
+        setTab(n.tab);
+      }
+    }
+  }
 
   return (
     <aside className="w-[240px] shrink-0 border-r border-neutral-800/80 bg-black/30 flex flex-col">
@@ -96,15 +120,18 @@ export function LeftRail() {
         </div>
         {NAV.map((n) => {
           const Icon = n.icon;
-          const isSelected = n.active && n.tab && n.tab === currentTab;
+          const isRoute = !!n.route;
+          const isSelected = n.active && (
+            isRoute
+              ? pathname?.startsWith(n.route ?? "/__never__")
+              : !onSettings && n.tab && n.tab === currentTab
+          );
           return (
             <button
               key={n.id}
               data-nav={n.id}
               disabled={!n.active}
-              onClick={() => {
-                if (n.active && n.tab) setTab(n.tab);
-              }}
+              onClick={() => handleNav(n)}
               className={
                 "w-full flex items-center justify-between gap-2 rounded-md px-2.5 py-2 text-[13px] transition-colors " +
                 (n.active
