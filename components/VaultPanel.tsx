@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload, Trash2, FileText } from "lucide-react";
 import { useArgos } from "@/lib/store";
+import { Button } from "@/components/ui/button";
 
 interface DocumentMeta {
   id: string;
@@ -262,14 +263,16 @@ export function VaultPanel() {
                     </div>
                   </div>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => void remove(d.id)}
-                  className="text-neutral-500 hover:text-red-400 px-2 py-1 transition-colors"
+                  className="text-neutral-500 hover:text-red-400 hover:bg-transparent"
                   title="Delete"
                   data-testid={`delete-${d.id}`}
                 >
                   <Trash2 size={14} strokeWidth={1.5} />
-                </button>
+                </Button>
               </div>
             ))}
           </div>
