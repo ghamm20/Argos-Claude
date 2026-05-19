@@ -1,14 +1,18 @@
 import { StubPage, StubSection, StubBullet, StubQuote } from "@/components/StubPage";
-import { argosRoot } from "@/lib/vault/paths";
+import { getRuntimeInfo } from "@/lib/runtime-info";
 
 export const metadata = { title: "Tools — ARGOS" };
 
-export default function ToolsPage() {
-  const root = argosRoot();
-  const display = process.env.ARGOS_ROOT ? root : `${root} (dev)`;
+export default async function ToolsPage() {
+  const runtime = await getRuntimeInfo();
+  const display = runtime.isDev
+    ? `${runtime.argosRoot} (dev)`
+    : runtime.argosRoot;
   return (
     <StubPage
       argosRoot={display}
+      version={runtime.version}
+      startedAt={runtime.startedAt}
       title="Tools"
       status="v2+"
       weekLabel="Post-launch · Path B"

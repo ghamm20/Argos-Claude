@@ -1,15 +1,19 @@
 import { Mic } from "lucide-react";
 import { StubPage, StubSection, StubBullet, StubQuote } from "@/components/StubPage";
-import { argosRoot } from "@/lib/vault/paths";
+import { getRuntimeInfo } from "@/lib/runtime-info";
 
 export const metadata = { title: "Voice — ARGOS" };
 
-export default function VoicePage() {
-  const root = argosRoot();
-  const display = process.env.ARGOS_ROOT ? root : `${root} (dev)`;
+export default async function VoicePage() {
+  const runtime = await getRuntimeInfo();
+  const display = runtime.isDev
+    ? `${runtime.argosRoot} (dev)`
+    : runtime.argosRoot;
   return (
     <StubPage
       argosRoot={display}
+      version={runtime.version}
+      startedAt={runtime.startedAt}
       title="Voice"
       status="v2"
       weekLabel="Week 6 · Path B"

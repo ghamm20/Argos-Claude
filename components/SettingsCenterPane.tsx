@@ -6,6 +6,7 @@ import { ModelSection } from "./settings/ModelSection";
 import { PersonaSection } from "./settings/PersonaSection";
 import { VaultSection } from "./settings/VaultSection";
 import { AboutSection } from "./settings/AboutSection";
+import type { RuntimeInfo } from "@/lib/runtime-info";
 
 type SectionId = "model" | "personas" | "vault" | "about";
 
@@ -23,8 +24,10 @@ const SECTIONS: SectionProps[] = [
 
 export function SettingsCenterPane({
   initialSection,
+  runtimeInfo,
 }: {
   initialSection?: SectionId;
+  runtimeInfo: RuntimeInfo;
 }) {
   const [active, setActive] = useState<SectionId>(initialSection ?? "model");
 
@@ -63,7 +66,7 @@ export function SettingsCenterPane({
           {active === "model" && <ModelSection />}
           {active === "personas" && <PersonaSection />}
           {active === "vault" && <VaultSection />}
-          {active === "about" && <AboutSection />}
+          {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>
       </div>
     </section>

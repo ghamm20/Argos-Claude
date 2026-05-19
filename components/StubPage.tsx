@@ -7,6 +7,8 @@ import { CitationDrawer } from "./CitationDrawer";
 
 interface StubPageProps {
   argosRoot: string;
+  version: string;
+  startedAt: number;
   title: string;
   status: string;
   weekLabel: string;
@@ -15,6 +17,8 @@ interface StubPageProps {
 
 export function StubPage({
   argosRoot,
+  version,
+  startedAt,
   title,
   status,
   weekLabel,
@@ -55,7 +59,7 @@ export function StubPage({
           <div className="max-w-2xl space-y-8">{children}</div>
         </div>
       </section>
-      <HUD argosRoot={argosRoot} />
+      <HUD argosRoot={argosRoot} version={version} startedAt={startedAt} />
       <CitationDrawer />
     </main>
   );

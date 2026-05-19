@@ -8,10 +8,6 @@ import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
   argosRoot: string;
-}
-
-interface AboutData {
-  appName: string;
   version: string;
   startedAt: number;
 }
@@ -89,7 +85,7 @@ function Section({
   );
 }
 
-export function HUD({ argosRoot }: HUDProps) {
+export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const personaName = useArgos((s) => s.personaName());
   const eyeColor = useArgos((s) => s.eyeColor());
   const model = useArgos((s) => s.currentModel);
@@ -101,20 +97,17 @@ export function HUD({ argosRoot }: HUDProps) {
   const setVaultCounts = useArgos((s) => s.setVaultCounts);
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
-  const [about, setAbout] = useState<AboutData | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       try {
-        const [aboutRes, hwRes, vaultRes] = await Promise.all([
-          fetch("/api/about", { cache: "no-store" }),
+        const [hwRes, vaultRes] = await Promise.all([
           fetch("/api/hardware", { cache: "no-store" }),
           fetch("/api/vault/list", { cache: "no-store" }),
         ]);
         if (cancel) return;
-        if (aboutRes.ok) setAbout((await aboutRes.json()) as AboutData);
         if (hwRes.ok) setHw((await hwRes.json()) as HardwareProfile);
         if (vaultRes.ok) {
           const j = (await vaultRes.json()) as {
@@ -198,8 +191,7 @@ export function HUD({ argosRoot }: HUDProps) {
       : hw.reason
     : "—";
 
-  const uptimeMs = about ? now - about.startedAt : 0;
-  const version = about?.version ?? "—";
+  const uptimeMs = now - startedAt;
 
   return (
     <aside className="w-[280px] shrink-0 border-l border-neutral-800/80 bg-black/30 px-4 py-5 overflow-y-auto">

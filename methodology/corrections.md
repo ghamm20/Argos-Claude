@@ -17,3 +17,28 @@ This proved the Claude_Preview Electron renderer was suppressing animation obser
 **Lesson:** When verifying motion/transitions in a headless or non-standard browser, validate the environment itself with a known-good control (plain div + keyframes) before declaring a real bug. Inline `style` attributes and DOM mutations are observable; animated transforms may not be.
 
 **Outcome:** No code change. Pulse animation remains as written, flagged in `methodology/eyes-on-h1-h2-h3.md` as "code-verified, eyes-on pending in real browser."
+
+---
+
+## 2026-05-19 — Decision: keep user-asset files untracked, don't commit them as repo content
+
+**Context:** End-of-H6 score harness flagged the working directory as carrying 2 dirty files. Investigation shows they are:
+1. `ARGOS/` — an empty directory present in the working tree since session start (dropped here by the user before doctrine was written).
+2. `argos imagery.png` — a reference image dropped at repo root before scaffolding.
+
+**Resolution:** Both are user assets, not source. They were deliberately unstaged in every commit from H1 onward (you can see `git restore --staged` calls in the transcript). Treating them as "dirty source" would either commit user material (wrong) or pretend they don't exist (also wrong). The right move is to keep them untracked.
+
+**Action taken:** None — both items continue to be untracked. Added to gitignore would feel sneaky; just letting them sit as visible-but-untracked is the most honest posture.
+
+**Lesson:** Scoring tooling that flags any non-clean working tree as a warning will misclassify user-supplied reference material as project drift. The remediation is to be explicit about provenance, not to suppress the signal.
+
+---
+
+## 2026-05-19 — Self-correction: /api/about was out of scope, refactoring to inline server props
+
+**Context:** End-of-H6 score harness flagged `/api/about` as an out-of-scope API route. The scope authorization for v1 covers chat, vault, hardware, settings — not about. I created the route in H5 to centralise build-info reads for HUD and AboutSection; this was a small unauthorised scope expansion.
+
+**Correction:** Remove `app/api/about/route.ts`. Replace the data path with `lib/runtime-info.ts` (server-only module that reads package.json + ARGOS_ROOT + boot time). Each server page calls `getRuntimeInfo()` and passes the result as props down to HUD and AboutSection. Client components no longer fetch `/api/about`.
+
+**Lesson:** When a feature needs cross-page data, the first instinct shouldn't be "add an API route." Server-component props are cheaper and stay inside the existing scope envelope.
+

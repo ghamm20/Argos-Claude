@@ -3,35 +3,19 @@
 import { useEffect, useState } from "react";
 import { Shield } from "lucide-react";
 import type { HardwareProfile } from "@/lib/hardware";
+import type { RuntimeInfo } from "@/lib/runtime-info";
 
-interface AboutData {
-  appName: string;
-  version: string;
-  argosRoot: string;
-  isDev: boolean;
-  ollamaUrl: string;
-  hardware?: HardwareProfile | null;
-  startedAt: number;
-}
-
-export function AboutSection() {
-  const [data, setData] = useState<AboutData | null>(null);
+export function AboutSection({ runtimeInfo }: { runtimeInfo: RuntimeInfo }) {
+  const [hardware, setHardware] = useState<HardwareProfile | null>(null);
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       try {
-        const [aboutRes, hwRes] = await Promise.all([
-          fetch("/api/about", { cache: "no-store" }),
-          fetch("/api/hardware", { cache: "no-store" }),
-        ]);
-        if (!aboutRes.ok) return;
-        const about = (await aboutRes.json()) as AboutData;
-        if (hwRes.ok) {
-          const hw = (await hwRes.json()) as HardwareProfile;
-          about.hardware = hw;
-        }
-        if (!cancel) setData(about);
+        const r = await fetch("/api/hardware", { cache: "no-store" });
+        if (!r.ok) return;
+        const hw = (await r.json()) as HardwareProfile;
+        if (!cancel) setHardware(hw);
       } catch {
         /* ignore */
       }
@@ -49,19 +33,19 @@ export function AboutSection() {
       </p>
 
       <div className="rounded-md border border-neutral-800 bg-black/30 divide-y divide-neutral-800/70">
-        <Row label="App" value={data ? `${data.appName} v${data.version}` : "—"} />
+        <Row label="App" value={`${runtimeInfo.appName} v${runtimeInfo.version}`} />
         <Row
           label="Mode"
-          value={data ? (data.isDev ? "Development (next dev)" : "Production") : "—"}
+          value={runtimeInfo.isDev ? "Development (next dev)" : "Production"}
         />
-        <Row label="ARGOS_ROOT" value={data?.argosRoot ?? "—"} mono />
-        <Row label="Ollama" value={data?.ollamaUrl ?? "—"} mono />
+        <Row label="ARGOS_ROOT" value={runtimeInfo.argosRoot} mono />
+        <Row label="Ollama" value={runtimeInfo.ollamaUrl} mono />
         <Row
           label="GPU"
           value={
-            data?.hardware
-              ? `${data.hardware.gpuName ?? "—"}${
-                  data.hardware.vramGB > 0 ? ` · ${data.hardware.vramGB} GB VRAM` : ""
+            hardware
+              ? `${hardware.gpuName ?? "—"}${
+                  hardware.vramGB > 0 ? ` · ${hardware.vramGB} GB VRAM` : ""
                 }`
               : "—"
           }
@@ -69,20 +53,16 @@ export function AboutSection() {
         <Row
           label="CPU"
           value={
-            data?.hardware
-              ? `${data.hardware.cpuModel} · ${data.hardware.cpuCores} cores`
+            hardware
+              ? `${hardware.cpuModel} · ${hardware.cpuCores} cores`
               : "—"
           }
         />
         <Row
           label="RAM"
-          value={data?.hardware ? `${data.hardware.totalRamGB} GB` : "—"}
+          value={hardware ? `${hardware.totalRamGB} GB` : "—"}
         />
-        <Row
-          label="Platform"
-          value={data?.hardware?.platform ?? "—"}
-          mono
-        />
+        <Row label="Platform" value={hardware?.platform ?? "—"} mono />
       </div>
 
       <div className="mt-6 flex items-center gap-3 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
