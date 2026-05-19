@@ -26,3 +26,9 @@
 | H5 | npm run check post-H5 | PASS | lint + typecheck + build + verify all green; 5 dynamic + 1 static routes. |
 | H5 | smoke-settings.mjs (14 assertions) | PASS | hardware GET, about GET, settings round-trip + validation + chat-route model gating. |
 | H5 | eyes-on H5 via Claude_Preview | PASS | See methodology/eyes-on-h5.md. Real numbers: Qwen 3B at 193 tok/s, Llama 8B at 57 tok/s on RTX 3060 Ti. |
+| H6 | 4 stub routes serve 200 with full honesty markers | PASS | /vision /voice /memory /tools all carry v2 + Path B + scope-lock link + Why-not + What in server HTML. |
+| H6 | audit-stub-honesty.mjs (44 checks) | PASS | Required: v2/PathB/scope-lock/Why-not/What/week marker per page; forbidden: useState/useEffect/fetch/wired onClick. Plus 4 workspace switcher checks. |
+| H6 | LeftRail v2 stubs routable + workspace tooltips | PASS | Nav: vision/voice/memory/tools route with amber v2 badge. Workspace: 6 v2 items disabled with canonical tooltip "Workspaces ship in v2..." sourced from one constant. |
+| H6 | HUD live on stub pages | PASS | Mode/Reason/Build/Uptime/Vault all populate on /vision the same as on /. |
+| H6 | npm run check post-H6 | PASS | lint + typecheck + build + verify all green. |
+| H6 | Hour 6 — doctrine made visible | PASS | docs/02-SCOPE-LOCK.md is now reflected in /vision /voice /memory /tools and the workspace switcher tooltip. The repo doctrine is visible from the product, not buried in markdown. |

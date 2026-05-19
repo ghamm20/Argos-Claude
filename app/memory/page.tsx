@@ -23,7 +23,7 @@ export default function MemoryPage() {
       <StubSection title="Why not v1">
         <StubBullet>Real memory needs the Core Brain orchestrator — separation of capability (the model) from personality (the persona prompt) from history (the memory store). That orchestrator lands in Week 10–11 of the Path B plan.</StubBullet>
         <StubBullet>v1 personas are prompt presets. They do not have a persistent memory layer; they have a system prompt and the current message history, which dies when the tab closes.</StubBullet>
-        <StubBullet>Shipping a "Memory" page that secretly just dumps the message buffer to disk would be a fake feature — exactly what doctrine forbids.</StubBullet>
+        <StubBullet>Shipping a &ldquo;Memory&rdquo; page that secretly just dumps the message buffer to disk would be a fake feature — exactly what doctrine forbids.</StubBullet>
       </StubSection>
 
       <StubSection title="The distinction worth making">
