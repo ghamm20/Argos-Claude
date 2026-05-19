@@ -18,3 +18,11 @@
 | H4 | smoke-retrieval.mjs assertions | PASS | retrieval event present, ≥1 hit, response mentions path/relative, truth-mode hedge count non-decreasing. |
 | H4 | npm run check post-H4 | PASS | All five rules pass; lint + typecheck + build green; 5 dynamic routes + 1 static. |
 | H4 | eyes-on H4 via Claude_Preview | PASS (with same animation caveat) | See methodology/eyes-on-h4.md. Off-topic question yielded honest "no access" without fake citations. |
+| H5 | /settings route + three-pane layout | PASS | Section tabs (model/personas/vault/about) all interactive; nav round-trips with / cleanly. |
+| H5 | hardware detection on this box | PASS | nvidia-smi successful: RTX 3060 Ti / 8 GB VRAM / 64 GB RAM / i7-11700F / 16 cores → gpu mode, llama3.1:8b recommended. |
+| H5 | model swap validation | PASS | /api/chat rejects unknown model with 400 + availableModels list. |
+| H5 | settings persistence at $ARGOS_ROOT/config/settings.json | PASS | GET → POST → re-read round-trip; invalid persona / model both rejected. |
+| H5 | HUD polish (mode, reason, build, uptime) | PASS | All four rows pulled from real APIs, uptime live-ticks at 1 Hz. |
+| H5 | npm run check post-H5 | PASS | lint + typecheck + build + verify all green; 5 dynamic + 1 static routes. |
+| H5 | smoke-settings.mjs (14 assertions) | PASS | hardware GET, about GET, settings round-trip + validation + chat-route model gating. |
+| H5 | eyes-on H5 via Claude_Preview | PASS | See methodology/eyes-on-h5.md. Real numbers: Qwen 3B at 193 tok/s, Llama 8B at 57 tok/s on RTX 3060 Ti. |

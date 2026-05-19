@@ -33,6 +33,17 @@ export function ModelSection() {
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [hwError, setHwError] = useState<string | null>(null);
 
+  function pick(m: string) {
+    setModel(m);
+    // Persist default for next app launch; failures are non-fatal because the
+    // store already holds the live value.
+    void fetch("/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultModel: m }),
+    }).catch(() => undefined);
+  }
+
   useEffect(() => {
     let cancel = false;
     void (async () => {
@@ -132,7 +143,7 @@ export function ModelSection() {
                   name="model"
                   value={m}
                   checked={selected}
-                  onChange={() => setModel(m)}
+                  onChange={() => pick(m)}
                   className="mt-1 accent-neutral-300"
                 />
                 <div className="flex-1 min-w-0">
