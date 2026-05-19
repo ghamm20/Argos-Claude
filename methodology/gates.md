@@ -32,3 +32,12 @@
 | H6 | HUD live on stub pages | PASS | Mode/Reason/Build/Uptime/Vault all populate on /vision the same as on /. |
 | H6 | npm run check post-H6 | PASS | lint + typecheck + build + verify all green. |
 | H6 | Hour 6 — doctrine made visible | PASS | docs/02-SCOPE-LOCK.md is now reflected in /vision /voice /memory /tools and the workspace switcher tooltip. The repo doctrine is visible from the product, not buried in markdown. |
+| H7 | /api/about removed, runtime-info threaded as server props | PASS | Score-harness flag resolved. 6 server pages now call getRuntimeInfo() and pass version + startedAt + argosRoot as props to HUD and AboutSection. |
+| H7 | Launcher design doc + acceptance criteria | PASS | launchers/README.md spells out env, ports, splash, cleanup contract, five acceptance points. |
+| H7 | launcher.bat / .command / .sh files exist with correct perms | PASS | git index modes: 100644 / 100755 / 100755. .gitattributes enforces LF on shell, CRLF on bat. |
+| H7 | Launcher smoke (41 checks) | PASS | per-launcher structure + README + layout-doc checks all green. |
+| H7 | Windows launcher e2e: bootstrap + chat + cleanup | PASS (after 3 fixes) | Layout sniff (..\ resolution), echo-paren escapes, netstat-based cleanup — all caught during eyes-on, fixed before final commit. |
+| H7 | macOS .command / Linux .sh e2e | DEFERRED | No Mac / Linux box on this machine; code-verified via smoke. Will eyes-on at H8 USB-drive run or in CI. |
+| H7 | USB layout doc | PASS | launchers/ARGOS_layout.md captures target structure + delta vs dev + H8 migration plan + size budget. |
+| H7 | npm run check post-H7 | PASS | lint + typecheck + build + verify all green. Build emits 5 dynamic + 5 static routes. |
+| H7 | Filesystem diff | PASS | Logs landed in ARGOS_ROOT/logs/, not host. APPDATA delta = 0 in 5-min window. |
