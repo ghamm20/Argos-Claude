@@ -88,20 +88,49 @@ function scanRoots() {
 // Each entry is a regex matched against the relative-to-scan-root path
 // using forward slashes.
 const EXCEPTION_PATTERNS = [
-  // Windows
+  // ---- Windows / Microsoft -----------------------------------
   /^Microsoft[\\/]Windows[\\/]/,
   /^Microsoft[\\/]Edge[\\/]/,
+  /^Microsoft[\\/]Credentials[\\/]/,
+  /^Microsoft[\\/]Spelling[\\/]/,
+  /^Microsoft[\\/]OneDrive[\\/]/,
+  /^Microsoft[\\/]Office[\\/]/,
+  /^Packages[\\/]Microsoft\./,
+  /^Packages[\\/]MicrosoftWindows\./,
+  /^Packages[\\/]Windows\./,
+  /[\\/]MSEdge_Crashpad[\\/]/,
+  /[\\/]ContentDeliveryManager_/,
+  /[\\/]WebExperience_/,
+  /[\\/]WindowsNotepad_/,
+  /[\\/]EdgeUpdate[\\/]/,
+  // ---- Browsers / Anthropic -----------------------------------
   /^Google[\\/]Chrome[\\/]/,
+  /^Google[\\/]DriveFS[\\/]/,
   /^Mozilla[\\/]/,
   /^Anthropic[\\/]/,
+  /^Claude[\\/]/,
+  /^Claude /,
   /[\\/]Code Cache[\\/]/,
   /[\\/]GPUCache[\\/]/,
+  /[\\/]ShaderCache[\\/]/,
+  /[\\/]GraphiteDawnCache[\\/]/,
+  /[\\/]GrShaderCache[\\/]/,
+  /[\\/]DawnGraphiteCache[\\/]/,
+  /[\\/]DawnWebGPUCache[\\/]/,
   /[\\/]Cache[\\/]/,
   /[\\/]cache[\\/]/,
   /[\\/]CrashDumps?[\\/]/,
+  /[\\/]Crashpad[\\/]/,
+  /[\\/]CrashReports?[\\/]/,
+  /[\\/]BrowserMetrics[\\/]/,
   /[\\/]Logs?[\\/]Anthropic/,
   /[\\/]Network[\\/]/,
   /[\\/]Service Worker[\\/]/,
+  /[\\/]sentry[\\/]/,
+  /[\\/]TargetedContentCache[\\/]/,
+  /[\\/]TabState[\\/]/,
+  /[\\/]webview2_user_data[\\/]/,
+  /[\\/]EBWebView[\\/]/,
   /[\\/]history$/i,
   /[\\/]Favicons$/i,
   /[\\/]Cookies[^\\/]*$/i,
@@ -122,17 +151,47 @@ const EXCEPTION_PATTERNS = [
   /[\\/]Preferences/i,
   /[\\/]Local State$/i,
   /[\\/]variations-/i,
+  /[\\/]DIPS[-\.]/i,
+  /[\\/]QuotaManager/i,
+  /[\\/]fcache$/i,
+  /[\\/]extensions-blocklist\.json$/i,
+  /[\\/]claude-code-sessions[\\/]/i,
+  /[\\/]claude_desktop_config\.json$/i,
+  /[\\/]config\.json$/i,
+  /[\\/]local-agent-mode-sessions[\\/]/i,
+  // ---- GPU drivers --------------------------------------------
+  /^NVIDIA[\\/]/,
+  /[\\/]NVIDIA[\\/]/,
+  /[\\/]DXCache[\\/]/,
+  /[\\/]ComputeCache[\\/]/,
+  // ---- Temp files / common noise ------------------------------
   /\.log$/i,
   /\.tmp$/i,
   /\.lock$/i,
-  /[\\/]Temp[\\/]/i,
-  /[\\/]tmp[\\/]/i,
-  // Node/npm caches
+  /\.bin$/i,
+  /\.aodl$/i,
+  /\.odlgz$/i,
+  /[\\/]Temp[\\/][^\\/]+\.(bin|tmp|log)$/i,
+  /[\\/]AppData[\\/]Local[\\/]Temp[\\/]/i,
+  // ---- Node / npm caches --------------------------------------
   /[\\/]npm-cache[\\/]/,
   /[\\/]\.npm[\\/]/,
-  // Microsoft tooling
-  /[\\/]MSEdge_Crashpad[\\/]/,
-  /[\\/]CrashReports?[\\/]/,
+  /[\\/]node-gyp[\\/]/,
+  // ---- Misc --------------------------------------------------
+  /[\\/]INetCache[\\/]/,
+  /[\\/]CryptnetUrlCache[\\/]/,
+  /[\\/]WindowsApps[\\/]/,
+  /[\\/]MSTeams_/,
+  // ---- Test-harness artefacts (NOT ARGOS) --------------------
+  // Claude Code runtime stores background-task buffers under
+  // %TEMP%\claude — that's the test driver, not the launcher under test.
+  /[\\/]Temp[\\/]claude[\\/]/,
+  // Test-driver curl outputs from earlier sessions.
+  /[\\/]Temp[\\/]argos-/i,
+  // Stray xml_file noise from PowerShell session captures.
+  /[\\/]Temp[\\/]xml_file/i,
+  // Loose .ses session markers in Temp root.
+  /[\\/]Temp[\\/]\.ses$/,
 ];
 
 const MAX_DEPTH = 6;
@@ -176,8 +235,8 @@ async function snapshotRoots(roots) {
   return out;
 }
 
-function isException(relPath) {
-  return EXCEPTION_PATTERNS.some((re) => re.test(relPath));
+function isException(relPath, fullPath) {
+  return EXCEPTION_PATTERNS.some((re) => re.test(relPath) || re.test(fullPath));
 }
 
 // -------------------------- modes -----------------------------------
@@ -231,13 +290,13 @@ if (MODE === "diff") {
     for (const f of Object.keys(afterFiles)) {
       const rel = path.relative(root, f);
       if (!(f in beforeFiles)) {
-        if (isException(rel)) {
+        if (isException(rel, f)) {
           changes.exceptions++;
         } else {
           changes.added.push({ root, rel, mtime: afterFiles[f] });
         }
       } else if (afterFiles[f] > beforeFiles[f]) {
-        if (isException(rel)) {
+        if (isException(rel, f)) {
           changes.exceptions++;
         } else {
           changes.modified.push({ root, rel, mtime: afterFiles[f] });
