@@ -1,6 +1,8 @@
 "use client";
 
 import { useArgos } from "@/lib/store";
+import { TruthModeToggle } from "./TruthModeToggle";
+import { ShieldCheck } from "lucide-react";
 
 interface HUDProps {
   argosRoot: string;
@@ -73,7 +75,10 @@ export function HUD({ argosRoot }: HUDProps) {
   const isStreaming = useArgos((s) => s.isStreaming);
   const m = useArgos((s) => s.hudMetrics);
   const vault = useArgos((s) => s.vaultStatus);
+  const messages = useArgos((s) => s.messages);
+  const truthMode = useArgos((s) => s.truthMode);
 
+  // Vault status row
   let vaultLabel: string;
   let vaultAccent: string | undefined;
   if (vault.ingesting) {
@@ -85,22 +90,69 @@ export function HUD({ argosRoot }: HUDProps) {
     vaultLabel = "empty";
   }
 
+  // Retrieval status row
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((msg) => msg.role === "assistant");
+  const lastHitCount = lastAssistant?.retrievalHits?.length ?? 0;
+
+  let retrievalLabel: string;
+  let retrievalAccent: string | undefined;
+  if (isStreaming && vault.docs > 0 && lastHitCount === 0) {
+    retrievalLabel = "Retrieving…";
+    retrievalAccent = eyeColor;
+  } else if (vault.docs === 0) {
+    retrievalLabel = "empty (no vault)";
+  } else if (lastHitCount > 0) {
+    retrievalLabel = `Last: ${lastHitCount} hit${lastHitCount === 1 ? "" : "s"}`;
+  } else {
+    retrievalLabel = `ON (${vault.docs} ${vault.docs === 1 ? "doc" : "docs"}, ${vault.chunks} chunks)`;
+  }
+
+  // Citations used in the last assistant message
+  let citationsUsed = 0;
+  if (lastAssistant) {
+    const matches = lastAssistant.content.match(/\[(\d+)\]/g);
+    if (matches && lastAssistant.retrievalHits) {
+      const maxIdx = lastAssistant.retrievalHits.length;
+      citationsUsed = matches
+        .map((m) => parseInt(m.slice(1, -1), 10))
+        .filter((n) => n >= 1 && n <= maxIdx).length;
+    }
+  }
+
   return (
     <aside className="w-[280px] shrink-0 border-l border-neutral-800/80 bg-black/30 px-4 py-5 overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
         <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-400">
           HUD
         </div>
-        <span
-          data-testid="hud-stream-indicator"
-          data-streaming={isStreaming ? "true" : "false"}
-          className="h-1.5 w-1.5 rounded-full"
-          style={{
-            background: isStreaming ? eyeColor : "#3f3f46",
-            boxShadow: isStreaming ? `0 0 6px ${eyeColor}` : "none",
-          }}
-          title={isStreaming ? "streaming" : "idle"}
-        />
+        <div className="flex items-center gap-2">
+          {truthMode && (
+            <span
+              data-testid="hud-truth-badge"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border text-[9px] uppercase tracking-[0.18em]"
+              style={{
+                borderColor: eyeColor,
+                color: eyeColor,
+                background: `${eyeColor}14`,
+              }}
+            >
+              <ShieldCheck size={9} strokeWidth={2} />
+              Truth
+            </span>
+          )}
+          <span
+            data-testid="hud-stream-indicator"
+            data-streaming={isStreaming ? "true" : "false"}
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              background: isStreaming ? eyeColor : "#3f3f46",
+              boxShadow: isStreaming ? `0 0 6px ${eyeColor}` : "none",
+            }}
+            title={isStreaming ? "streaming" : "idle"}
+          />
+        </div>
       </div>
 
       <Section title="Model">
@@ -119,8 +171,17 @@ export function HUD({ argosRoot }: HUDProps) {
 
       <Section title="Context">
         <Row label="Persona" value={personaName} accent={eyeColor} />
-        <Row label="Retrieval" value="Idle" />
+        <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
+        <Row
+          label="Citations"
+          value={citationsUsed > 0 ? `${citationsUsed} used` : "—"}
+          accent={citationsUsed > 0 ? eyeColor : undefined}
+        />
+      </Section>
+
+      <Section title="Mode">
+        <TruthModeToggle />
       </Section>
 
       <Section title="Host">
