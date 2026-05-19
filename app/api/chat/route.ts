@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { retrieve } from "@/lib/vault/store";
 import type { RetrievalHit } from "@/lib/vault/types";
+import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,6 +98,11 @@ export async function POST(req: NextRequest) {
   }
   if (typeof body.model !== "string" || !body.model.trim()) {
     return jsonError(400, "model is required");
+  }
+  if (!isAvailableModel(body.model)) {
+    return jsonError(400, `model not in allowed list: ${body.model}`, {
+      availableModels: AVAILABLE_MODELS,
+    });
   }
   const persona = PERSONA_BY_ID[body.personaId];
   if (!persona) {

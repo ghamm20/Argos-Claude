@@ -56,6 +56,13 @@ const EMPTY_VAULT: VaultStatus = {
 };
 
 const DEFAULT_MODEL = "llama3.1:8b-instruct-q4_K_M";
+export const AVAILABLE_MODELS: readonly string[] = [
+  "llama3.1:8b-instruct-q4_K_M",
+  "qwen2.5:3b-instruct-q4_K_M",
+] as const;
+export function isAvailableModel(m: string): boolean {
+  return AVAILABLE_MODELS.includes(m);
+}
 const LATENCY_WINDOW = 10;
 
 function p50(values: number[]): number {
