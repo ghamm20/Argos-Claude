@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { Settings as SettingsIcon } from "lucide-react";
 import { ModelSection } from "./settings/ModelSection";
+import { PersonaSection } from "./settings/PersonaSection";
+import { VaultSection } from "./settings/VaultSection";
+import { AboutSection } from "./settings/AboutSection";
 
 type SectionId = "model" | "personas" | "vault" | "about";
 
@@ -58,45 +61,12 @@ export function SettingsCenterPane({
 
         <div className="flex-1 overflow-y-auto px-8 py-6">
           {active === "model" && <ModelSection />}
-          {active === "personas" && <PersonaSectionPlaceholder />}
-          {active === "vault" && <VaultSectionPlaceholder />}
-          {active === "about" && <AboutSectionPlaceholder />}
+          {active === "personas" && <PersonaSection />}
+          {active === "vault" && <VaultSection />}
+          {active === "about" && <AboutSection />}
         </div>
       </div>
     </section>
   );
 }
 
-function PersonaSectionPlaceholder() {
-  return (
-    <div>
-      <h2 className="text-[15px] font-medium text-neutral-100 mb-1">Personas</h2>
-      <p className="text-[12px] text-neutral-500 mb-6">
-        Default persona at launch.
-      </p>
-      <div className="text-[12px] text-neutral-600">Wires in commit 5.</div>
-    </div>
-  );
-}
-function VaultSectionPlaceholder() {
-  return (
-    <div>
-      <h2 className="text-[15px] font-medium text-neutral-100 mb-1">Vault</h2>
-      <p className="text-[12px] text-neutral-500 mb-6">
-        Document index management.
-      </p>
-      <div className="text-[12px] text-neutral-600">Wires in commit 5.</div>
-    </div>
-  );
-}
-function AboutSectionPlaceholder() {
-  return (
-    <div>
-      <h2 className="text-[15px] font-medium text-neutral-100 mb-1">About</h2>
-      <p className="text-[12px] text-neutral-500 mb-6">
-        Build info, mount path, network posture.
-      </p>
-      <div className="text-[12px] text-neutral-600">Wires in commit 5.</div>
-    </div>
-  );
-}
