@@ -1,11 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useArgos } from "@/lib/store";
 import { TruthModeToggle } from "./TruthModeToggle";
 import { ShieldCheck } from "lucide-react";
+import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
   argosRoot: string;
+}
+
+interface AboutData {
+  appName: string;
+  version: string;
+  startedAt: number;
 }
 
 function fmtMs(v: number): string {
@@ -24,14 +32,27 @@ function fmtInt(v: number): string {
   return v.toLocaleString();
 }
 
+function fmtUptime(ms: number): string {
+  if (ms < 0 || !Number.isFinite(ms)) return "—";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
 function Row({
   label,
   value,
   accent,
+  title,
 }: {
   label: string;
   value: React.ReactNode;
   accent?: string;
+  title?: string;
 }) {
   return (
     <div className="flex items-center justify-between text-[11px] py-1.5 border-b border-neutral-800/50 last:border-b-0">
@@ -41,7 +62,7 @@ function Row({
       <span
         className="font-mono text-[11px] text-neutral-200 truncate max-w-[160px] text-right"
         style={accent ? { color: accent } : undefined}
-        title={typeof value === "string" ? value : undefined}
+        title={title ?? (typeof value === "string" ? value : undefined)}
       >
         {value}
       </span>
@@ -77,6 +98,41 @@ export function HUD({ argosRoot }: HUDProps) {
   const vault = useArgos((s) => s.vaultStatus);
   const messages = useArgos((s) => s.messages);
   const truthMode = useArgos((s) => s.truthMode);
+  const setVaultCounts = useArgos((s) => s.setVaultCounts);
+
+  const [hw, setHw] = useState<HardwareProfile | null>(null);
+  const [about, setAbout] = useState<AboutData | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      try {
+        const [aboutRes, hwRes, vaultRes] = await Promise.all([
+          fetch("/api/about", { cache: "no-store" }),
+          fetch("/api/hardware", { cache: "no-store" }),
+          fetch("/api/vault/list", { cache: "no-store" }),
+        ]);
+        if (cancel) return;
+        if (aboutRes.ok) setAbout((await aboutRes.json()) as AboutData);
+        if (hwRes.ok) setHw((await hwRes.json()) as HardwareProfile);
+        if (vaultRes.ok) {
+          const j = (await vaultRes.json()) as {
+            documents: unknown[];
+            totalChunks: number;
+          };
+          setVaultCounts(j.documents.length, j.totalChunks);
+        }
+      } catch {
+        /* leave nulls; HUD shows — */
+      }
+    })();
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      cancel = true;
+      clearInterval(tick);
+    };
+  }, [setVaultCounts]);
 
   // Vault status row
   let vaultLabel: string;
@@ -116,10 +172,34 @@ export function HUD({ argosRoot }: HUDProps) {
     if (matches && lastAssistant.retrievalHits) {
       const maxIdx = lastAssistant.retrievalHits.length;
       citationsUsed = matches
-        .map((m) => parseInt(m.slice(1, -1), 10))
+        .map((mm) => parseInt(mm.slice(1, -1), 10))
         .filter((n) => n >= 1 && n <= maxIdx).length;
     }
   }
+
+  // Mode + Reason from hardware
+  const modeLabel = hw
+    ? hw.mode === "gpu"
+      ? `GPU · ${hw.gpuVendor.toUpperCase()}`
+      : hw.mode === "metal"
+        ? "Metal · Apple"
+        : `CPU · ${hw.cpuCores} cores`
+    : "—";
+  const modeAccent = hw
+    ? hw.mode === "gpu"
+      ? "#10b981"
+      : hw.mode === "metal"
+        ? "#3b82f6"
+        : "#a3a3a3"
+    : undefined;
+  const reasonShort = hw
+    ? hw.reason.length > 24
+      ? `${hw.reason.slice(0, 22)}…`
+      : hw.reason
+    : "—";
+
+  const uptimeMs = about ? now - about.startedAt : 0;
+  const version = about?.version ?? "—";
 
   return (
     <aside className="w-[280px] shrink-0 border-l border-neutral-800/80 bg-black/30 px-4 py-5 overflow-y-auto">
@@ -157,8 +237,12 @@ export function HUD({ argosRoot }: HUDProps) {
 
       <Section title="Model">
         <Row label="Model" value={model} />
-        <Row label="Mode" value="—" />
-        <Row label="Reason" value="—" />
+        <Row label="Mode" value={modeLabel} accent={modeAccent} />
+        <Row
+          label="Reason"
+          value={reasonShort}
+          title={hw?.reason}
+        />
       </Section>
 
       <Section title="Inference">
@@ -187,11 +271,9 @@ export function HUD({ argosRoot }: HUDProps) {
       <Section title="Host">
         <Row label="USB path" value={argosRoot} />
         <Row label="Network" value="Local only" accent="#10b981" />
+        <Row label="Build" value={`v${version}`} />
+        <Row label="Uptime" value={fmtUptime(uptimeMs)} />
       </Section>
-
-      <div className="mt-6 text-[9px] uppercase tracking-[0.2em] text-neutral-700 leading-relaxed">
-        Hardware mode + retrieval wire in Hour 3+.
-      </div>
     </aside>
   );
 }
