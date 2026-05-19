@@ -13,3 +13,7 @@ benchmarks/raw/
 *.benchlog
 tsconfig.tsbuildinfo
 .env*.local
+.argos-host-before.json
+.argos-host-after.json
+.commit-msg.tmp
+.usb-dryrun/
