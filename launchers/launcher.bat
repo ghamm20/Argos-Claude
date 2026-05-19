@@ -15,21 +15,26 @@ set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
 REM --- Layout sniff (post-H8 / repo-root / pre-H8 dev) --------
+REM  Canonicalize parent dir first; cmd 'if exist' does not resolve
+REM  '..' segments embedded in a path, so we expand via for-loop.
+set "PARENT_DIR="
+for %%I in ("%SCRIPT_DIR%\..") do set "PARENT_DIR=%%~fI"
+
 if exist "%SCRIPT_DIR%\app\package.json" (
   set "ARGOS_ROOT=%SCRIPT_DIR%"
   set "NEXTJS_DIR=%SCRIPT_DIR%\app"
 ) else if exist "%SCRIPT_DIR%\package.json" (
   set "ARGOS_ROOT=%SCRIPT_DIR%"
   set "NEXTJS_DIR=%SCRIPT_DIR%"
-) else if exist "%SCRIPT_DIR%\..\package.json" (
-  for %%I in ("%SCRIPT_DIR%\..") do set "ARGOS_ROOT=%%~fI"
-  for %%I in ("%SCRIPT_DIR%\..") do set "NEXTJS_DIR=%%~fI"
+) else if exist "%PARENT_DIR%\package.json" (
+  set "ARGOS_ROOT=%PARENT_DIR%"
+  set "NEXTJS_DIR=%PARENT_DIR%"
 ) else (
   echo [ERROR] Could not locate ARGOS Next.js app from %SCRIPT_DIR%
   echo Expected one of:
-  echo   %SCRIPT_DIR%\app\package.json   (post-H8 USB layout)
-  echo   %SCRIPT_DIR%\package.json       (launcher at repo root)
-  echo   %SCRIPT_DIR%\..\package.json    (pre-H8 dev with launchers\ subdir)
+  echo   %SCRIPT_DIR%\app\package.json   ^(post-H8 USB layout^)
+  echo   %SCRIPT_DIR%\package.json       ^(launcher at repo root^)
+  echo   %PARENT_DIR%\package.json       ^(pre-H8 dev with launchers\ subdir^)
   pause
   exit /b 1
 )
@@ -50,8 +55,8 @@ if "%OLLAMA_BIN%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "
 if "%OLLAMA_BIN%"=="" (
   echo [ERROR] Ollama binary not found.
   echo Expected one of:
-  echo   %ARGOS_ROOT%\bin\ollama.exe                          (bundled — H8 will populate this)
-  echo   %LOCALAPPDATA%\Programs\Ollama\ollama.exe            (system install)
+  echo   %ARGOS_ROOT%\bin\ollama.exe                  ^(bundled - H8 will populate this^)
+  echo   %LOCALAPPDATA%\Programs\Ollama\ollama.exe    ^(system install^)
   pause
   exit /b 1
 )
@@ -61,7 +66,7 @@ set "OLLAMA_LOG=%ARGOS_ROOT%\logs\ollama.log"
 set "NEXT_LOG=%ARGOS_ROOT%\logs\next.log"
 
 echo.
-echo  ARGOS — local-first AI workstation
+echo  ARGOS - local-first AI workstation
 echo  --------------------------------------------------------
 echo  ARGOS_ROOT  %ARGOS_ROOT%
 echo  Next.js     %NEXTJS_DIR%
@@ -109,23 +114,30 @@ timeout /t 1 /nobreak >NUL
 goto WAIT_NEXT
 
 :NEXT_READY
-echo [4/4] ARGOS ready — opening browser at http://127.0.0.1:7799
+echo [4/4] ARGOS ready - opening browser at http://127.0.0.1:7799
 start "" http://127.0.0.1:7799
 echo.
 echo  ARGOS is running.
 echo  Press any key to shut down ARGOS cleanly.
-echo  (X-closing this window orphans the daemon windows — close them by hand if you do.)
+echo  ^(X-closing this window orphans the daemon windows - close them by hand if you do.^)
 echo.
 pause >NUL
 
 :CLEANUP
 echo Shutting down...
-taskkill /FI "WINDOWTITLE eq ARGOS-NEXT*" >NUL 2>&1
-taskkill /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
-timeout /t 1 /nobreak >NUL
-taskkill /F /FI "WINDOWTITLE eq ARGOS-NEXT*" >NUL 2>&1
+REM  Next.js renames its cmd-window title to "next-server (vX.Y.Z)" once
+REM  the server is up, so taskkill by ARGOS-NEXT title misses it.
+REM  Resolve via netstat: kill whoever is listening on 7799.
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":7799" ^| findstr "LISTENING"') do (
+  taskkill /F /PID %%P >NUL 2>&1
+)
+REM  Ollama gets the title-match path; if our launcher started it the
+REM  title sticks because ollama serve does not rename its window.
 taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
-REM Backup: kill any remaining ollama child by image name
+REM  Backup for an orphan Ollama child started by THIS launcher. Note:
+REM  this also kills any host-installed Ollama tray daemon - known
+REM  cost for the USB-isolated scenario where ARGOS owns Ollama
+REM  exclusively. See launchers/README.md.
 taskkill /F /IM ollama.exe >NUL 2>&1
 echo Done.
 exit /b 0
