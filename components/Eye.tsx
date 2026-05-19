@@ -6,7 +6,8 @@ import { useArgos } from "@/lib/store";
 import { PERSONA_BY_ID } from "@/lib/personas";
 
 export function Eye() {
-  const iris = useArgos((s) => PERSONA_BY_ID[s.personaId].iris);
+  const eyeColor = useArgos((s) => PERSONA_BY_ID[s.currentPersonaId].eyeColor);
+  const isStreaming = useArgos((s) => s.isStreaming);
   const [hover, setHover] = useState(false);
 
   return (
@@ -16,9 +17,19 @@ export function Eye() {
       viewBox="0 0 200 200"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      animate={{ scale: [1, 1.02, 1] }}
-      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-      style={{ filter: hover ? `drop-shadow(0 0 12px ${iris}80)` : "none" }}
+      animate={{ scale: isStreaming ? [1, 1.04, 1] : [1, 1.02, 1] }}
+      transition={{
+        duration: isStreaming ? 1.2 : 3,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+      style={{
+        filter: hover
+          ? `drop-shadow(0 0 12px ${eyeColor}80)`
+          : isStreaming
+            ? `drop-shadow(0 0 8px ${eyeColor}60)`
+            : "none",
+      }}
       role="img"
       aria-label="ARGOS eye"
     >
@@ -28,8 +39,8 @@ export function Eye() {
           <stop offset="100%" stopColor="#0a0a0a" />
         </radialGradient>
         <radialGradient id="argos-iris" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor={iris} stopOpacity={0.9} />
-          <stop offset="70%" stopColor={iris} stopOpacity={0.6} />
+          <stop offset="0%" stopColor={eyeColor} stopOpacity={0.9} />
+          <stop offset="70%" stopColor={eyeColor} stopOpacity={0.6} />
           <stop offset="100%" stopColor="#000" stopOpacity={0.9} />
         </radialGradient>
       </defs>
@@ -49,7 +60,7 @@ export function Eye() {
         cy={100}
         r={42}
         fill="url(#argos-iris)"
-        stroke={iris}
+        stroke={eyeColor}
         strokeOpacity={0.4}
         strokeWidth={1}
       />

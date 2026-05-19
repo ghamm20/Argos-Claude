@@ -25,8 +25,8 @@ const WORKSPACES = [
 ];
 
 export function LeftRail() {
-  const personaId = useArgos((s) => s.personaId);
-  const setPersona = useArgos((s) => s.setPersona);
+  const currentPersonaId = useArgos((s) => s.currentPersonaId);
+  const switchPersona = useArgos((s) => s.switchPersona);
 
   return (
     <aside className="w-[240px] shrink-0 border-r border-neutral-800/80 bg-black/30 flex flex-col">
@@ -45,23 +45,24 @@ export function LeftRail() {
         </div>
         <div className="grid grid-cols-2 gap-2">
           {PERSONAS.map((p) => {
-            const selected = personaId === p.id;
+            const selected = currentPersonaId === p.id;
             return (
               <button
                 key={p.id}
-                onClick={() => setPersona(p.id)}
+                onClick={() => switchPersona(p.id)}
                 className="group relative rounded-md border px-2.5 py-2 text-left transition-colors"
                 style={{
-                  borderColor: selected ? p.iris : "rgba(64,64,64,0.6)",
+                  borderColor: selected ? p.eyeColor : "rgba(64,64,64,0.6)",
                   background: selected
-                    ? `${p.iris}14`
+                    ? `${p.eyeColor}14`
                     : "rgba(20,20,20,0.6)",
                 }}
+                title={p.description}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className="h-2 w-2 rounded-full"
-                    style={{ background: p.iris }}
+                    style={{ background: p.eyeColor }}
                   />
                   <span className="text-[12px] font-medium text-neutral-200">
                     {p.name}
