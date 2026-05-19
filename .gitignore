@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+dist/
+vault/
+models/*.gguf
+config/local.*
+logs/
+.DS_Store
+Thumbs.db
+benchmarks/raw/
+*.benchlog
