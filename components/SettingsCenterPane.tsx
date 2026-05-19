@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Settings as SettingsIcon } from "lucide-react";
+import { ModelSection } from "./settings/ModelSection";
 
 type SectionId = "model" | "personas" | "vault" | "about";
 
@@ -56,7 +57,7 @@ export function SettingsCenterPane({
         </nav>
 
         <div className="flex-1 overflow-y-auto px-8 py-6">
-          {active === "model" && <ModelSectionPlaceholder />}
+          {active === "model" && <ModelSection />}
           {active === "personas" && <PersonaSectionPlaceholder />}
           {active === "vault" && <VaultSectionPlaceholder />}
           {active === "about" && <AboutSectionPlaceholder />}
@@ -66,17 +67,6 @@ export function SettingsCenterPane({
   );
 }
 
-function ModelSectionPlaceholder() {
-  return (
-    <div>
-      <h2 className="text-[15px] font-medium text-neutral-100 mb-1">Model</h2>
-      <p className="text-[12px] text-neutral-500 mb-6">
-        Active model and hardware-aware recommendation.
-      </p>
-      <div className="text-[12px] text-neutral-600">Wires in commit 4.</div>
-    </div>
-  );
-}
 function PersonaSectionPlaceholder() {
   return (
     <div>
