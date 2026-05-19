@@ -48,15 +48,21 @@ REM --- Ensure runtime dirs ------------------------------------
 if not exist "%ARGOS_ROOT%\logs" mkdir "%ARGOS_ROOT%\logs"
 if not exist "%ARGOS_ROOT%\tmp" mkdir "%ARGOS_ROOT%\tmp"
 
-REM --- Locate Ollama binary (bundled first, system fallback) --
+REM --- Locate Ollama binary (bundled first, system fallback, PATH fallback) --
 set "OLLAMA_BIN="
 if exist "%ARGOS_ROOT%\bin\ollama.exe" set "OLLAMA_BIN=%ARGOS_ROOT%\bin\ollama.exe"
 if "%OLLAMA_BIN%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_BIN=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
 if "%OLLAMA_BIN%"=="" (
+  for /f "delims=" %%I in ('where ollama 2^>NUL') do (
+    if not defined OLLAMA_BIN set "OLLAMA_BIN=%%I"
+  )
+)
+if "%OLLAMA_BIN%"=="" (
   echo [ERROR] Ollama binary not found.
   echo Expected one of:
-  echo   %ARGOS_ROOT%\bin\ollama.exe                  ^(bundled - H8 will populate this^)
-  echo   %LOCALAPPDATA%\Programs\Ollama\ollama.exe    ^(system install^)
+  echo   %ARGOS_ROOT%\bin\ollama.exe                  ^(bundled - shipped by migrate-to-usb^)
+  echo   %LOCALAPPDATA%\Programs\Ollama\ollama.exe    ^(system install via winget^)
+  echo   any ollama.exe on PATH
   pause
   exit /b 1
 )
