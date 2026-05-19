@@ -41,3 +41,10 @@
 | H7 | USB layout doc | PASS | launchers/ARGOS_layout.md captures target structure + delta vs dev + H8 migration plan + size budget. |
 | H7 | npm run check post-H7 | PASS | lint + typecheck + build + verify all green. Build emits 5 dynamic + 5 static routes. |
 | H7 | Filesystem diff | PASS | Logs landed in ARGOS_ROOT/logs/, not host. APPDATA delta = 0 in 5-min window. |
+| H8 | production-deps audit | PASS | 13 runtime deps, no native binaries, 245 MB deps+.next, deny-list clean. |
+| H8 | migrate-to-usb script | PASS | dry-run completed in 0.6s, layout matches launchers/ARGOS_layout.md, total ~435 MB excluding models. |
+| H8 | launcher windows three-tier ollama lookup | PASS | bundled / winget-path / PATH fallback. |
+| H8 | verify-host-clean script | SHIPPED | capture-before, capture-after, diff modes; Windows scan roots + exception list. Awaiting real PNY run for first PASS verdict. |
+| H8 | real PNY migration | BLOCKED | No PNY drive identifiable in this session. See methodology/eyes-on-h8.md "To unblock real H8 e2e". |
+| H8 | host-diff PASS from PNY run | DEFERRED | Verifier ready; needs PNY run to capture before/after snapshots. |
+| H8 | npm run check post-H8 | PASS | All rules pass, scripts integrated. |
