@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { PERSONA_BY_ID, type PersonaId } from "./personas";
 
 export type ChatRole = "user" | "assistant" | "system";
+export type Tab = "chat" | "vault";
 
 export interface ChatMessage {
   id: string;
@@ -23,6 +24,12 @@ export interface HudMetrics {
   recentLatencies: number[];
 }
 
+export interface VaultStatus {
+  docs: number;
+  chunks: number;
+  ingesting: string | null;
+}
+
 const EMPTY_METRICS: HudMetrics = {
   latencyMs: 0,
   tokensPerSec: 0,
@@ -30,6 +37,12 @@ const EMPTY_METRICS: HudMetrics = {
   timeToFirstTokenMs: 0,
   p50LatencyMs: 0,
   recentLatencies: [],
+};
+
+const EMPTY_VAULT: VaultStatus = {
+  docs: 0,
+  chunks: 0,
+  ingesting: null,
 };
 
 const DEFAULT_MODEL = "llama3.1:8b-instruct-q4_K_M";
@@ -47,12 +60,15 @@ function p50(values: number[]): number {
 interface ArgosState {
   currentPersonaId: PersonaId;
   currentModel: string;
+  currentTab: Tab;
   messages: ChatMessage[];
   isStreaming: boolean;
   hudMetrics: HudMetrics;
+  vaultStatus: VaultStatus;
 
   switchPersona: (id: PersonaId) => void;
   setModel: (m: string) => void;
+  setTab: (t: Tab) => void;
   appendMessage: (m: ChatMessage) => void;
   appendToLastMessage: (chunk: string) => void;
   patchLastMessage: (patch: Partial<ChatMessage>) => void;
@@ -61,6 +77,8 @@ interface ArgosState {
   pushLatency: (ms: number) => void;
   resetHudMetrics: () => void;
   clearChat: () => void;
+  setVaultCounts: (docs: number, chunks: number) => void;
+  setVaultIngesting: (filename: string | null) => void;
 
   eyeColor: () => string;
   accentColor: () => string;
@@ -70,12 +88,15 @@ interface ArgosState {
 export const useArgos = create<ArgosState>((set, get) => ({
   currentPersonaId: "bartimaeus",
   currentModel: DEFAULT_MODEL,
+  currentTab: "chat",
   messages: [],
   isStreaming: false,
   hudMetrics: { ...EMPTY_METRICS },
+  vaultStatus: { ...EMPTY_VAULT },
 
   switchPersona: (id) => set({ currentPersonaId: id }),
   setModel: (m) => set({ currentModel: m }),
+  setTab: (t) => set({ currentTab: t }),
 
   appendMessage: (m) =>
     set((s) => ({ messages: [...s.messages, m] })),
@@ -121,6 +142,11 @@ export const useArgos = create<ArgosState>((set, get) => ({
       hudMetrics: { ...EMPTY_METRICS },
       isStreaming: false,
     }),
+
+  setVaultCounts: (docs, chunks) =>
+    set((s) => ({ vaultStatus: { ...s.vaultStatus, docs, chunks } })),
+  setVaultIngesting: (filename) =>
+    set((s) => ({ vaultStatus: { ...s.vaultStatus, ingesting: filename } })),
 
   eyeColor: () => PERSONA_BY_ID[get().currentPersonaId].eyeColor,
   accentColor: () => PERSONA_BY_ID[get().currentPersonaId].accentColor,

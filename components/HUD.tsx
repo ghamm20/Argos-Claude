@@ -72,6 +72,18 @@ export function HUD({ argosRoot }: HUDProps) {
   const model = useArgos((s) => s.currentModel);
   const isStreaming = useArgos((s) => s.isStreaming);
   const m = useArgos((s) => s.hudMetrics);
+  const vault = useArgos((s) => s.vaultStatus);
+
+  let vaultLabel: string;
+  let vaultAccent: string | undefined;
+  if (vault.ingesting) {
+    vaultLabel = `Indexing: ${vault.ingesting}`;
+    vaultAccent = eyeColor;
+  } else if (vault.docs > 0) {
+    vaultLabel = `${vault.docs} ${vault.docs === 1 ? "doc" : "docs"}, ${vault.chunks} ${vault.chunks === 1 ? "chunk" : "chunks"}`;
+  } else {
+    vaultLabel = "empty";
+  }
 
   return (
     <aside className="w-[280px] shrink-0 border-l border-neutral-800/80 bg-black/30 px-4 py-5 overflow-y-auto">
@@ -80,6 +92,8 @@ export function HUD({ argosRoot }: HUDProps) {
           HUD
         </div>
         <span
+          data-testid="hud-stream-indicator"
+          data-streaming={isStreaming ? "true" : "false"}
           className="h-1.5 w-1.5 rounded-full"
           style={{
             background: isStreaming ? eyeColor : "#3f3f46",
@@ -106,6 +120,7 @@ export function HUD({ argosRoot }: HUDProps) {
       <Section title="Context">
         <Row label="Persona" value={personaName} accent={eyeColor} />
         <Row label="Retrieval" value="Idle" />
+        <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
       </Section>
 
       <Section title="Host">

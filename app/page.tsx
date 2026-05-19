@@ -1,15 +1,17 @@
 import { LeftRail } from "@/components/LeftRail";
-import { ChatPane } from "@/components/ChatPane";
 import { HUD } from "@/components/HUD";
+import { CenterPane } from "@/components/CenterPane";
+import { argosRoot } from "@/lib/vault/paths";
 
 export default function Home() {
-  const argosRoot = process.env.ARGOS_ROOT || "dev";
+  const root = argosRoot();
+  const display = process.env.ARGOS_ROOT ? root : `${root} (dev)`;
 
   return (
     <main className="h-screen w-screen flex overflow-hidden">
       <LeftRail />
-      <ChatPane />
-      <HUD argosRoot={argosRoot} />
+      <CenterPane />
+      <HUD argosRoot={display} />
     </main>
   );
 }

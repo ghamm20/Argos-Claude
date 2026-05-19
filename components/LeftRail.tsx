@@ -1,17 +1,27 @@
 "use client";
 
 import { PERSONAS } from "@/lib/personas";
-import { useArgos } from "@/lib/store";
+import { useArgos, type Tab } from "@/lib/store";
 import {
   MessageSquare,
+  FolderArchive,
   Eye as EyeIcon,
   Mic,
   Database,
   Wrench,
 } from "lucide-react";
 
-const NAV = [
-  { id: "chat", label: "Chat", icon: MessageSquare, active: true },
+interface NavItem {
+  id: string;
+  label: string;
+  icon: typeof MessageSquare;
+  active: boolean;
+  tab?: Tab;
+}
+
+const NAV: NavItem[] = [
+  { id: "chat", label: "Chat", icon: MessageSquare, active: true, tab: "chat" },
+  { id: "vault", label: "Vault", icon: FolderArchive, active: true, tab: "vault" },
   { id: "vision", label: "Vision", icon: EyeIcon, active: false },
   { id: "voice", label: "Voice", icon: Mic, active: false },
   { id: "memory", label: "Memory", icon: Database, active: false },
@@ -27,6 +37,8 @@ const WORKSPACES = [
 export function LeftRail() {
   const currentPersonaId = useArgos((s) => s.currentPersonaId);
   const switchPersona = useArgos((s) => s.switchPersona);
+  const currentTab = useArgos((s) => s.currentTab);
+  const setTab = useArgos((s) => s.setTab);
 
   return (
     <aside className="w-[240px] shrink-0 border-r border-neutral-800/80 bg-black/30 flex flex-col">
@@ -49,6 +61,7 @@ export function LeftRail() {
             return (
               <button
                 key={p.id}
+                data-persona={p.id}
                 onClick={() => switchPersona(p.id)}
                 className="group relative rounded-md border px-2.5 py-2 text-left transition-colors"
                 style={{
@@ -83,14 +96,21 @@ export function LeftRail() {
         </div>
         {NAV.map((n) => {
           const Icon = n.icon;
+          const isSelected = n.active && n.tab && n.tab === currentTab;
           return (
             <button
               key={n.id}
+              data-nav={n.id}
               disabled={!n.active}
+              onClick={() => {
+                if (n.active && n.tab) setTab(n.tab);
+              }}
               className={
                 "w-full flex items-center justify-between gap-2 rounded-md px-2.5 py-2 text-[13px] transition-colors " +
                 (n.active
-                  ? "bg-neutral-800/70 text-neutral-100"
+                  ? isSelected
+                    ? "bg-neutral-800/80 text-neutral-100"
+                    : "text-neutral-300 hover:bg-neutral-900/60"
                   : "text-neutral-500 hover:bg-neutral-900/50 cursor-not-allowed")
               }
             >
