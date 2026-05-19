@@ -1,6 +1,7 @@
 import { LeftRail } from "@/components/LeftRail";
 import { HUD } from "@/components/HUD";
 import { CenterPane } from "@/components/CenterPane";
+import { CitationDrawer } from "@/components/CitationDrawer";
 import { argosRoot } from "@/lib/vault/paths";
 
 export default function Home() {
@@ -12,6 +13,7 @@ export default function Home() {
       <LeftRail />
       <CenterPane />
       <HUD argosRoot={display} />
+      <CitationDrawer />
     </main>
   );
 }
