@@ -10,3 +10,5 @@ logs/
 Thumbs.db
 benchmarks/raw/
 *.benchlog
+tsconfig.tsbuildinfo
+.env*.local
