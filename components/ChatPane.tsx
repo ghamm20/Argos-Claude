@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Eye } from "./Eye";
-import { useArgos, type ChatMessage } from "@/lib/store";
+import { CitationPill } from "./CitationPill";
+import {
+  useArgos,
+  type ChatMessage,
+  type CitedHit,
+} from "@/lib/store";
 import { PERSONA_BY_ID } from "@/lib/personas";
 
 function makeId(): string {
@@ -13,7 +18,52 @@ function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function renderWithCitations(
+  content: string,
+  hits: CitedHit[] | undefined,
+  accent: string,
+  onPillClick: (hit: CitedHit) => void
+): React.ReactNode {
+  if (!hits || hits.length === 0) return content;
+  const re = /\[(\d+)\]/g;
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let pillKey = 0;
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) out.push(content.slice(last, m.index));
+    const n = parseInt(m[1], 10);
+    const hit = hits.find((h) => h.index === n);
+    if (hit) {
+      out.push(
+        <CitationPill
+          key={`pill-${pillKey++}`}
+          n={n}
+          accent={accent}
+          onClick={() => onPillClick(hit)}
+        />
+      );
+    } else {
+      if (typeof console !== "undefined") {
+        console.warn(
+          `[citation] out-of-range marker [${n}] (only ${hits.length} hit(s) available) — rendering as plain text`
+        );
+      }
+      out.push(m[0]);
+    }
+    last = re.lastIndex;
+  }
+  if (last < content.length) out.push(content.slice(last));
+  return out;
+}
+
+function MessageBubble({
+  msg,
+  onPillClick,
+}: {
+  msg: ChatMessage;
+  onPillClick: (hit: CitedHit) => void;
+}) {
   const isUser = msg.role === "user";
   const persona = msg.personaId ? PERSONA_BY_ID[msg.personaId] : undefined;
   const accent = persona?.accentColor ?? "#737373";
@@ -50,7 +100,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           <div className="text-red-400">{msg.content}</div>
         ) : (
           <>
-            <span>{msg.content}</span>
+            <span>
+              {renderWithCitations(
+                msg.content,
+                msg.retrievalHits,
+                accent,
+                onPillClick
+              )}
+            </span>
             {msg.isStreaming && (
               <motion.span
                 className="inline-block ml-0.5 w-1.5 h-3 align-middle"
@@ -75,15 +132,18 @@ interface OllamaStreamLine {
   prompt_eval_duration?: number;
   total_duration?: number;
   error?: string;
+  type?: string;
+  hits?: CitedHit[] | null;
+  enabled?: boolean;
 }
 
 export function ChatPane() {
   const messages = useArgos((s) => s.messages);
   const isStreaming = useArgos((s) => s.isStreaming);
-  const currentPersonaId = useArgos((s) => s.currentPersonaId);
   const currentModel = useArgos((s) => s.currentModel);
   const personaName = useArgos((s) => s.personaName());
   const accent = useArgos((s) => s.accentColor());
+  const vaultDocs = useArgos((s) => s.vaultStatus.docs);
 
   const appendMessage = useArgos((s) => s.appendMessage);
   const appendToLastMessage = useArgos((s) => s.appendToLastMessage);
@@ -91,6 +151,7 @@ export function ChatPane() {
   const setStreaming = useArgos((s) => s.setStreaming);
   const setHudMetric = useArgos((s) => s.setHudMetric);
   const pushLatency = useArgos((s) => s.pushLatency);
+  const setActiveCitation = useArgos((s) => s.setActiveCitation);
 
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -108,6 +169,7 @@ export function ChatPane() {
     const snapshot = useArgos.getState().messages;
     const personaIdAtSend = useArgos.getState().currentPersonaId;
     const modelAtSend = useArgos.getState().currentModel;
+    const useRetrieval = useArgos.getState().vaultStatus.docs > 0;
 
     const userMsg: ChatMessage = {
       id: makeId(),
@@ -145,6 +207,7 @@ export function ChatPane() {
           messages: wireHistory,
           personaId: personaIdAtSend,
           model: modelAtSend,
+          useRetrieval,
         }),
       });
 
@@ -193,6 +256,13 @@ export function ChatPane() {
                 isStreaming: false,
               });
               break;
+            }
+            if (data?.type === "retrieval") {
+              patchLastMessage({
+                retrievalHits: data.hits ?? undefined,
+                retrievalError: data.hits ? null : "no retrieval hits",
+              });
+              continue;
             }
             const chunk = data?.message?.content;
             if (chunk) {
@@ -284,10 +354,20 @@ export function ChatPane() {
         <div className="max-w-2xl mx-auto">
           {empty ? (
             <p className="text-center text-neutral-600 text-[13px]">
-              Local · Ollama · Persona {personaName}. Cmd/Ctrl+Enter to send.
+              Local · Ollama · Persona {personaName}.{" "}
+              {vaultDocs > 0
+                ? `Retrieval over ${vaultDocs} doc${vaultDocs === 1 ? "" : "s"}.`
+                : "No vault yet — chat will run without retrieval."}{" "}
+              Cmd/Ctrl+Enter to send.
             </p>
           ) : (
-            messages.map((m) => <MessageBubble key={m.id} msg={m} />)
+            messages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                msg={m}
+                onPillClick={(hit) => setActiveCitation(hit)}
+              />
+            ))
           )}
         </div>
       </div>

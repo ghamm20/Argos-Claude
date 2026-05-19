@@ -4,13 +4,23 @@ import { PERSONA_BY_ID, type PersonaId } from "./personas";
 export type ChatRole = "user" | "assistant" | "system";
 export type Tab = "chat" | "vault";
 
+export interface CitedHit {
+  index: number;
+  text: string;
+  filename: string;
+  chunkIndex: number;
+  score: number;
+  docId: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   timestamp: number;
   personaId?: PersonaId;
-  citations?: number[];
+  retrievalHits?: CitedHit[];
+  retrievalError?: string | null;
   isStreaming?: boolean;
   errored?: boolean;
 }
@@ -65,6 +75,7 @@ interface ArgosState {
   isStreaming: boolean;
   hudMetrics: HudMetrics;
   vaultStatus: VaultStatus;
+  activeCitation: CitedHit | null;
 
   switchPersona: (id: PersonaId) => void;
   setModel: (m: string) => void;
@@ -79,6 +90,7 @@ interface ArgosState {
   clearChat: () => void;
   setVaultCounts: (docs: number, chunks: number) => void;
   setVaultIngesting: (filename: string | null) => void;
+  setActiveCitation: (hit: CitedHit | null) => void;
 
   eyeColor: () => string;
   accentColor: () => string;
@@ -93,6 +105,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   isStreaming: false,
   hudMetrics: { ...EMPTY_METRICS },
   vaultStatus: { ...EMPTY_VAULT },
+  activeCitation: null,
 
   switchPersona: (id) => set({ currentPersonaId: id }),
   setModel: (m) => set({ currentModel: m }),
@@ -147,6 +160,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
     set((s) => ({ vaultStatus: { ...s.vaultStatus, docs, chunks } })),
   setVaultIngesting: (filename) =>
     set((s) => ({ vaultStatus: { ...s.vaultStatus, ingesting: filename } })),
+  setActiveCitation: (hit) => set({ activeCitation: hit }),
 
   eyeColor: () => PERSONA_BY_ID[get().currentPersonaId].eyeColor,
   accentColor: () => PERSONA_BY_ID[get().currentPersonaId].accentColor,
