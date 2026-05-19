@@ -262,23 +262,26 @@ const allTopLevel = readdirSync(NODE_MODULES, { withFileTypes: true })
   .filter((e) => e.isDirectory() && !e.name.startsWith("."))
   .map((e) => e.name);
 const NONDEV_SCOPES_TO_CRAWL = ["@radix-ui", "@swc"];
+const failedCopies = [];
 for (const entry of allTopLevel) {
   if (devDeps.has(entry)) continue;
   if (runtimeDeps.includes(entry)) continue; // already copied
   // Copy scoped dirs entirely if they aren't dev-only roots
-  if (entry.startsWith("@")) {
-    if (devDeps.has(entry)) continue;
-    const dst = path.join(APP_DST, "node_modules", entry);
-    if (existsSync(dst)) continue;
-    const src = path.join(NODE_MODULES, entry);
-    sizes.node_modules += await copyTree(src, dst);
-    continue;
-  }
-  // Otherwise copy if not a devDep root
   const dst = path.join(APP_DST, "node_modules", entry);
   if (existsSync(dst)) continue;
   const src = path.join(NODE_MODULES, entry);
-  sizes.node_modules += await copyTree(src, dst);
+  try {
+    sizes.node_modules += await copyTree(src, dst);
+  } catch (e) {
+    failedCopies.push({ entry, err: e instanceof Error ? e.message : String(e) });
+  }
+}
+if (failedCopies.length > 0) {
+  console.log(`    [warn] ${failedCopies.length} transitive entries failed to copy (logged, continuing):`);
+  for (const f of failedCopies.slice(0, 10)) {
+    console.log(`      - ${f.entry}: ${f.err.slice(0, 80)}`);
+  }
+  if (failedCopies.length > 10) console.log(`      ... ${failedCopies.length - 10} more`);
 }
 
 // 6) app/package.json + lockfile
