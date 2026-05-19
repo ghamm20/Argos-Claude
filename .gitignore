@@ -3,6 +3,7 @@ node_modules/
 out/
 dist/
 /vault/
+/config/
 models/*.gguf
 config/local.*
 logs/

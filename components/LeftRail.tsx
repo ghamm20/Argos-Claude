@@ -20,15 +20,16 @@ interface NavItem {
   active: boolean;
   tab?: Tab;
   route?: string;
+  stub?: boolean;
 }
 
 const NAV: NavItem[] = [
   { id: "chat", label: "Chat", icon: MessageSquare, active: true, tab: "chat" },
   { id: "vault", label: "Vault", icon: FolderArchive, active: true, tab: "vault" },
-  { id: "vision", label: "Vision", icon: EyeIcon, active: false },
-  { id: "voice", label: "Voice", icon: Mic, active: false },
-  { id: "memory", label: "Memory", icon: Database, active: false },
-  { id: "tools", label: "Tools", icon: Wrench, active: false },
+  { id: "vision", label: "Vision", icon: EyeIcon, active: true, route: "/vision", stub: true },
+  { id: "voice", label: "Voice", icon: Mic, active: true, route: "/voice", stub: true },
+  { id: "memory", label: "Memory", icon: Database, active: true, route: "/memory", stub: true },
+  { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools", stub: true },
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 
@@ -123,13 +124,15 @@ export function LeftRail() {
           const isRoute = !!n.route;
           const isSelected = n.active && (
             isRoute
-              ? pathname?.startsWith(n.route ?? "/__never__")
+              ? pathname === n.route ||
+                (n.route !== "/" && pathname?.startsWith(`${n.route}/`))
               : !onSettings && n.tab && n.tab === currentTab
           );
           return (
             <button
               key={n.id}
               data-nav={n.id}
+              data-nav-stub={n.stub ? "true" : undefined}
               disabled={!n.active}
               onClick={() => handleNav(n)}
               className={
@@ -145,8 +148,8 @@ export function LeftRail() {
                 <Icon size={14} strokeWidth={1.75} />
                 {n.label}
               </span>
-              {!n.active && (
-                <span className="text-[9px] uppercase tracking-wider rounded-sm border border-neutral-700 px-1 py-0.5 text-neutral-500">
+              {(n.stub || !n.active) && (
+                <span className="text-[9px] uppercase tracking-wider rounded-sm border border-amber-500/40 text-amber-400 bg-amber-500/5 px-1 py-0.5">
                   v2
                 </span>
               )}
