@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
+import { retrieve } from "@/lib/vault/store";
+import type { RetrievalHit } from "@/lib/vault/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,6 +9,7 @@ export const dynamic = "force-dynamic";
 const OLLAMA_BASE = "http://127.0.0.1:11434";
 const OLLAMA_CHAT = `${OLLAMA_BASE}/api/chat`;
 const FIRST_TOKEN_TIMEOUT_MS = 60_000;
+const DEFAULT_TOP_K = 5;
 
 type WireRole = "user" | "assistant" | "system";
 
@@ -19,6 +22,17 @@ interface ChatRequestBody {
   messages: WireMessage[];
   personaId: PersonaId;
   model: string;
+  useRetrieval?: boolean;
+  topK?: number;
+}
+
+interface CitedHit {
+  index: number;
+  text: string;
+  filename: string;
+  chunkIndex: number;
+  score: number;
+  docId: string;
 }
 
 function jsonError(status: number, error: string, extra: Record<string, unknown> = {}) {
@@ -36,6 +50,27 @@ function isConnRefused(e: unknown): boolean {
   if (!(e instanceof Error)) return false;
   const msg = e.message;
   return /ECONNREFUSED|fetch failed|other side closed|ENOTFOUND/i.test(msg);
+}
+
+function lastUserText(msgs: WireMessage[]): string | null {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === "user") return msgs[i].content;
+  }
+  return null;
+}
+
+function buildRetrievalBlock(hits: RetrievalHit[]): string {
+  const lines = hits.map((h, i) => {
+    const idx = i + 1;
+    const cleaned = h.text.replace(/\s+/g, " ").trim();
+    return `[${idx}] ${cleaned} (source: ${h.filename}, chunk ${h.chunkIndex})`;
+  });
+  return [
+    "RELEVANT CONTEXT (cite by [1], [2], etc. when you use this material):",
+    ...lines,
+    "",
+    "If no chunk is relevant to the user's question, say so plainly and do not invent citations.",
+  ].join("\n");
 }
 
 export async function POST(req: NextRequest) {
@@ -57,11 +92,38 @@ export async function POST(req: NextRequest) {
     return jsonError(400, `unknown persona: ${String(body.personaId)}`);
   }
 
+  // ---- Retrieval (graceful: never breaks the chat) ----
+  const wantsRetrieval = body.useRetrieval !== false;
+  const topK =
+    typeof body.topK === "number" && body.topK > 0 && body.topK <= 50
+      ? body.topK
+      : DEFAULT_TOP_K;
+
+  let retrievedHits: RetrievalHit[] = [];
+  let retrievalError: string | null = null;
+  const queryText = wantsRetrieval ? lastUserText(body.messages) : null;
+  if (wantsRetrieval && queryText) {
+    try {
+      retrievedHits = await retrieve(queryText, topK);
+    } catch (e) {
+      retrievalError = e instanceof Error ? e.message : String(e);
+      console.warn(`[chat] retrieval failed, continuing without context: ${retrievalError}`);
+    }
+  }
+
+  // ---- System prompt construction ----
+  const systemParts: string[] = [persona.systemPrompt];
+  if (retrievedHits.length > 0) {
+    systemParts.push(buildRetrievalBlock(retrievedHits));
+  }
+  const systemPrompt = systemParts.join("\n\n");
+
   const ollamaMessages: WireMessage[] = [
-    { role: "system", content: persona.systemPrompt },
+    { role: "system", content: systemPrompt },
     ...body.messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
+  // ---- Open Ollama stream ----
   const controller = new AbortController();
   const firstTokenTimer = setTimeout(() => {
     controller.abort();
@@ -111,7 +173,24 @@ export async function POST(req: NextRequest) {
     return jsonError(502, "empty stream body from Ollama");
   }
 
+  // Build the retrieval event we'll emit after Ollama closes.
+  const citedHits: CitedHit[] = retrievedHits.map((h, i) => ({
+    index: i + 1,
+    text: h.text,
+    filename: h.filename,
+    chunkIndex: h.chunkIndex,
+    score: h.score,
+    docId: h.docId,
+  }));
+  const retrievalEvent = {
+    type: "retrieval" as const,
+    hits: retrievalError === null ? citedHits : null,
+    error: retrievalError,
+    enabled: wantsRetrieval,
+  };
+
   const reader = upstream.body.getReader();
+  const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controllerInner) {
       let receivedAny = false;
@@ -125,6 +204,10 @@ export async function POST(req: NextRequest) {
           }
           if (value) controllerInner.enqueue(value);
         }
+        // Tail the stream with our retrieval set so the client can render pills.
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(retrievalEvent)}\n`)
+        );
         controllerInner.close();
       } catch (e) {
         clearTimeout(firstTokenTimer);
