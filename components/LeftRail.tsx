@@ -33,10 +33,24 @@ const NAV: NavItem[] = [
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 
-const WORKSPACES = [
+interface Workspace {
+  id: string;
+  label: string;
+  active: boolean;
+  note?: string;
+}
+
+const WORKSPACE_V2_NOTE =
+  "Workspaces ship in v2. v1 runs in Operator only. See docs/02-SCOPE-LOCK.md.";
+
+const WORKSPACES: Workspace[] = [
   { id: "operator", label: "Operator", active: true },
-  { id: "analyst", label: "Analyst", active: false },
-  { id: "researcher", label: "Researcher", active: false },
+  { id: "research", label: "Research", active: false, note: WORKSPACE_V2_NOTE },
+  { id: "strategy", label: "Strategy", active: false, note: WORKSPACE_V2_NOTE },
+  { id: "theology", label: "Theology", active: false, note: WORKSPACE_V2_NOTE },
+  { id: "writing", label: "Writing", active: false, note: WORKSPACE_V2_NOTE },
+  { id: "survival", label: "Survival", active: false, note: WORKSPACE_V2_NOTE },
+  { id: "coding", label: "Coding", active: false, note: WORKSPACE_V2_NOTE },
 ];
 
 export function LeftRail() {
@@ -166,17 +180,23 @@ export function LeftRail() {
           {WORKSPACES.map((w) => (
             <button
               key={w.id}
+              data-workspace={w.id}
+              data-workspace-active={w.active ? "true" : "false"}
               disabled={!w.active}
+              title={w.note ?? undefined}
+              onClick={(e) => {
+                if (!w.active) e.preventDefault();
+              }}
               className={
-                "w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-[12px] " +
+                "w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-[12px] transition-colors " +
                 (w.active
                   ? "bg-neutral-800/60 text-neutral-200"
-                  : "text-neutral-600 cursor-not-allowed")
+                  : "text-neutral-600 cursor-not-allowed hover:bg-neutral-900/40")
               }
             >
               {w.label}
               {!w.active && (
-                <span className="text-[9px] uppercase tracking-wider rounded-sm border border-neutral-700 px-1 py-0.5 text-neutral-500">
+                <span className="text-[9px] uppercase tracking-wider rounded-sm border border-amber-500/40 text-amber-400 bg-amber-500/5 px-1 py-0.5">
                   v2
                 </span>
               )}
