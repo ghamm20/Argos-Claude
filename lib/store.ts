@@ -76,6 +76,7 @@ interface ArgosState {
   hudMetrics: HudMetrics;
   vaultStatus: VaultStatus;
   activeCitation: CitedHit | null;
+  truthMode: boolean;
 
   switchPersona: (id: PersonaId) => void;
   setModel: (m: string) => void;
@@ -91,6 +92,7 @@ interface ArgosState {
   setVaultCounts: (docs: number, chunks: number) => void;
   setVaultIngesting: (filename: string | null) => void;
   setActiveCitation: (hit: CitedHit | null) => void;
+  setTruthMode: (b: boolean) => void;
 
   eyeColor: () => string;
   accentColor: () => string;
@@ -106,6 +108,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   hudMetrics: { ...EMPTY_METRICS },
   vaultStatus: { ...EMPTY_VAULT },
   activeCitation: null,
+  truthMode: false,
 
   switchPersona: (id) => set({ currentPersonaId: id }),
   setModel: (m) => set({ currentModel: m }),
@@ -161,6 +164,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   setVaultIngesting: (filename) =>
     set((s) => ({ vaultStatus: { ...s.vaultStatus, ingesting: filename } })),
   setActiveCitation: (hit) => set({ activeCitation: hit }),
+  setTruthMode: (b) => set({ truthMode: b }),
 
   eyeColor: () => PERSONA_BY_ID[get().currentPersonaId].eyeColor,
   accentColor: () => PERSONA_BY_ID[get().currentPersonaId].accentColor,

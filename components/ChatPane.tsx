@@ -208,6 +208,7 @@ export function ChatPane() {
           personaId: personaIdAtSend,
           model: modelAtSend,
           useRetrieval,
+          truthMode: useArgos.getState().truthMode,
         }),
       });
 

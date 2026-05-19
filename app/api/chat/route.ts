@@ -24,7 +24,18 @@ interface ChatRequestBody {
   model: string;
   useRetrieval?: boolean;
   topK?: number;
+  truthMode?: boolean;
 }
+
+const TRUTH_MODE_CLAUSE = [
+  "",
+  "TRUTH MODE ACTIVE:",
+  "- Explicitly surface uncertainty when present.",
+  "- Hedge claims that aren't directly supported by retrieval context (prefer \"the source suggests\" or \"based on the available material\" over \"it is\").",
+  "- When you cite [N], the citation must point to a chunk you actually used.",
+  "- If you don't know, say \"I don't know\" instead of speculating.",
+  "- Do not invent citations or sources.",
+].join("\n");
 
 interface CitedHit {
   index: number;
@@ -115,6 +126,9 @@ export async function POST(req: NextRequest) {
   const systemParts: string[] = [persona.systemPrompt];
   if (retrievedHits.length > 0) {
     systemParts.push(buildRetrievalBlock(retrievedHits));
+  }
+  if (body.truthMode === true) {
+    systemParts.push(TRUTH_MODE_CLAUSE);
   }
   const systemPrompt = systemParts.join("\n\n");
 
