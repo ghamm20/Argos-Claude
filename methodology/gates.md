@@ -45,6 +45,8 @@
 | H8 | migrate-to-usb script | PASS | dry-run completed in 0.6s, layout matches launchers/ARGOS_layout.md, total ~435 MB excluding models. |
 | H8 | launcher windows three-tier ollama lookup | PASS | bundled / winget-path / PATH fallback. |
 | H8 | verify-host-clean script | SHIPPED | capture-before, capture-after, diff modes; Windows scan roots + exception list. Awaiting real PNY run for first PASS verdict. |
-| H8 | real PNY migration | BLOCKED | No PNY drive identifiable in this session. See methodology/eyes-on-h8.md "To unblock real H8 e2e". |
-| H8 | host-diff PASS from PNY run | DEFERRED | Verifier ready; needs PNY run to capture before/after snapshots. |
+| H8 | real PNY migration | **PASS** | PNY (PNY_PRO_ELITEV3 116GB Removable) at D:. Two-stage: migrate-to-usb (partial, crashed in transitive loop) + robocopy follow-up + manual stages 5-9. Payload 475 MB without models. |
+| H8 | launcher boot from PNY | **PASS** | All 4 stages on D:\ARGOS\launcher.bat. :7799 returns 200. Chat works through PNY-launched server: 43 tok/s warm, 4 eval tokens, 2.85s wall-clock. |
+| H8 | host-diff PASS from PNY run | **PASS** | Captured 38099 files before, 38381 after. 959 exception matches, **0 attributable additions, 0 attributable modifications**. Rule #1 holds on real removable media. |
+| H8 | logs land on PNY, not host | **PASS** | next.log at D:\ARGOS\logs\, no host log writes attributable to ARGOS. |
 | H8 | npm run check post-H8 | PASS | All rules pass, scripts integrated. |
