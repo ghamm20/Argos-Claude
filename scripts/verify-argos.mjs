@@ -240,6 +240,92 @@ function record(name, ok, details = []) {
   );
 }
 
+// ---------- RULE 6: launcher daemon spawns capture stderr ----------
+//
+// Filed after H8/H8.5 silent-failure of `ollama serve` from PNY:
+// when the daemon dies on startup the operator had no log to read
+// because the spawn line didn't redirect stderr. Every daemon-spawn
+// line in launchers/* must redirect stderr to a log file.
+//
+// Targeted: lines that invoke a long-running daemon (ollama serve,
+// next start). Detection is intentionally tight to avoid flagging
+// short-lived helper commands (curl, taskkill, etc.).
+{
+  const violations = [];
+  const launcherDir = join(ROOT, "launchers");
+  const launchers = [
+    "launcher.bat",
+    "launcher.command",
+    "launcher.sh",
+  ];
+  for (const name of launchers) {
+    const file = join(launcherDir, name);
+    if (!existsSync(file)) continue;
+    const lines = readFileSync(file, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      const lc = line.toLowerCase();
+      const looksLikeDaemonSpawn =
+        /\bollama(?:\.exe)?["']?\s+serve\b/.test(lc) ||
+        /\bnext(?:\.js)?["']?\s+start\b/.test(lc) ||
+        /\bnext\/dist\/bin\/next\b/.test(lc);
+      if (!looksLikeDaemonSpawn) return;
+      // skip comments
+      const trimmed = line.replace(/^\s*(?:rem |::|#)/i, "");
+      if (trimmed !== line.trim() && /^\s*(?:rem |::|#)/i.test(line)) return;
+      // bat: must have ">>" or "2>>"; sh/command: must have ">>" + "2>&1" (or "&>>")
+      const hasRedirect =
+        />>/.test(line) || /2>&1/.test(line) || /&>>/.test(line);
+      if (!hasRedirect) {
+        violations.push(
+          `launchers/${name}:${i + 1}: daemon-spawn without log redirect — ${line.trim().slice(0, 80)}`
+        );
+      }
+    });
+  }
+  record(
+    "Rule 6: launcher daemon spawns must redirect stderr to a log file",
+    violations.length === 0,
+    violations
+  );
+}
+
+// ---------- RULE 7: Windows launcher cmd /c daemon spawns detach stdin --
+//
+// Filed after H8.5 Phase C investigation: cmd /c "..." inside a
+// non-interactive parent (TaskCreate, CI, headless harness) inherits
+// piped stdin and exits with "ERROR: Input redirection is not
+// supported" before the daemon starts. The fix is `< NUL` inside
+// the cmd /c quoted command, which redirects stdin from the NUL
+// device and bypasses the inheritance.
+//
+// Windows-specific (only launcher.bat).
+{
+  const violations = [];
+  const file = join(ROOT, "launchers", "launcher.bat");
+  if (existsSync(file)) {
+    const lines = readFileSync(file, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      // skip REM lines
+      if (/^\s*(?:rem |::)/i.test(line)) return;
+      // find `start "..." ... cmd /c "..."` lines
+      const m = /^\s*start\b[^\n]*\bcmd\s*\/c\s+"/i.exec(line);
+      if (!m) return;
+      // must include `< NUL` inside (case-insensitive). The < and NUL
+      // can have surrounding whitespace.
+      if (!/<\s*NUL\b/i.test(line)) {
+        violations.push(
+          `launchers/launcher.bat:${i + 1}: cmd /c daemon spawn without "< NUL" — ${line.trim().slice(0, 100)}`
+        );
+      }
+    });
+  }
+  record(
+    "Rule 7: Windows launcher cmd /c daemon spawns must use `< NUL` to detach stdin",
+    violations.length === 0,
+    violations
+  );
+}
+
 // ---------- Report ----------
 let failed = 0;
 const sep = "─".repeat(64);
