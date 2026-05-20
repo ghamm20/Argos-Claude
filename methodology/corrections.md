@@ -42,3 +42,25 @@ This proved the Claude_Preview Electron renderer was suppressing animation obser
 
 **Lesson:** When a feature needs cross-page data, the first instinct shouldn't be "add an API route." Server-component props are cheaper and stay inside the existing scope envelope.
 
+---
+
+## 2026-05-19 — Drive-letter reassignment caused 13 GB write to wrong drive
+
+**Context:** During the H8.5 follow-up task ("Add the 3 Ollama models to the PNY payload"), the user's brief specified `D:\ARGOS\models` as the target — at the time of the H8 final commit, D: was the PNY (`PNY_PRO_ELITEV3` Removable). Between the H8 commit and this task, the user ejected/reinserted the PNY, and Windows reassigned drive letters: the PNY came back at F:, while D: was reclaimed by `HammDrive` (a 1.8 TB Fixed exFAT drive that had been mounted earlier in the same session).
+
+The robocopy ran against the brief literally and wrote 12.73 GB of Ollama model blobs + manifests to `D:\ARGOS\models` — on HammDrive, not the PNY.
+
+**Self-detection:** Immediately after the robocopy, my verification probe ran `Get-Volume -DriveLetter D` and found `FileSystemLabel=HammDrive, DriveType=Fixed` instead of the expected `PNY_PRO_ELITEV3, Removable`. I halted before any further USB-relevant action and re-surveyed all drives, which confirmed:
+- PNY had moved to F:
+- The H8 launcher payload (launcher.bat, app/, bin/, etc.) was still on F: at `F:\ARGOS\`
+- D:\ARGOS was a new artifact created by my mis-targeted robocopy
+
+**Course-correction:** Issued a second robocopy to `F:\ARGOS\models` (the verified PNY) and informed the user. The wrong-target write on D: remained pending a user decision (delete vs keep as backup).
+
+**Resolution:** [pending user decision — will record final outcome here]
+
+**v2 hardening recommendation:** Pre-flight drive-label confirmation for any write >1 GB. Specifically, the `migrate-to-usb.mjs` script should accept `--expect-label=<label>` and refuse the write if `Get-Volume` on the target drive reports a different `FileSystemLabel` or `DriveType` than expected. Cheap to implement, prevents this exact failure mode. Filed for v2.
+
+**Lesson:** Drive letters are not stable identity. Drive labels + DriveType (Removable vs Fixed) are. Any script that writes more than a trivial amount of data to a removable target should verify the label before the write, not just the letter.
+
+
