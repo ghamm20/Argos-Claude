@@ -57,7 +57,7 @@ The robocopy ran against the brief literally and wrote 12.73 GB of Ollama model 
 
 **Course-correction:** Issued a second robocopy to `F:\ARGOS\models` (the verified PNY) and informed the user. The wrong-target write on D: remained pending a user decision (delete vs keep as backup).
 
-**Resolution:** [pending user decision — will record final outcome here]
+**Resolution:** Operator kept D:\ARGOS (12.73 GB of mirrored Ollama model blobs + manifests) on HammDrive as an offline backup of the model store. No ARGOS code path references the location, and HammDrive has 526 GB free — the 13 GB carries no ongoing cost. Logged here for the audit trail. If the backup is ever no longer wanted, deletion is `Remove-Item D:\ARGOS -Recurse -Force` from PowerShell.
 
 **v2 hardening recommendation:** Pre-flight drive-label confirmation for any write >1 GB. Specifically, the `migrate-to-usb.mjs` script should accept `--expect-label=<label>` and refuse the write if `Get-Volume` on the target drive reports a different `FileSystemLabel` or `DriveType` than expected. Cheap to implement, prevents this exact failure mode. Filed for v2.
 
