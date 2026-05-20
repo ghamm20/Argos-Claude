@@ -81,8 +81,16 @@ echo  Logs        %ARGOS_ROOT%\logs\
 echo.
 
 REM ====== Stage 1/4: start Ollama ============================
+REM Wrap with cmd /c so stdout+stderr redirect to logs. Without this,
+REM if ollama serve dies on startup (missing lib/ runtime, port held,
+REM etc.) the operator sees the launcher loop on "waiting (N/30)" with
+REM no clue why. See methodology/corrections.md 2026-05-20 entry.
+REM
+REM Quote-escaping rule for cmd /c "...": embed a literal " by doubling
+REM it ("" inside the outer-quoted command). Same pattern as the
+REM ARGOS-NEXT line below. Tolerates OLLAMA_BIN paths with spaces.
 echo [1/4] Starting Ollama on 127.0.0.1:11434...
-start "ARGOS-OLLAMA" /MIN "%OLLAMA_BIN%" serve
+start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve 1>>""%OLLAMA_LOG%"" 2>&1"
 
 set /a TRIES=0
 :WAIT_OLLAMA
@@ -90,7 +98,9 @@ set /a TRIES+=1
 curl -fs --max-time 2 http://127.0.0.1:11434/api/tags >NUL 2>&1
 if %errorlevel%==0 goto OLLAMA_READY
 if %TRIES% GEQ 30 (
-  echo [ERROR] Ollama did not respond within 30s. See %OLLAMA_LOG%
+  echo [ERROR] Ollama did not respond within 30s.
+  echo         daemon stderr captured to: %OLLAMA_LOG%
+  echo         Read that file for the actual failure reason.
   goto CLEANUP_FAIL
 )
 echo    ... waiting (%TRIES%/30)
