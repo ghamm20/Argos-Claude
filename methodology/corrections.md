@@ -98,5 +98,31 @@ The robocopy ran against the brief literally and wrote 12.73 GB of Ollama model 
 
 **Lesson:** "Single-binary mentality" (Seven Rules Rule #7) is the intent for v2 — ARGOS itself is intended to ship without npm install on the user machine. The third-party Ollama dependency is NOT a single binary; it's a binary + runtime libs. Migration plans must account for entire vendor install dirs, not just executable names.
 
+---
+
+## 2026-05-20 — `ollama serve` launcher failure signature changes by stdin environment
+
+**Context:** After the lib/ fix landed in migrate-to-usb.mjs and the PNY payload was re-mirrored, a follow-up launcher.bat smoke (run via TaskCreate, i.e. without an interactive console) showed a *new* failure mode different from the silent-exit signature observed at H8 end.
+
+Launcher output looped 22+ times with:
+```
+[1/4] Starting Ollama on 127.0.0.1:11434...
+   ... waiting (1/30)
+ERROR: Input redirection is not supported, exiting the process immediately.
+   ... waiting (2/30)
+ERROR: Input redirection is not supported, exiting the process immediately.
+...
+```
+
+Meanwhile, `ollama.exe --version` in the same environment ran cleanly and hashed identical to the host-installed binary (A820ECBC8A4B8654 == A820ECBC8A4B8654). So the binary on PNY is sound.
+
+**Diagnostic read:** "Input redirection is not supported, exiting the process immediately." is a cmd.exe error, emitted when a child cmd inherits a non-console stdin handle. The launcher's `start /b "ARGOS-OLLAMA" "%OLLAMA_BIN%" serve` spawns via an intermediate cmd that, under TaskCreate's piped-stdin parent, errors out before ollama serve actually runs. This is an *environment* artifact, not a code defect: a real interactive `cmd.exe` window double-clicking launcher.bat from File Explorer would not hit this path.
+
+**Resolution:** Deferred to Thursday — the real cold-start measurement has to be taken from an operator-opened console, not from a TaskCreate-wrapped run. The launcher itself is likely fine; the verification harness around it is what's incompatible with the spawn mechanics.
+
+**v2 hardening recommendation:** launcher.bat could `2>>"%ARGOS_ROOT%\logs\ollama-stderr.log"` the `start /b` line so the actual ollama serve stderr (vs the cmd-host stderr) is captured and the operator has a paper trail when daemon-start fails. Also worth investigating service-wrapper alternatives to `start /b` for the daemon-spawn step.
+
+**Lesson:** "It failed silently before, now it fails noisily" is itself a diagnostic — the *change* in signature when nothing in the code changed (only the verification environment changed) is a strong hint that the failure is environmental, not code-resident.
+
 
 
