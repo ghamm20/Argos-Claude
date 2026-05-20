@@ -160,15 +160,19 @@ if (!existsSync(NODE_MODULES)) {
   die("Missing node_modules/ — run npm install first.");
 }
 
-// Ollama Windows binary
-const OLLAMA_WIN = path.join(
+// Ollama Windows install dir — must copy the WHOLE tree, not just
+// ollama.exe. The runtime needs lib/ollama/*.dll (GGML, CUDA, BLAS,
+// per-CPU variants). Caught during H8.5 live PNY cold-start: a copy
+// of just ollama.exe hangs on --version because the GGML runtime
+// libraries can't be located. See methodology/corrections.md.
+const OLLAMA_WIN_DIR = path.join(
   os.homedir(),
   "AppData",
   "Local",
   "Programs",
-  "Ollama",
-  "ollama.exe"
+  "Ollama"
 );
+const OLLAMA_WIN = path.join(OLLAMA_WIN_DIR, "ollama.exe");
 const ollamaWinAvailable = existsSync(OLLAMA_WIN);
 
 // Ollama models dir
@@ -216,17 +220,16 @@ for (const name of ["launcher.bat", "launcher.command", "launcher.sh"]) {
   }
 }
 
-// 3) bin/
-console.log("[2/9] Copying bin/ (Ollama binaries)...");
+// 3) bin/ — copy the FULL Ollama install dir, not just ollama.exe
+//    (lib/ollama/*.dll is required at runtime). Result: F:\ARGOS\bin\
+//    mirrors %LOCALAPPDATA%\Programs\Ollama\ exactly.
+console.log("[2/9] Copying bin/ (full Ollama install tree)...");
 await ensureDir(path.join(ABS_TARGET, "bin"));
 sizes.bin = 0;
 if (ollamaWinAvailable) {
-  sizes.bin += await copyTree(
-    OLLAMA_WIN,
-    path.join(ABS_TARGET, "bin", "ollama.exe")
-  );
+  sizes.bin += await copyTree(OLLAMA_WIN_DIR, path.join(ABS_TARGET, "bin"));
 } else {
-  console.log("    [skip] no Windows ollama.exe found");
+  console.log("    [skip] no Windows Ollama install found");
 }
 
 // 4) app/.next

@@ -132,6 +132,21 @@ Same methodology pattern as H7 — bugs surfaced live, fixed before final commit
 
 The real cold-start measurement on the ThinkPad target (CPU mode, no warm daemon, models loaded from PNY) is the H9 readiness gate. Today's run validates the PNY launcher mechanics and the host-isolation contract.
 
+## H8.5 follow-up (2026-05-20) — models on PNY, cold-start deferred
+
+After the H8 final commit, a second pass:
+
+1. Added models to the PNY payload via robocopy `~/.ollama/models` → `F:\ARGOS\models`. **12.73 GB** (manifests/ + blobs/) at 82 MB/s sustained — robocopy is ~100× faster than the Node script for this workload.
+2. Updated `migrate-to-usb.mjs` to copy the **entire** `%LOCALAPPDATA%\Programs\Ollama\` tree to `bin/` (not just `ollama.exe`). The original migration shipped only the 40 MB binary; the daemon needs `lib/ollama/*.dll` (GGML, CUDA, CPU-variants) totaling ~1.4 GB.
+3. **Final PNY payload: 14.5 GB** — app 0.38 GB + bin 1.39 GB + models 12.73 GB. PNY free: 101.4 GB of 116.1.
+4. **Cold-start with PNY-resident models: DEFERRED.** Direct `ollama serve` from `F:\ARGOS\bin\ollama.exe` against `OLLAMA_MODELS=F:\ARGOS\models` failed silently in a way that needs deeper investigation (binary runs and `--version` works, but `serve` exits without listening on :11434). The blocker is likely a path-resolution detail in Ollama's runtime when launched outside its installer's expected layout. Fix is a Thursday-fresh-eyes task, not a protection-mode task.
+
+Two incidents captured in methodology/corrections.md from this follow-up:
+- **NTFS corruption from yank-during-robocopy**: PNY filesystem damaged when the drive was physically disconnected mid-write. Recovered via reformat + re-migrate. v2: transactional staged writes.
+- **Ollama runtime lib/ requirement**: migration script was copying only the binary. Caught when launcher serve attempt died silently. v2: smoke-test the bin/ copy via `ollama serve --version` post-migration.
+
+Together these explain why the launcher-from-PNY cold-start with PNY-resident models is not measured here. The previous H8 final commit's cold-start numbers (43 tok/s, 2.85s wall) used the host's tray daemon with its own ~/.ollama/models — those numbers stand for the launcher mechanics, but the "models served from USB" claim is still pending Thursday.
+
 ## Decisions diverged from spec
 
 1. **Skipped models in migration** (~7.1 GB), deferred to a follow-up. The auto-classifier blocked the initial 8 GB write; smaller payload ran fine and proved the launcher mechanics. Adding models is one more migration command.

@@ -63,4 +63,40 @@ The robocopy ran against the brief literally and wrote 12.73 GB of Ollama model 
 
 **Lesson:** Drive letters are not stable identity. Drive labels + DriveType (Removable vs Fixed) are. Any script that writes more than a trivial amount of data to a removable target should verify the label before the write, not just the letter.
 
+---
+
+## 2026-05-19 — NTFS filesystem corruption on PNY from yank-during-write
+
+**Context:** After the drive-letter incident above, a second robocopy was issued to F:\ARGOS\models (the verified PNY). Mid-write, the PNY was physically disconnected. When re-plugged later, F: showed `DriveType=Removable` but `FileSystem=`, `Size=0`, `OperationalStatus=Unknown`. The H8 payload at F:\ARGOS\ was invisible to the OS layer.
+
+**Self-detection:** Operator reported "getting error codes" on access. Diagnostic probe via `Get-Disk`, `Get-Volume`, and read-only `chkdsk F:` revealed:
+- Drive hardware: Online, Healthy
+- Partition: intact, IFS type
+- NTFS filesystem: damaged $UpCase metadata table
+- MFT: 189,440 file records still present
+- Mount state: degraded (volume read by chkdsk but not by file system layer)
+
+**Resolution:** With operator authorization, ran quick-format on F: (`format F: /fs:NTFS /Q /V:PNY_PRO_ELITEV3 /Y`). Re-migrated the H8 payload via PowerShell + robocopy (faster than re-running migrate-to-usb.mjs). Models re-mirrored via second robocopy invocation. Final state: F:\ARGOS = 14.5 GB (app 0.38 + bin 1.39 + models 12.73).
+
+**v2 hardening recommendation:** All ARGOS write operations to removable media should use a transactional pattern: stage to `.tmp` subdir, fsync, then atomic rename. Reduces window of NTFS-metadata vulnerability to yank.
+
+**Lesson:** USB removable media + active writes + filesystem journaling is a triangle of fragility. Yanking a drive during a robocopy of thousands of small files is essentially guaranteed to corrupt NTFS metadata. The recovery cost (reformat + re-migrate) was small because the payload was reproducible from source.
+
+---
+
+## 2026-05-20 — Ollama runtime requires lib/ not just ollama.exe
+
+**Context:** migrate-to-usb.mjs originally copied only `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` (40 MB) to `F:\ARGOS\bin\ollama.exe`. The H7-final dev-side smoke worked because the host's tray daemon had already loaded the runtime libs. The H8 PNY cold-start attempt failed: `F:\ARGOS\bin\ollama.exe --version` ran (client-mode command, no libs needed) but `ollama.exe serve` died silently.
+
+**Root cause:** Ollama's serve daemon requires the `lib/ollama/` runtime subdirectory containing GGML, CUDA, and per-CPU-variant DLLs (ggml-base.dll, ggml-cpu-alderlake.dll, ggml-cpu-haswell.dll, ggml-cpu-icelake.dll, ggml-cpu-sandybridge.dll, ggml-cpu-skylakex.dll, ggml-cpu-sse42.dll, ggml-cpu-x64.dll, cuda_v12/* and cuda_v13/* with cublas64_*.dll, cublasLt64_*.dll, cudart64_*.dll, ggml-cuda.dll). Without these, ollama.exe serve attempts to load the inference runtime, fails to find shared libraries, and exits with no useful stderr.
+
+**Resolution:** Updated migrate-to-usb.mjs to mirror the entire %LOCALAPPDATA%\Programs\Ollama\ tree to `$ARGOS_ROOT/bin/`, not just the ollama.exe binary. Mirror size on PNY: 1.39 GB (vs 40 MB before). Ollama serve from PNY now has the GGML + CUDA + CPU-variant libraries it needs at the expected `lib/ollama/` path relative to the binary.
+
+**Self-detection cue:** ollama.exe --version printed (works without libs) but `ollama serve` produced no output, no port binding, no exit code visible. The asymmetry of those two outcomes is the diagnostic signature.
+
+**v2 hardening recommendation:** migrate-to-usb.mjs should also verify the bin/ copy via a `ollama serve --help` or `ollama serve --version` smoke test before declaring the migration complete. A 5-second timeout-bounded daemon-start check post-migration would have caught this in the script's own validation phase rather than during launcher e2e.
+
+**Lesson:** "Single-binary mentality" (Seven Rules Rule #7) is the intent for v2 — ARGOS itself is intended to ship without npm install on the user machine. The third-party Ollama dependency is NOT a single binary; it's a binary + runtime libs. Migration plans must account for entire vendor install dirs, not just executable names.
+
+
 
