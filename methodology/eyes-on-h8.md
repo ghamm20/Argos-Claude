@@ -167,3 +167,20 @@ Together these explain why the launcher-from-PNY cold-start with PNY-resident mo
 2. **`scripts/score-builds.ps1` not implemented** — that's from the parallel Codex track. The in-track equivalent is the combined harness: verify-argos + audit-production-deps + smoke-launcher + verify-host-clean.
 3. **macOS .command / Linux .sh e2e remain deferred** — no Mac or Linux box on this dev machine.
 4. **Used robocopy for the transitive fill-in** instead of waiting for migrate-to-usb to be perfected. Robocopy is Windows-native, multi-threaded, handles long paths, and idempotent — pragmatic for getting to the real e2e in one session.
+
+## H8.5 autonomous hardening block (2026-05-20, post-FINAL-HOUR)
+
+After the FINAL HOUR commits + local tag, the operator extended autonomy for a follow-on hardening pass while GitHub auth remained blocked. Four phases landed back-to-back, all commits green on `npm run check`:
+
+| Phase | Subject | Commit |
+|---|---|---|
+| A | migrate-to-usb.mjs: --expect-label pre-flight + post-migration ollama smoke | `6c389a8` |
+| B | launcher.bat: capture ollama serve stderr to logs/ollama.log | `d18d00b` |
+| C | Cold-start root cause + `< NUL` stdin fix; PNY ollama daemon verified working (port bind in 105ms via PowerShell Start-Process) | `364f9f7` |
+| D | verify-argos.mjs Rule 6 (launcher daemon stderr capture) + Rule 7 (Windows cmd /c `< NUL` stdin detach), both self-tested via injection | `89aa872` |
+
+The Phase C result is the consequential one: the H8/H8.5 "ollama serve dies silently from PNY" failure was **environmental at the launcher.bat cmd /c wrapper layer**, not in Ollama or its lib/ runtime. Spawning `F:\ARGOS\bin\ollama.exe serve` directly via PowerShell `Start-Process` on alt port 11435 (so the host tray daemon on 11434 was untouched) showed the daemon binding in 105ms. The `< NUL` fix in launcher.bat makes the launcher robust against both interactive operator-clicks-the-icon invocations and non-interactive verification-harness/CI invocations.
+
+What this means for Friday: the previously "Thursday-deferred" cold-start measurement is now achievable via the same path. The launcher.bat will work from a regular cmd window; the harness contract is sound.
+
+What remains for Thursday: GitHub auth + push (operator-side: `gh auth login --web` browser flow) and an optional end-to-end first-chat-token measurement through the launcher with a model loaded.
