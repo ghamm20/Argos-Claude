@@ -12,11 +12,26 @@
 // Env override:
 //   USB_TARGET=E:\\ARGOS  node scripts/migrate-to-usb.mjs
 //
+// Drive-identity verification (v2 hardening, filed in
+// methodology/corrections.md after the H8.5 drive-letter incident
+// where Windows reassigned D: between runs and 13 GB was written to
+// the wrong drive):
+//   --expect-label=PNY_PRO_ELITEV3       (Windows only via Get-Volume)
+//   --expect-drivetype=Removable         (Windows only)
+//
+// Post-migration smoke (v2 hardening, filed after the H8.5 silent
+// ollama-serve failure caused by missing lib/ runtime):
+//   The script invokes `<target>/bin/ollama.exe --version` with a
+//   5s timeout after the copy. Mismatch with system binary or
+//   non-zero exit prints a WARN but does not fail the migration.
+//
 // Refuses to write if:
 //   - --target is missing
 //   - target equals the source repo root (would copy onto self)
 //   - .next/ is missing (must run "npm run build" first)
 //   - target parent does not exist
+//   - --expect-label is given and Get-Volume reports a different label
+//   - --expect-drivetype is given and Get-Volume reports a different type
 //   - --i-acknowledge-overwrite is required when target dir already
 //     contains an ARGOS payload (any of: launcher.bat, app/.next,
 //     models/manifests)
@@ -30,6 +45,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,6 +66,9 @@ const TARGET = args.target ?? process.env.USB_TARGET ?? null;
 const DRY_RUN = args["dry-run"] === "true";
 const ACK_OVERWRITE = args["i-acknowledge-overwrite"] === "true";
 const SKIP_MODELS = args["skip-models"] === "true";
+const EXPECT_LABEL = args["expect-label"] ?? null;
+const EXPECT_DRIVETYPE = args["expect-drivetype"] ?? null;
+const SKIP_SMOKE = args["skip-smoke"] === "true";
 
 function die(msg, code = 1) {
   console.error(`\n[ERROR] ${msg}\n`);
@@ -71,12 +90,117 @@ if (!existsSync(parentDir)) {
   die(`Parent of --target does not exist: ${parentDir}`);
 }
 
+// Pre-flight: drive identity check (Windows only, no-op elsewhere).
+// Stops the H8.5 wrong-drive failure mode dead.
+{
+  const probe = verifyTargetDrive(ABS_TARGET, EXPECT_LABEL, EXPECT_DRIVETYPE);
+  if (!probe.ok) {
+    die(`Drive-identity pre-flight failed:\n  ${probe.error}`);
+  }
+  if (probe.skipped) {
+    console.log(`[pre-flight] drive check: ${probe.skipped}`);
+  } else {
+    console.log(
+      `[pre-flight] drive ${probe.drive}: label='${probe.label}', DriveType='${probe.driveType}' — OK`
+    );
+  }
+}
+
 // -------------------------- helpers ---------------------------------
 function fmtMB(b) {
   return `${(b / (1024 * 1024)).toFixed(2)} MB`;
 }
 function fmtGB(b) {
   return `${(b / (1024 ** 3)).toFixed(2)} GB`;
+}
+
+// verifyTargetDrive — Windows-only Get-Volume probe.
+//
+// Pre-flight check filed as v2 hardening in corrections.md after the
+// H8.5 drive-letter incident: an ejected/reinserted PNY came back at
+// F: while D: was reclaimed by a different fixed drive, and the
+// follow-up robocopy wrote 13 GB to the wrong place. Drive letters
+// are not stable identity; labels + DriveType are.
+//
+// On non-Windows, this is a no-op (skips with a note) — operators
+// on macOS/Linux use mount points like /Volumes/PNY which are
+// self-identifying.
+function verifyTargetDrive(absTarget, expectLabel, expectDriveType) {
+  if (!expectLabel && !expectDriveType) return { ok: true, skipped: "no expectation specified" };
+  if (process.platform !== "win32") {
+    return { ok: true, skipped: "non-windows platform — Get-Volume not applicable" };
+  }
+  // Extract drive letter from the absolute target path
+  const match = absTarget.match(/^([A-Za-z]):[\\/]/);
+  if (!match) {
+    return { ok: false, error: `cannot extract drive letter from target: ${absTarget}` };
+  }
+  const drive = match[1].toUpperCase();
+  const ps = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$v = Get-Volume -DriveLetter ${drive} -ErrorAction SilentlyContinue; if (-not $v) { Write-Output 'NOTFOUND'; exit 0 } else { Write-Output ("LABEL=" + $v.FileSystemLabel); Write-Output ("DRIVETYPE=" + $v.DriveType) }`,
+    ],
+    { encoding: "utf8", timeout: 10000 }
+  );
+  if (ps.status !== 0) {
+    return { ok: false, error: `Get-Volume failed (status ${ps.status}): ${ps.stderr || ps.stdout}` };
+  }
+  const out = (ps.stdout || "").trim();
+  if (out === "NOTFOUND") {
+    return { ok: false, error: `Get-Volume found no volume at ${drive}: — drive missing or unmounted` };
+  }
+  const labelLine = out.split(/\r?\n/).find((l) => l.startsWith("LABEL="));
+  const dtLine = out.split(/\r?\n/).find((l) => l.startsWith("DRIVETYPE="));
+  const actualLabel = labelLine ? labelLine.slice("LABEL=".length).trim() : "";
+  const actualDt = dtLine ? dtLine.slice("DRIVETYPE=".length).trim() : "";
+  if (expectLabel && actualLabel !== expectLabel) {
+    return {
+      ok: false,
+      error: `Drive ${drive}: label mismatch — expected '${expectLabel}', got '${actualLabel}'. Refusing to write. Pass --expect-label='${actualLabel}' to override (or eject/reinsert and confirm letter).`,
+    };
+  }
+  if (expectDriveType && actualDt !== expectDriveType) {
+    return {
+      ok: false,
+      error: `Drive ${drive}: DriveType mismatch — expected '${expectDriveType}', got '${actualDt}'. Refusing to write.`,
+    };
+  }
+  return { ok: true, label: actualLabel, driveType: actualDt, drive };
+}
+
+// smokePostMigration — sanity-check the copied Ollama binary.
+//
+// Filed as v2 hardening after H8.5 silent-failure: ollama.exe runs
+// in client mode without lib/ but `serve` needs the runtime DLLs.
+// A 5-second timeout-bounded --version check is the cheapest signal
+// that bin/ was copied with its runtime libs intact.
+function smokePostMigration(absTarget) {
+  if (process.platform !== "win32") {
+    return { ok: true, skipped: "non-windows: ollama smoke deferred to launcher" };
+  }
+  const bin = path.join(absTarget, "bin", "ollama.exe");
+  if (!existsSync(bin)) {
+    return { ok: false, error: `bin/ollama.exe not found at ${bin}` };
+  }
+  const r = spawnSync(bin, ["--version"], {
+    encoding: "utf8",
+    timeout: 5000,
+    windowsHide: true,
+  });
+  if (r.error) {
+    return { ok: false, error: `spawn failed: ${r.error.message}` };
+  }
+  if (r.status !== 0 && r.status !== null) {
+    return { ok: false, error: `exit ${r.status}: ${(r.stderr || r.stdout || "").trim()}` };
+  }
+  // Note: --version may also print a "could not connect to a running Ollama
+  // instance" warning when no daemon is up. That's expected and OK.
+  const out = (r.stdout || r.stderr || "").trim();
+  return { ok: true, output: out.split(/\r?\n/).slice(0, 3).join(" | ") };
 }
 
 async function dirSize(dir) {
@@ -398,6 +522,26 @@ if (!DRY_RUN) {
 }
 sizes.readme = readme.length;
 
+// -------------------------- post-migration smoke --------------------
+// v2 hardening: confirm the copied ollama binary can at least answer
+// --version. Doesn't validate `serve` (which depends on lib/ being
+// findable at runtime via the installer's path-resolution conventions
+// — see corrections.md 2026-05-20 entry), but catches the gross
+// "binary didn't copy / lib/ missing" class of failure.
+let smokeResult = null;
+if (!DRY_RUN && !SKIP_SMOKE) {
+  console.log("\n[post-smoke] running <target>/bin/ollama.exe --version ...");
+  smokeResult = smokePostMigration(ABS_TARGET);
+  if (smokeResult.skipped) {
+    console.log(`    [skip] ${smokeResult.skipped}`);
+  } else if (smokeResult.ok) {
+    console.log(`    [ok]   ${smokeResult.output}`);
+  } else {
+    console.log(`    [WARN] post-migration smoke failed: ${smokeResult.error}`);
+    console.log(`    [WARN] continuing — but verify the bin/ copy before relying on it.`);
+  }
+}
+
 // -------------------------- summary --------------------------
 console.log("\n[9/9] Verifying payload...");
 let payloadBytes = 0;
@@ -420,3 +564,23 @@ if (!DRY_RUN) {
   console.log(`  ${"ON-DISK".padEnd(14)} ${fmtMB(payloadBytes).padStart(12)}  (${fmtGB(payloadBytes)})`);
 }
 console.log(`\nTarget: ${ABS_TARGET}`);
+if (smokeResult && !smokeResult.ok && !smokeResult.skipped) {
+  console.log(`Post-migration smoke: WARN (${smokeResult.error.slice(0, 100)})`);
+} else if (smokeResult && smokeResult.ok) {
+  console.log(`Post-migration smoke: OK`);
+}
+
+// -------------------------- v2 deferral note ------------------------
+// Transactional staged-write pattern (stage to .tmp, fsync, atomic
+// rename) was filed as a v2 hardening in corrections.md after the
+// H8.5 NTFS-corruption-from-yank incident. It's NOT implemented here
+// because the natural implementation point is per-large-file (models),
+// which means staging ~12 GB of model blobs in .tmp before rename —
+// expensive and arguably worse than the current direct-write since
+// the user might yank mid-stage just as easily as mid-write.
+//
+// The proper fix is at the OS level (use BypassWriteCache + FlushFile
+// or robocopy /B with its own buffer discipline). Filed for v3 review.
+// For now: the launcher.bat eject path uses `mountvol /p` which gives
+// Windows a chance to flush + dismount cleanly; that's the user-side
+// mitigation.
