@@ -17,3 +17,5 @@ tsconfig.tsbuildinfo
 .argos-host-after.json
 .commit-msg.tmp
 .usb-dryrun/
+.robocopy*.log
+.migrate-out.log
