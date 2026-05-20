@@ -89,8 +89,18 @@ REM
 REM Quote-escaping rule for cmd /c "...": embed a literal " by doubling
 REM it ("" inside the outer-quoted command). Same pattern as the
 REM ARGOS-NEXT line below. Tolerates OLLAMA_BIN paths with spaces.
+REM
+REM < NUL redirects stdin from the NUL device, so the child cmd does
+REM not inherit a piped stdin from a non-interactive parent. Without
+REM this, when the launcher is invoked from a non-console context
+REM (verification harness, CI, headless wrapper), cmd dies with
+REM "ERROR: Input redirection is not supported" before ollama even
+REM starts. The Phase C investigation on 2026-05-20 confirmed the
+REM underlying ollama binary works (binds 127.0.0.1:11435 in 105ms
+REM via PowerShell Start-Process); the failure was always at the
+REM cmd /c wrapper layer.
 echo [1/4] Starting Ollama on 127.0.0.1:11434...
-start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve 1>>""%OLLAMA_LOG%"" 2>&1"
+start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
 
 set /a TRIES=0
 :WAIT_OLLAMA
@@ -111,9 +121,12 @@ goto WAIT_OLLAMA
 echo [2/4] Ollama ready on port 11434
 
 REM ====== Stage 3/4: start Next.js prod server ===============
+REM Same < NUL stdin-detach as the Ollama line above — defends against
+REM non-console invocation contexts. node ignores stdin in `next start`
+REM mode but the wrapping cmd /c is still vulnerable.
 echo [3/4] Starting Next.js on 127.0.0.1:7799...
 pushd "%NEXTJS_DIR%"
-start "ARGOS-NEXT" /MIN cmd /c "node node_modules\next\dist\bin\next start -p 7799 1>>""%NEXT_LOG%"" 2>&1"
+start "ARGOS-NEXT" /MIN cmd /c "node node_modules\next\dist\bin\next start -p 7799 < NUL 1>>""%NEXT_LOG%"" 2>&1"
 popd
 
 set /a TRIES=0

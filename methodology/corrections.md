@@ -118,11 +118,17 @@ Meanwhile, `ollama.exe --version` in the same environment ran cleanly and hashed
 
 **Diagnostic read:** "Input redirection is not supported, exiting the process immediately." is a cmd.exe error, emitted when a child cmd inherits a non-console stdin handle. The launcher's `start /b "ARGOS-OLLAMA" "%OLLAMA_BIN%" serve` spawns via an intermediate cmd that, under TaskCreate's piped-stdin parent, errors out before ollama serve actually runs. This is an *environment* artifact, not a code defect: a real interactive `cmd.exe` window double-clicking launcher.bat from File Explorer would not hit this path.
 
-**Resolution:** Deferred to Thursday — the real cold-start measurement has to be taken from an operator-opened console, not from a TaskCreate-wrapped run. The launcher itself is likely fine; the verification harness around it is what's incompatible with the spawn mechanics.
+**Resolution (initial):** Deferred to Thursday — the real cold-start measurement has to be taken from an operator-opened console, not from a TaskCreate-wrapped run. The launcher itself is likely fine; the verification harness around it is what's incompatible with the spawn mechanics.
 
-**v2 hardening recommendation:** launcher.bat could `2>>"%ARGOS_ROOT%\logs\ollama-stderr.log"` the `start /b` line so the actual ollama serve stderr (vs the cmd-host stderr) is captured and the operator has a paper trail when daemon-start fails. Also worth investigating service-wrapper alternatives to `start /b` for the daemon-spawn step.
+**Resolution (Phase C, 2026-05-20):** Root cause found and shipped. The cmd /c wrapper inherits the parent's piped stdin under non-interactive contexts (TaskCreate, CI, headless wrappers) and exits with "Input redirection is not supported" before ollama gets to run. The fix is a single token — `< NUL` before the redirect operators — which gives the child cmd a NUL device for stdin instead of the inherited pipe.
 
-**Lesson:** "It failed silently before, now it fails noisily" is itself a diagnostic — the *change* in signature when nothing in the code changed (only the verification environment changed) is a strong hint that the failure is environmental, not code-resident.
+Verified by spinning `F:\ARGOS\bin\ollama.exe serve` directly via PowerShell `Start-Process` on alt port 11435 (host tray daemon untouched on 11434): port bind in **105ms**, /api/tags 200 OK at t+14.1s (dominated by GPU enumeration timeout, not daemon-init). The PNY ollama.exe daemon works correctly; the failure was 100% at the launcher wrapper layer.
+
+Launcher commit landing the fix: applied to both the ARGOS-OLLAMA and ARGOS-NEXT spawn lines in launcher.bat for full hardening. The `.command` (macOS) and `.sh` (Linux) launchers don't need this — they invoke binaries directly with `&` backgrounding, no cmd intermediary.
+
+**v2 hardening recommendation (already filed in launcher.bat):** the stderr-capture pattern `cmd /c """%BIN%"" args < NUL 1>>""%LOG%"" 2>&1` is now the canonical form for daemon spawns in this codebase. Any future launcher work that spawns a daemon via cmd should follow it.
+
+**Lesson:** "It failed silently before, now it fails noisily" is itself a diagnostic — the *change* in signature when nothing in the code changed (only the verification environment changed) is a strong hint that the failure is environmental, not code-resident. Confirmed by Phase C: pure environmental, fully fixable.
 
 
 

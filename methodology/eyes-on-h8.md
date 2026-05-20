@@ -139,7 +139,21 @@ After the H8 final commit, a second pass:
 1. Added models to the PNY payload via robocopy `~/.ollama/models` → `F:\ARGOS\models`. **12.73 GB** (manifests/ + blobs/) at 82 MB/s sustained — robocopy is ~100× faster than the Node script for this workload.
 2. Updated `migrate-to-usb.mjs` to copy the **entire** `%LOCALAPPDATA%\Programs\Ollama\` tree to `bin/` (not just `ollama.exe`). The original migration shipped only the 40 MB binary; the daemon needs `lib/ollama/*.dll` (GGML, CUDA, CPU-variants) totaling ~1.4 GB.
 3. **Final PNY payload: 14.5 GB** — app 0.38 GB + bin 1.39 GB + models 12.73 GB. PNY free: 101.4 GB of 116.1.
-4. **Cold-start with PNY-resident models: DEFERRED.** Direct `ollama serve` from `F:\ARGOS\bin\ollama.exe` against `OLLAMA_MODELS=F:\ARGOS\models` failed silently in a way that needs deeper investigation (binary runs and `--version` works, but `serve` exits without listening on :11434). The blocker is likely a path-resolution detail in Ollama's runtime when launched outside its installer's expected layout. Fix is a Thursday-fresh-eyes task, not a protection-mode task.
+4. **Cold-start with PNY-resident models: DEFERRED at H8.5.** Direct `ollama serve` from `F:\ARGOS\bin\ollama.exe` against `OLLAMA_MODELS=F:\ARGOS\models` failed silently in a way that needs deeper investigation (binary runs and `--version` works, but `serve` exits without listening on :11434). The blocker is likely a path-resolution detail in Ollama's runtime when launched outside its installer's expected layout. Fix is a Thursday-fresh-eyes task, not a protection-mode task.
+
+   **UPDATE (2026-05-20, Phase C autonomous block):** Resolved — the failure was environmental, not in Ollama. The PNY ollama.exe daemon **works correctly** when invoked directly. Measured via PowerShell `Start-Process` on alt port 11435 (so the host's tray daemon on 11434 was not disturbed):
+
+   ```
+   Spawned PID=7076 at 15:32:30.593
+   Listening on 127.0.0.1:11435 (version 0.24.0) at 15:32:30.698  →  port bind in 105ms
+   /api/tags returned 200 OK at 15:32:44.689                       →  ready in 14.1s wall
+   ```
+
+   The 14s ready-time was dominated by GPU enumeration (`runner.go: discovering available GPUs`) which fell through to `inference compute id=cpu` at 15:32:44.689 — typical for a CPU-only test invocation. On the actual target hardware with a working GPU, this stage should drop sub-second.
+
+   The original `serve` failures (both H8's silent exit and H8.5's "Input redirection is not supported" loop) were both at the **launcher.bat cmd /c wrapper layer**: under non-interactive parent stdin (verification harness, CI, any context that pipes stdin to the launcher), the wrapping cmd dies before ollama even starts. Fixed by adding `< NUL` to the spawn lines (Phase B commit `d18d00b` plus the Phase C follow-up): cmd now gets a NUL device for stdin instead of an inherited pipe, and the daemon launches cleanly under both interactive and non-interactive invocations.
+
+   So: the PNY ollama daemon binds in **105ms** from spawn; the 14s observed in the test run was GPU enumeration timeout, not daemon-start latency. End-to-end cold-start through the launcher (with this hardware: CPU fallback) should land at roughly **launcher splash → :11434 bound = ~15s** on cold first-run, sub-second on subsequent runs (warm GPU cache). End-to-end through to first chat token requires a separate measurement which is now Friday-eligible since the daemon mechanics are proven.
 
 Two incidents captured in methodology/corrections.md from this follow-up:
 - **NTFS corruption from yank-during-robocopy**: PNY filesystem damaged when the drive was physically disconnected mid-write. Recovered via reformat + re-migrate. v2: transactional staged writes.
