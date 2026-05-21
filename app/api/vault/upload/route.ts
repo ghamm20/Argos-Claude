@@ -8,6 +8,12 @@ import { UnsupportedFileType } from "@/lib/vault/extract";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Cap upload size to keep accidental drops of huge files from
+// crashing the ingest pipeline. 50 MB is generous for typical
+// documents (PDFs in this range are already huge) and matches
+// what most vault workflows ship in production.
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
 function safeFilename(name: string): string {
   const base = path.basename(name);
   return base.replace(/[^a-zA-Z0-9._\- ]+/g, "_");
@@ -27,6 +33,14 @@ export async function POST(req: NextRequest) {
   const fileField = form.get("file");
   if (!(fileField instanceof File)) {
     return Response.json({ error: "missing 'file' field" }, { status: 400 });
+  }
+  if (fileField.size > MAX_FILE_BYTES) {
+    return Response.json(
+      {
+        error: `file exceeds ${MAX_FILE_BYTES} bytes (${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)} MB); got ${fileField.size}`,
+      },
+      { status: 413 }
+    );
   }
   const filename = safeFilename(fileField.name);
   if (filename.length === 0) {

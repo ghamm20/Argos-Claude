@@ -25,6 +25,12 @@ export async function POST(req: NextRequest) {
   const patch: { defaultPersona?: PersonaId; defaultModel?: string } = {};
 
   if (body.defaultPersona !== undefined) {
+    if (typeof body.defaultPersona !== "string") {
+      return Response.json(
+        { error: "defaultPersona must be a string" },
+        { status: 400 }
+      );
+    }
     if (!PERSONA_BY_ID[body.defaultPersona as PersonaId]) {
       return Response.json(
         { error: `unknown persona: ${body.defaultPersona}` },
@@ -34,6 +40,12 @@ export async function POST(req: NextRequest) {
     patch.defaultPersona = body.defaultPersona as PersonaId;
   }
   if (body.defaultModel !== undefined) {
+    if (typeof body.defaultModel !== "string") {
+      return Response.json(
+        { error: "defaultModel must be a string" },
+        { status: 400 }
+      );
+    }
     if (!AVAILABLE_MODELS.includes(body.defaultModel)) {
       return Response.json(
         {

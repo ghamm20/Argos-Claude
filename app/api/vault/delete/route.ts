@@ -14,6 +14,15 @@ export async function POST(req: NextRequest) {
   if (!body.docId || typeof body.docId !== "string") {
     return Response.json({ error: "docId required" }, { status: 400 });
   }
+  // Bound docId — anything past a reasonable hash length is junk.
+  // Existing docIds are 16-char hex; allow some headroom for future
+  // schemes but reject pathological lengths early.
+  if (body.docId.length > 128) {
+    return Response.json(
+      { error: `docId too long (max 128 chars, got ${body.docId.length})` },
+      { status: 400 }
+    );
+  }
   const removed = await deleteDocument(body.docId);
   return Response.json({ ok: true, removed });
 }

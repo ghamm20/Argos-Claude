@@ -12,6 +12,12 @@ const OLLAMA_BASE = getOllamaBase();
 const OLLAMA_CHAT = `${OLLAMA_BASE}/api/chat`;
 const FIRST_TOKEN_TIMEOUT_MS = 60_000;
 const DEFAULT_TOP_K = 5;
+// Input bounds — defense against pathological clients and accidental
+// huge histories. The chat route is local-only by Seven Rules but
+// defensive bounds keep a stuck client from OOMing the daemon.
+const MAX_MESSAGES = 200;
+const MAX_CONTENT_LENGTH = 100_000; // 100 KB per message
+const VALID_ROLES = new Set<WireRole>(["user", "assistant", "system"]);
 
 type WireRole = "user" | "assistant" | "system";
 
@@ -96,6 +102,29 @@ export async function POST(req: NextRequest) {
 
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
     return jsonError(400, "messages must be a non-empty array");
+  }
+  if (body.messages.length > MAX_MESSAGES) {
+    return jsonError(400, `too many messages (max ${MAX_MESSAGES}, got ${body.messages.length})`);
+  }
+  // Per-message validation: role + content type + content length.
+  // Catches malformed clients before they hit the daemon.
+  for (let i = 0; i < body.messages.length; i++) {
+    const m = body.messages[i];
+    if (!m || typeof m !== "object") {
+      return jsonError(400, `messages[${i}] must be an object`);
+    }
+    if (typeof m.role !== "string" || !VALID_ROLES.has(m.role as WireRole)) {
+      return jsonError(400, `messages[${i}].role must be one of user|assistant|system`);
+    }
+    if (typeof m.content !== "string") {
+      return jsonError(400, `messages[${i}].content must be a string`);
+    }
+    if (m.content.length > MAX_CONTENT_LENGTH) {
+      return jsonError(
+        400,
+        `messages[${i}].content exceeds ${MAX_CONTENT_LENGTH} chars (got ${m.content.length})`
+      );
+    }
   }
   if (typeof body.model !== "string" || !body.model.trim()) {
     return jsonError(400, "model is required");

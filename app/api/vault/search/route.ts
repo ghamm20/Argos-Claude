@@ -5,6 +5,11 @@ import { EmbedError } from "@/lib/vault/embed";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Bound the query so a runaway client can't ship 10 MB to the embedder.
+// The embed model has its own token limit anyway, but bouncing early
+// is cheaper than embedding garbage.
+const MAX_QUERY_LENGTH = 10_000;
+
 export async function POST(req: NextRequest) {
   let body: { query?: string; topK?: number };
   try {
@@ -14,6 +19,14 @@ export async function POST(req: NextRequest) {
   }
   if (!body.query || typeof body.query !== "string") {
     return Response.json({ error: "query required" }, { status: 400 });
+  }
+  if (body.query.length > MAX_QUERY_LENGTH) {
+    return Response.json(
+      {
+        error: `query exceeds ${MAX_QUERY_LENGTH} chars (got ${body.query.length})`,
+      },
+      { status: 400 }
+    );
   }
   const topK =
     typeof body.topK === "number" && body.topK > 0 && body.topK <= 50
