@@ -201,6 +201,7 @@ The default model isn't pulled. Either:
 | `node scripts/smoke-input-validation.mjs` | 26 negative-test cases against API routes |
 | `node scripts/smoke-vault-ranking.mjs` | Retrieval quality benchmark with known-answer queries |
 | `node scripts/smoke-launcher-e2e.mjs` | Full launcher → first chat token timing (Windows only) |
+| `npm run warm` | Pre-load chat + embed models into VRAM so first chat is sub-second instead of ~8s cold |
 | `node scripts/verify-host-clean.mjs --capture-before` | Snapshot host state before launcher run |
 | `node scripts/verify-host-clean.mjs --capture-after` | Snapshot host state after launcher run |
 | `node scripts/verify-host-clean.mjs --diff` | Compute attributable host writes from the diff |
@@ -225,10 +226,12 @@ Before walking into a demo:
 
 1. Plug USB. Run `Get-Volume -DriveLetter F | Select FileSystemLabel, DriveType, Size, SizeRemaining` (substitute your drive letter) — confirm it matches expectations.
 2. Double-click `launcher.bat`. Watch for the splash. Wait for browser to open.
-3. Confirm chat works: send "hi" to the default persona. Should respond in <10s cold, sub-second warm.
-4. Confirm vault works: upload a small markdown doc. Should ingest in <1s.
-5. Confirm retrieval works: ask a question the doc answers. Citation pill should appear.
-6. Close the launcher window. Confirm daemons stopped (`netstat -ano | findstr ":11434\|:7799"` → empty).
-7. Eject drive. Plug into a guest machine. Repeat steps 2–5 to verify portability.
+3. **(Recommended)** In a second PowerShell window: `cd <repo>; npm run warm`. Takes ~10s. Warms llama3.1:8b + nomic-embed-text into VRAM so your first demo chat is sub-second instead of cold.
+4. Confirm chat works: send "hi" to the default persona. Should respond in <1s if you warmed, ~8s cold.
+5. Confirm vault works: upload a small markdown doc. Should ingest in <1s.
+6. Confirm retrieval works: ask a question the doc answers. Citation pill should appear.
+7. Confirm Stop works: send a long-prompt request and click Stop. Stream should halt cleanly, transcript shows `_[stopped by operator]_`.
+8. Close the launcher window. Confirm daemons stopped (`netstat -ano | findstr ":11434\|:7799"` → empty).
+9. Eject drive. Plug into a guest machine. Repeat steps 2–6 to verify portability.
 
 If any of those steps fail, see "Failure modes" above before showing it to anyone.

@@ -13,7 +13,8 @@
     "check": "npm run lint && npm run typecheck && npm run build && npm run verify",
     "check:full": "node scripts/check-full.mjs",
     "smoke": "npm run verify",
-    "smoke:launcher-e2e": "node scripts/smoke-launcher-e2e.mjs"
+    "smoke:launcher-e2e": "node scripts/smoke-launcher-e2e.mjs",
+    "warm": "node scripts/warm-ollama.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
