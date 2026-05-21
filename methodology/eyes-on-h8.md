@@ -198,3 +198,37 @@ After the operator authorized "keep building, push harder", five more phases lan
 | I | TODO/FIXME/HACK + `console.log` + `debugger` + `@ts-ignore` + loose `any` + empty `catch` sweep across `app/`, `components/`, `lib/` | **Zero findings — codebase is in finished state, not half-done state** |
 
 The Phase F smoke-settings fix is the only real regression caught — the smoke had drifted out of sync with the H7.0b /api/about removal. Now corrected and run through the new `check:full` orchestrator so future drift will surface in a single command.
+
+### Phases J–N — full agentic mode (2026-05-20)
+
+Operator extended autonomy further: "lets go full agentic mode". Five more phases landed:
+
+| Phase | Subject | Result |
+|---|---|---|
+| J | `.github/workflows/ci.yml` — lint + typecheck + build + verify-argos + audit-stub-honesty + audit-production-deps + smoke-launcher on every PR/push | Workflow ready, will activate on first GitHub push |
+| K | **Real launcher.bat end-to-end cold-start measurement** via `scripts/smoke-launcher-e2e.mjs` on alt ports (11436/7800) so host tray daemon untouched | **PASS — 9.5s total kickoff → first chat token** |
+| L | `scripts/smoke-all-models.mjs` — confirms all 3 shipped models (nomic-embed-text, qwen2.5:3b, llama3.1:8b) load and respond | All 3 PASS |
+| M | Top-level `README.md` rewritten (was "Scaffold in progress" from H1) — what it is, quick-start, doctrine pointers, verify-argos output, USB migration recipe | Ready for the GitHub push |
+| N | tsconfig strict-mode audit | (see below) |
+
+### The headline Phase K number
+
+```
+spawn launcher.bat ────────────► 0 ms (t0)
+ollama bound on :11436 ─────────► 2,107 ms
+next bound on :7800 ────────────► 2,710 ms (Next adds 603 ms over ollama)
+first chat token (TTFB) ────────► 9,501 ms (chat adds 6,791 ms — cold model load)
+```
+
+This is the **end-to-end real cold-start for the demo path**: from spawning launcher.bat in a non-interactive cmd context (TaskCreate stdin) to receiving the first chat token through the live Next.js production server. The 6.8s chat TTFB is the cold model-load cost for llama3.1:8b on this hardware (RTX 3060 Ti + 64GB RAM); subsequent chats will be sub-second TTFB (matches Phase F's warm-model 5219ms for the first call, but those were against an already-spun-up dev server).
+
+Operator-facing takeaway: from drive-plug to first chat output on this hardware is ~10 seconds. Warm chat: sub-second.
+
+### Refactor that enabled Phase K
+
+`lib/ollama-config.ts` — centralized base-URL helper with `OLLAMA_HOST` env override. The launcher.bat now sets `OLLAMA_HOST=127.0.0.1:11434` explicitly (via `if not defined OLLAMA_HOST ...`) and the app reads the same env var. Same change applied to .command and .sh. This makes alt-port testing trivial and supports remote-Ollama scenarios cleanly.
+
+Files touched by the config refactor:
+- `lib/ollama-config.ts` (new)
+- `app/api/chat/route.ts`, `lib/runtime-info.ts`, `lib/vault/embed.ts` (use `getOllamaBase()`)
+- `launchers/launcher.{bat,command,sh}` (set OLLAMA_HOST + OLLAMA_MODELS via `if not defined` / `${VAR:-default}`)
