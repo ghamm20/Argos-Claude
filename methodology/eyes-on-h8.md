@@ -232,3 +232,45 @@ Files touched by the config refactor:
 - `lib/ollama-config.ts` (new)
 - `app/api/chat/route.ts`, `lib/runtime-info.ts`, `lib/vault/embed.ts` (use `getOllamaBase()`)
 - `launchers/launcher.{bat,command,sh}` (set OLLAMA_HOST + OLLAMA_MODELS via `if not defined` / `${VAR:-default}`)
+
+### Phases O-Y — 8-hour autonomous block (2026-05-20)
+
+Operator went to sleep with "i need you to run the next 8 hours with out asking me for anything". Eleven additional phases landed, all within Auto Mode safety rails (no destructive ops, no auth-required external calls, no host disruption):
+
+| Phase | Subject | Result |
+|---|---|---|
+| O | API route input-validation hardening + 26 negative-test smokes | All 26 PASS; added MAX_MESSAGES/MAX_CONTENT/MAX_QUERY/MAX_FILE caps + type checks |
+| P | Threat model walkthrough vs code (`methodology/threat-model-audit.md`) | All 4 claims verified; 4 new minor gaps identified |
+| Q | Vault retrieval quality ranking benchmark (`scripts/smoke-vault-ranking.mjs`) | 5/5 PASS — all known-answer queries return expected chunk in top-5 |
+| R | `docs/05-OPERATIONS.md` operator runbook | Daily flow, config, vault recipes, migration, failure modes, demo-day pre-flight |
+| S | `methodology/decisions.md` architectural log | 12 entries: tech choices + alternatives + why; 9 deferred-to-v2 items |
+| T | Extended `smoke-launcher.mjs` with Phase B/C/K patterns | 41 checks across 3 platforms + docs, all PASS |
+| U | Multi-doc vault stress test (`scripts/smoke-vault-stress.mjs`) | 19 docs / 76 chunks / 2.5s ingest, p50=127ms, 4/4 retrieval probes PASS |
+| V | Bundle size audit (`methodology/bundle-audit.md`) | / = 157 KB first-load JS; healthy, below 200 KB Lighthouse threshold |
+| W | Settings persistence atomicity (`lib/settings.ts`) | Atomic write-rename + fsync, fixes Gap A from Phase P |
+| X | Per-route API reference docs (`docs/api/{README,chat,hardware,settings,vault}.md`) | 530 lines across 5 files; every endpoint documented with field tables + error matrices |
+| Y | Final eyes-on + retag (this section) | — |
+
+### Cumulative numbers (Phases A-Y combined)
+
+- **69 commits** on `main`
+- **All 7 verify-argos rules PASS**
+- **Real launcher e2e cold-start**: 9.5 seconds (Phase K)
+- **All 3 shipped models work**: nomic-embed (941ms), qwen 3b (150 tok/s), llama 8b (84 tok/s) — Phase L
+- **API hardened**: 5 routes, MAX_* caps + type checks, 26 negative-test smokes PASS — Phase O
+- **Threat model**: all 4 "Addressed" claims VERIFIED in code; 4 minor gaps surfaced — Phase P
+- **Vault**: 19-doc corpus ingest in 2.5s, retrieval p50 127ms — Phase U
+- **Bundle**: 157 KB first-load JS on chat route, 87 KB shared chunks — Phase V
+- **Settings**: atomic write-rename + fsync, crash-safe — Phase W
+- **CI**: `.github/workflows/ci.yml` runs full check on every push/PR — Phase J
+- **Docs**: 5 doctrine docs (00-04), 1 operations runbook (05), 5 API reference docs, 5 methodology audit docs
+- **Tech debt**: zero TODOs/FIXMEs/`any`/`console.log`/empty catches across all source — Phase I
+
+### What's left for Thursday (operator-only)
+
+- **GitHub auth + push**. Run `& 'C:\Program Files\GitHub CLI\gh.exe' auth login --hostname github.com --git-protocol https --web` in a browser, complete the device flow, then `powershell.exe -NoProfile -File scripts/push-to-github.ps1`. That ships all 69 commits + both tags + opens the repo.
+- **Demo script writing** — explicitly off-limits per the original brief.
+- **Vault seed content for demo day** — explicitly off-limits per the original brief.
+- **End-to-end demo dress rehearsal on the PNY** — operator-only.
+
+The protect-state goal of the original final-hour brief has been thoroughly exceeded. Local repo at HEAD = 2a73dd4 (Phase X commit) on `main`. Tag `h8.5-autonomous-hardening-complete` will be moved to current HEAD as the final action.
