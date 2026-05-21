@@ -184,3 +184,17 @@ The Phase C result is the consequential one: the H8/H8.5 "ollama serve dies sile
 What this means for Friday: the previously "Thursday-deferred" cold-start measurement is now achievable via the same path. The launcher.bat will work from a regular cmd window; the harness contract is sound.
 
 What remains for Thursday: GitHub auth + push (operator-side: `gh auth login --web` browser flow) and an optional end-to-end first-chat-token measurement through the launcher with a model loaded.
+
+### Phases E–I (autonomous block continuation)
+
+After the operator authorized "keep building, push harder", five more phases landed:
+
+| Phase | Subject | Result |
+|---|---|---|
+| E | E2E launcher cmd /c `< NUL` verification via real .bat invocation under non-interactive cmd-from-PowerShell | **PASS — daemon ready in 1.08s through exact launcher.bat spawn sequence** |
+| F | Full smoke battery against live dev server: smoke-h2 (73 tok/s), smoke-settings (fixed regression — /api/about removed in H7), smoke-vault (461ms upload, 260ms embed), smoke-retrieval (truth-mode toggle works, 69-71 tok/s, citation markers present) | All PASS |
+| G | `npm run check:full` orchestrator script — single command runs lint + typecheck + build + verify-argos + stub-honesty audit + production-deps audit + smoke-launcher (+ live smokes with auto dev-server lifecycle) | Static path 7/7 PASS in 22s |
+| H | `scripts/push-to-github.ps1` one-shot post-auth setup — PS5.1-compatible, idempotent, handles auth check / existing-repo lookup / create-or-link / push branch + tags / URL report. Tested in -DryRun: clean error message + exit 1 when gh unauthed | Ready to ship when operator auths |
+| I | TODO/FIXME/HACK + `console.log` + `debugger` + `@ts-ignore` + loose `any` + empty `catch` sweep across `app/`, `components/`, `lib/` | **Zero findings — codebase is in finished state, not half-done state** |
+
+The Phase F smoke-settings fix is the only real regression caught — the smoke had drifted out of sync with the H7.0b /api/about removal. Now corrected and run through the new `check:full` orchestrator so future drift will surface in a single command.
