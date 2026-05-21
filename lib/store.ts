@@ -84,6 +84,9 @@ interface ArgosState {
   vaultStatus: VaultStatus;
   activeCitation: CitedHit | null;
   truthMode: boolean;
+  /** The persisted-session id this chat belongs to, or null if not
+   *  yet saved. Set on first auto-save after assistant completes. */
+  currentSessionId: string | null;
 
   switchPersona: (id: PersonaId) => void;
   setModel: (m: string) => void;
@@ -100,6 +103,9 @@ interface ArgosState {
   setVaultIngesting: (filename: string | null) => void;
   setActiveCitation: (hit: CitedHit | null) => void;
   setTruthMode: (b: boolean) => void;
+  setCurrentSessionId: (id: string | null) => void;
+  /** Replace the entire in-memory chat with a loaded persisted session. */
+  loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
 
   eyeColor: () => string;
   accentColor: () => string;
@@ -164,6 +170,9 @@ export const useArgos = create<ArgosState>((set, get) => ({
       messages: [],
       hudMetrics: { ...EMPTY_METRICS },
       isStreaming: false,
+      // Clearing the chat ALSO drops the session linkage — next send
+      // creates a fresh session rather than over-writing the cleared one.
+      currentSessionId: null,
     }),
 
   setVaultCounts: (docs, chunks) =>
@@ -172,6 +181,19 @@ export const useArgos = create<ArgosState>((set, get) => ({
     set((s) => ({ vaultStatus: { ...s.vaultStatus, ingesting: filename } })),
   setActiveCitation: (hit) => set({ activeCitation: hit }),
   setTruthMode: (b) => set({ truthMode: b }),
+  setCurrentSessionId: (id) => set({ currentSessionId: id }),
+
+  loadSession: (id, messages, personaId, model) =>
+    set({
+      currentSessionId: id,
+      messages,
+      currentPersonaId: personaId,
+      currentModel: model,
+      hudMetrics: { ...EMPTY_METRICS },
+      isStreaming: false,
+    }),
+
+  currentSessionId: null,
 
   eyeColor: () => PERSONA_BY_ID[get().currentPersonaId].eyeColor,
   accentColor: () => PERSONA_BY_ID[get().currentPersonaId].accentColor,

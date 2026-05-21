@@ -6,6 +6,31 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-21 — Server-side chat-session persistence in v1 (Phase Z9)
+
+**Decision:** Ship basic chat-history persistence in v1. Sessions auto-save to `ARGOS_ROOT/state/sessions/<id>.json` after each assistant turn. Memory page remains a v2 stub (it documents *semantic* memory, which is a different concept).
+
+**Context:** The Z phases identified that operators losing chat on refresh is a real UX cost. The original decisions.md entry "Chat history is in-memory only (Zustand) — intentional per scope-lock" was deferred to v2 explicitly. But the scope-lock CUT list mentions "State engine, ambient modes" — that's about higher-level state machines, not basic transcript persistence. So basic session persistence is in-bounds for v1.
+
+**Alternatives considered:**
+- **localStorage in the browser.** Rejected: violates Rule #1 (host writes). The browser's localStorage lives at `%LOCALAPPDATA%\...\Local Storage\leveldb\` which is exactly the "host artifact" the doctrine forbids.
+- **Memory page becomes the history viewer.** Rejected: the existing Memory stub makes a strong doctrine point about NOT shipping a "Memory" page that secretly dumps chat history. Diluting that doctrine point would weaken the stub-honesty argument.
+- **Sessions as separate workspace concept.** Rejected: workspace is v2 per scope-lock. Sessions belong inside the existing chat surface.
+
+**Implementation:**
+- `lib/sessions.ts` — atomic write-rename + fsync (same pattern as `lib/settings.ts` after Phase W). 5 MB per-session cap. 200-session list cap. Strict shape validation on read.
+- `/api/chat/sessions` (GET list, POST upsert), `/api/chat/sessions/[id]` (GET full, DELETE).
+- `lib/store.ts` — `currentSessionId` + `loadSession()`.
+- `components/SessionList.tsx` — dropdown panel triggered by History icon next to Export/Clear in chat header.
+- ChatPane auto-saves session after each assistant turn completes (fire-and-forget; save failure must not block chat).
+- `scripts/smoke-sessions.mjs` — 26/26 PASS covering create/read/list/update/delete/idempotency/validation.
+
+**Why this one:** Basic transcript persistence is genuinely useful for v1 demo (load past chat, show "the AI remembers" without having to re-explain context) and respects every existing doctrine constraint. Memory page stays distinct as the v2 semantic-memory surface.
+
+**Scope note:** This is a scope expansion past the original decisions.md entry that listed chat history as v2-deferred. Calling it out explicitly: the change is contained (3 new files + 1 new route group, 100 lines of TS, 200 lines of UI), it's tested with a 26-case smoke, and it doesn't open the door to "Memory" semantics (separate doctrine point preserved).
+
+---
+
 ## 2026-05-20 — `OLLAMA_HOST` env-driven base URL (Phase K refactor)
 
 **Decision:** `lib/ollama-config.ts` centralizes the Ollama base URL with `OLLAMA_HOST` env override. The launcher sets `OLLAMA_HOST=127.0.0.1:11434` explicitly so the daemon and the app stay in sync.

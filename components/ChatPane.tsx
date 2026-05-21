@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, Trash2 } from "lucide-react";
+import { Download, History, Trash2 } from "lucide-react";
 import { Eye } from "./Eye";
 import { CitationPill } from "./CitationPill";
+import { SessionList } from "./SessionList";
 import {
   useArgos,
   type ChatMessage,
@@ -213,6 +214,7 @@ export function ChatPane() {
   }, [clearChat, isStreaming, messages.length]);
 
   const [draft, setDraft] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Holds the in-flight stream's AbortController so the operator can
@@ -418,6 +420,42 @@ export function ChatPane() {
       abortRef.current = null;
       patchLastMessage({ isStreaming: false });
       setStreaming(false);
+      // Auto-save the session after the assistant turn completes. Fire-
+      // and-forget — a save failure must not block the chat surface.
+      // The store tracks currentSessionId; first save creates a new one,
+      // subsequent saves upsert.
+      void (async () => {
+        try {
+          const snap = useArgos.getState();
+          const payload = {
+            id: snap.currentSessionId ?? undefined,
+            personaId: snap.currentPersonaId,
+            model: snap.currentModel,
+            messages: snap.messages.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+              personaId: m.personaId,
+              retrievalHits: m.retrievalHits,
+              retrievalError: m.retrievalError,
+              errored: m.errored,
+            })),
+          };
+          const r = await fetch("/api/chat/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!r.ok) return;
+          const j = (await r.json()) as { id?: string };
+          if (j.id && !useArgos.getState().currentSessionId) {
+            useArgos.getState().setCurrentSessionId(j.id);
+          }
+        } catch {
+          /* save best-effort; no user-visible error for transient saves */
+        }
+      })();
     }
   }, [
     draft,
@@ -493,31 +531,50 @@ export function ChatPane() {
         )}
       </div>
 
-      {/* Chat actions: visible only when there's at least one message.
-          Subtle monochrome buttons in the top-right of the scroller. */}
-      {!empty && (
-        <div className="absolute right-12 mt-3 z-10 flex gap-1.5">
-          <button
-            type="button"
-            onClick={exportChat}
-            title="Export chat as markdown (Cmd/Ctrl+E)"
-            className="rounded p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors"
-            aria-label="Export chat as markdown"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={onClearChat}
-            disabled={isStreaming}
-            title="Clear chat (Cmd/Ctrl+K)"
-            className="rounded p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-neutral-500"
-            aria-label="Clear chat"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      {/* Chat actions: History is always visible (the operator may have
+          past sessions even with an empty current chat). Export + Clear
+          only visible when there's content to act on. */}
+      <div className="absolute right-12 mt-3 z-10 flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => setShowHistory((v) => !v)}
+          title="History — past sessions"
+          className={
+            "rounded p-1.5 transition-colors " +
+            (showHistory
+              ? "text-neutral-200 bg-neutral-800/60"
+              : "text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60")
+          }
+          aria-label="Toggle session history"
+          aria-expanded={showHistory}
+        >
+          <History className="h-3.5 w-3.5" />
+        </button>
+        {!empty && (
+          <>
+            <button
+              type="button"
+              onClick={exportChat}
+              title="Export chat as markdown (Cmd/Ctrl+E)"
+              className="rounded p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors"
+              aria-label="Export chat as markdown"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={onClearChat}
+              disabled={isStreaming}
+              title="Clear chat (Cmd/Ctrl+K) — starts a fresh session"
+              className="rounded p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-neutral-500"
+              aria-label="Clear chat"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+      {showHistory && <SessionList onClose={() => setShowHistory(false)} />}
       <div
         ref={scrollerRef}
         className="flex-1 px-10 py-4 overflow-y-auto relative"
