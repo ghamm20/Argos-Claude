@@ -29,8 +29,12 @@ fi
 
 export ARGOS_ROOT
 export NEXT_TELEMETRY_DISABLED=1
-export OLLAMA_MODELS="$ARGOS_ROOT/models"
+# Default to the USB-payload location, but respect caller-provided override
+# (smoke tests, devs pointing at host models).
+export OLLAMA_MODELS="${OLLAMA_MODELS:-$ARGOS_ROOT/models}"
 export TMPDIR="$ARGOS_ROOT/tmp"
+# Daemon and app share OLLAMA_HOST so they stay in sync (lib/ollama-config.ts).
+export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 
 mkdir -p "$ARGOS_ROOT/logs" "$ARGOS_ROOT/tmp"
 

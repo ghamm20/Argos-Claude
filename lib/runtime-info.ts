@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
+import { getOllamaBase } from "./ollama-config";
 
 export interface RuntimeInfo {
   appName: string;
@@ -39,7 +40,7 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
     version: pkg.version,
     argosRoot: argosRoot(),
     isDev: !process.env.ARGOS_ROOT,
-    ollamaUrl: "http://127.0.0.1:11434",
+    ollamaUrl: getOllamaBase(),
     startedAt: STARTED_AT,
   };
 }

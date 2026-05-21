@@ -3,11 +3,12 @@ import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { retrieve } from "@/lib/vault/store";
 import type { RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
+import { getOllamaBase } from "@/lib/ollama-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const OLLAMA_BASE = "http://127.0.0.1:11434";
+const OLLAMA_BASE = getOllamaBase();
 const OLLAMA_CHAT = `${OLLAMA_BASE}/api/chat`;
 const FIRST_TOKEN_TIMEOUT_MS = 60_000;
 const DEFAULT_TOP_K = 5;
@@ -169,7 +170,7 @@ export async function POST(req: NextRequest) {
     if (isConnRefused(e)) {
       return jsonError(
         503,
-        "Ollama not reachable at 127.0.0.1:11434. Is `ollama serve` running?"
+        `Ollama not reachable at ${OLLAMA_BASE}. Is \`ollama serve\` running?`
       );
     }
     return jsonError(502, `upstream fetch failed: ${e instanceof Error ? e.message : String(e)}`);

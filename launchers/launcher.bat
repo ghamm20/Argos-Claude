@@ -41,8 +41,14 @@ if exist "%SCRIPT_DIR%\app\package.json" (
 
 REM --- Scoped env vars (child processes only) -----------------
 set "NEXT_TELEMETRY_DISABLED=1"
-set "OLLAMA_MODELS=%ARGOS_ROOT%\models"
+REM Default OLLAMA_MODELS to the USB-payload location, but respect a
+REM caller-provided value (smoke tests, devs running against host models).
+if not defined OLLAMA_MODELS set "OLLAMA_MODELS=%ARGOS_ROOT%\models"
 set "TMPDIR=%ARGOS_ROOT%\tmp"
+REM Set OLLAMA_HOST explicitly so both the ollama daemon AND the Next.js
+REM app read the same address. lib/ollama-config.ts respects this. Defaults
+REM match Ollama's own default (127.0.0.1:11434).
+if not defined OLLAMA_HOST set "OLLAMA_HOST=127.0.0.1:11434"
 
 REM --- Ensure runtime dirs ------------------------------------
 if not exist "%ARGOS_ROOT%\logs" mkdir "%ARGOS_ROOT%\logs"

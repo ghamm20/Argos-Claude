@@ -1,4 +1,6 @@
-const OLLAMA_BASE = "http://127.0.0.1:11434";
+import { getOllamaBase } from "../ollama-config";
+
+const OLLAMA_BASE = getOllamaBase();
 export const EMBED_MODEL = "nomic-embed-text";
 
 export class EmbedError extends Error {
@@ -27,7 +29,7 @@ export async function embedText(text: string): Promise<number[]> {
     const msg = e instanceof Error ? e.message : String(e);
     if (/ECONNREFUSED|fetch failed|ENOTFOUND/i.test(msg)) {
       throw new EmbedError(
-        "Ollama not reachable at 127.0.0.1:11434. Is `ollama serve` running?",
+        `Ollama not reachable at ${OLLAMA_BASE}. Is \`ollama serve\` running?`,
         503
       );
     }
