@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { Download, Trash2 } from "lucide-react";
 import { Eye } from "./Eye";
 import { CitationPill } from "./CitationPill";
 import {
@@ -10,6 +11,7 @@ import {
   type CitedHit,
 } from "@/lib/store";
 import { PERSONA_BY_ID } from "@/lib/personas";
+import { chatToMarkdown, exportFilename } from "@/lib/chat-export";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -153,6 +155,42 @@ export function ChatPane() {
   const pushLatency = useArgos((s) => s.pushLatency);
   const setActiveCitation = useArgos((s) => s.setActiveCitation);
   const setVaultCounts = useArgos((s) => s.setVaultCounts);
+  const clearChat = useArgos((s) => s.clearChat);
+
+  const exportChat = useCallback(() => {
+    const snap = useArgos.getState();
+    if (snap.messages.length === 0) return;
+    const exportedAt = Date.now();
+    const md = chatToMarkdown(snap.messages, {
+      model: snap.currentModel,
+      exportedAt,
+      personaName: snap.personaName(),
+    });
+    const fname = exportFilename(snap.personaName(), exportedAt);
+    // Browser download — no host write from the app's perspective; the
+    // browser's download dir is operator-controlled (per Rule #1 framing,
+    // the operator owns whatever they choose to save).
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, []);
+
+  const onClearChat = useCallback(() => {
+    if (isStreaming) return;
+    if (messages.length === 0) return;
+    // Lightweight confirmation — no modal dependency. Operator pressing
+    // the trash by accident shouldn't nuke a session.
+    if (typeof window !== "undefined" && !window.confirm("Clear the current chat?")) {
+      return;
+    }
+    clearChat();
+  }, [clearChat, isStreaming, messages.length]);
 
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -372,9 +410,34 @@ export function ChatPane() {
         )}
       </div>
 
+      {/* Chat actions: visible only when there's at least one message.
+          Subtle monochrome buttons in the top-right of the scroller. */}
+      {!empty && (
+        <div className="absolute right-12 mt-3 z-10 flex gap-1.5">
+          <button
+            type="button"
+            onClick={exportChat}
+            title="Export chat as markdown"
+            className="rounded p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors"
+            aria-label="Export chat as markdown"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onClearChat}
+            disabled={isStreaming}
+            title="Clear chat"
+            className="rounded p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-neutral-500"
+            aria-label="Clear chat"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <div
         ref={scrollerRef}
-        className="flex-1 px-10 py-4 overflow-y-auto"
+        className="flex-1 px-10 py-4 overflow-y-auto relative"
       >
         <div className="max-w-2xl mx-auto">
           {empty ? (
