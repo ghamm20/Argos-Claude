@@ -95,6 +95,7 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const messages = useArgos((s) => s.messages);
   const truthMode = useArgos((s) => s.truthMode);
   const setVaultCounts = useArgos((s) => s.setVaultCounts);
+  const currentSessionId = useArgos((s) => s.currentSessionId);
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -253,6 +254,22 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
           label="Citations"
           value={citationsUsed > 0 ? `${citationsUsed} used` : "—"}
           accent={citationsUsed > 0 ? eyeColor : undefined}
+        />
+        <Row
+          label="Session"
+          value={
+            currentSessionId
+              ? `saved · ${currentSessionId.slice(0, 8)}`
+              : messages.length === 0
+                ? "—"
+                : "unsaved (auto-saves on assistant reply)"
+          }
+          accent={currentSessionId ? eyeColor : undefined}
+          title={
+            currentSessionId
+              ? `Full id: ${currentSessionId}`
+              : "Sessions persist to ARGOS_ROOT/state/sessions after the first assistant reply"
+          }
         />
       </Section>
 

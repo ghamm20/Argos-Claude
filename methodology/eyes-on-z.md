@@ -159,11 +159,139 @@ Prevents the operator from accidentally losing draft text or triggering the conf
 **CI green on every push to main.**
 **No new runtime dependencies introduced (reused lucide-react, framer-motion, zustand).**
 
-## What's NOT in this block (deferred to bigger swings)
+## Phase Z6 — `methodology/eyes-on-z.md` (this doc)
 
-- **Server-side chat history persistence** — filed as Phase Z9; touches store, new API route, new storage primitives. Bigger scope than the Z phases.
-- **Memory page as session list viewer** — filed as Phase Z10, blocked on Z9.
-- **`scripts/demo-prep.mjs`** — filed as Phase Z8, operator-facing pre-demo wrapper.
-- **`npm run demo-check`** — filed as Phase Z7, single-command pre-demo sanity.
+Audit-trail doc for the Z phases. Matches the `eyes-on-h*.md` convention from the H build so a reviewer can find verification evidence for any phase by name.
 
-These are the next round.
+**Commit:** `eea53e1`
+
+## Phase Z7 — `npm run demo-check`
+
+**Files:** `scripts/demo-check.mjs` (new), `package.json`
+
+**6-stage pre-demo sanity check** designed for <1s when healthy:
+
+1. Static `verify-argos` (Seven Rules) — invoked via `process.execPath scripts/verify-argos.mjs` (not via npm-shell to avoid the deprecation noise + exit-code semantics that bit the first draft)
+2. Ollama daemon reachable on `OLLAMA_HOST`
+3. Required models installed (chat + embed)
+4. Models warm in VRAM (parallel chat + embed warm)
+5. Production `.next` build present + `BUILD_ID` readable
+6. Launcher Ollama resolution (`ARGOS_ROOT/bin` → system → PATH)
+
+**Result on first run:** 5/6 PASS, 1 FAIL — caught my own hardcoded `F:\ARGOS\bin\ollama.exe` in stage 6 via Rule 1. Fixed to read `ARGOS_ROOT` env. Subsequent run: 6/6 PASS in 626ms. **The harness enforcing its own rules worked exactly as designed.**
+
+**Commit:** `eea53e1`
+
+## Phase Z8 — `npm run demo-prep` (chain wrapper)
+
+**Files:** `package.json` only
+
+Folded into a trivial script chain rather than a new file: runs `demo-check` then prints the demo URL hint. All the technical functionality lives in Z7; Z8 just adds the operator-friendly post-flight summary.
+
+**Commit:** `e80e171`
+
+## Phase Z9 — Server-side chat history persistence
+
+**Files (new):**
+- `lib/sessions.ts` — atomic write-rename + fsync, 5 MB per-session cap, 200-session list cap, strict shape validation
+- `app/api/chat/sessions/route.ts` — `GET` list, `POST` upsert (create-or-update)
+- `app/api/chat/sessions/[id]/route.ts` — `GET` full session, `DELETE` (idempotent)
+- `scripts/smoke-sessions.mjs` — 26-case smoke covering create/read/list/update/delete/idempotency/validation
+
+**Files modified:**
+- `lib/store.ts` — added `currentSessionId`, `loadSession()`. `clearChat()` now drops session linkage (next send creates fresh session).
+- `components/ChatPane.tsx` — fire-and-forget auto-save after each assistant turn completes. Save failure does not block the chat surface.
+
+**Storage layout:**
+```
+ARGOS_ROOT/
+  state/
+    sessions/
+      <16-char-hex>.json    ← one file per session
+      <16-char-hex>.json.<pid>.tmp ← atomic-write transient, cleaned up
+```
+
+**Wire-shape persisted per session:**
+```ts
+{ version, id, title, personaId, model,
+  messages: [{ id, role, content, timestamp,
+               personaId?, retrievalHits?, retrievalError?, errored? }],
+  createdAt, updatedAt }
+```
+
+Transient flags (`isStreaming`, HUD metrics) deliberately NOT persisted.
+
+**Title derivation:** first user message in the session, capped at 80 chars, single-line. "New session" fallback if no user messages yet.
+
+**Doctrine compliance:**
+- **Rule 1 (no host writes):** sessions live under `ARGOS_ROOT/state/`, which goes with the USB.
+- **Rule 2 (no network deps):** zero new deps.
+- **Rule 3 (relative paths):** all paths derive from `argosRoot()`.
+- **Rule 5 (no remote fetch):** all storage is local fs.
+
+**Scope expansion note:** The original `methodology/decisions.md` listed chat-history persistence as v2-deferred. Z9 ships basic transcript persistence in v1, with the new decisions.md entry explaining the rationale (Rule 1 compliant, Memory page semantic-memory distinction preserved, contained 3-file change with 26-case smoke).
+
+**Verification:** 26/26 PASS on the live smoke. Verified create/read/list/update/delete/idempotency and 400/404 validation. `createdAt` preserved across updates; `updatedAt` always advances.
+
+**Commit:** `cfb9da0`
+
+## Phase Z10 — History panel UI
+
+**Files:**
+- `components/SessionList.tsx` (new) — dropdown panel triggered by History icon
+- `components/ChatPane.tsx` — History icon, panel state, always visible (operator may want to load a past session into a fresh view)
+
+**Behavior:**
+- Click History icon → dropdown opens at top-right of chat
+- Lists sessions newest-first with persona-colored bullet, title, persona name, message count, relative timestamp
+- Click a row → `loadSession()` → in-memory chat replaced with the stored session's messages, personaId, model
+- Hover row → trash icon reveals → confirm + delete
+- "current" pill on the active session
+- Auto-refresh on open + after delete
+
+**Memory page deliberately UNCHANGED.** The existing Memory page makes a strong doctrine point: a `Memory` page that secretly dumps the message buffer to disk would be a fake feature. Z9's chat history persistence is a different concept (basic transcript storage, time-ordered, no semantic recall). The Memory page remains the v2 stub for semantic memory + user-modeling.
+
+**Commit:** `cfb9da0`
+
+## Phase Z11 — HUD session indicator
+
+**Files:** `components/HUD.tsx`
+
+Added one Row to the HUD's Context section:
+- When `currentSessionId === null` and `messages.length === 0`: shows `—`
+- When `currentSessionId === null` and `messages.length > 0` (just before first auto-save): shows `unsaved (auto-saves on assistant reply)`
+- When linked to a saved session: shows `saved · <first 8 chars of id>` in persona accent color
+- Tooltip shows full id
+
+Operator-visible feedback that the chat is being tracked. The accent color matches the streaming indicator dot so the visual language is consistent.
+
+**Commit:** _this block_
+
+## Summary across all Z phases
+
+| Phase | Surface | Type | Commit |
+|---|---|---|---|
+| Z1 | Chat: export markdown + clear | Feature | `09ead2a` |
+| Z2 | Chat: "thinking…" cold-load | UX | `49c9487` |
+| Z3 | Chat: Stop streaming | Feature | `49c9487` |
+| Z4 | CLI: `npm run warm` | Infra | `5021e2d` |
+| Z5 | Chat: keyboard shortcuts | UX | `28b3901` |
+| Z6 | Docs: eyes-on-z.md | Audit | `eea53e1` |
+| Z7 | CLI: `npm run demo-check` | Infra | `eea53e1` |
+| Z8 | CLI: `npm run demo-prep` chain | Infra | `e80e171` |
+| Z9 | **Server: chat history persistence** | **Feature** | `cfb9da0` |
+| Z10 | **Chat: History panel UI** | **Feature** | `cfb9da0` |
+| Z11 | HUD: session indicator | UX | (current) |
+
+**All 7 verify-argos rules PASS** across every Z-phase commit.
+**26/26 smoke-sessions PASS** on the persistence layer.
+**27/27 smoke-chat-export PASS** on the export helper.
+**Zero scope-lock violations** — Memory page doctrine preserved, no new dependencies, all writes under ARGOS_ROOT.
+**CI green** on every push.
+
+## What's NOT in this block (genuinely deferred)
+
+- **Cross-session search** — searching across stored transcripts. Useful but doesn't change the demo-day surface.
+- **Session export-all-as-archive** — bundling every session into one .md or .zip. Filed for v2 portability work.
+- **Real semantic Memory** — the v2 stub on the Memory page. Cross-conversation memory + user-modeling. Still v2.
+- **Session pinning / favorites** — not needed for v1.
