@@ -437,6 +437,40 @@ export function ChatPane() {
     }
   };
 
+  // Window-level shortcuts: Cmd/Ctrl+K to clear, Cmd/Ctrl+E to export,
+  // Esc to stop streaming. Only fire when the user isn't typing in
+  // another input (else they'd lose draft text or confirm by accident).
+  useEffect(() => {
+    function isTypingInOtherInput(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "SELECT") return true;
+      if (tag === "TEXTAREA" && target !== textareaRef.current) return true;
+      if (target.isContentEditable) return true;
+      return false;
+    }
+    function handler(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      // Esc to stop streaming — only fires while streaming, no modifier
+      if (e.key === "Escape" && !mod && useArgos.getState().isStreaming) {
+        e.preventDefault();
+        stop();
+        return;
+      }
+      if (!mod) return;
+      if (isTypingInOtherInput(e.target)) return;
+      if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        onClearChat();
+      } else if (e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        exportChat();
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [stop, onClearChat, exportChat]);
+
   const empty = messages.length === 0;
 
   return (
@@ -466,7 +500,7 @@ export function ChatPane() {
           <button
             type="button"
             onClick={exportChat}
-            title="Export chat as markdown"
+            title="Export chat as markdown (Cmd/Ctrl+E)"
             className="rounded p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors"
             aria-label="Export chat as markdown"
           >
@@ -476,7 +510,7 @@ export function ChatPane() {
             type="button"
             onClick={onClearChat}
             disabled={isStreaming}
-            title="Clear chat"
+            title="Clear chat (Cmd/Ctrl+K)"
             className="rounded p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-neutral-500"
             aria-label="Clear chat"
           >
