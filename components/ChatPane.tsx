@@ -102,21 +102,41 @@ function MessageBubble({
           <div className="text-red-400">{msg.content}</div>
         ) : (
           <>
-            <span>
-              {renderWithCitations(
-                msg.content,
-                msg.retrievalHits,
-                accent,
-                onPillClick
-              )}
-            </span>
-            {msg.isStreaming && (
-              <motion.span
-                className="inline-block ml-0.5 w-1.5 h-3 align-middle"
-                style={{ background: accent }}
-                animate={{ opacity: [0.3, 1, 0.3] }}
-                transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
-              />
+            {/* Pre-first-token state: model is loading. Show explicit
+                "thinking" hint so the operator doesn't think the app
+                is frozen during the 5-10s cold-load window. */}
+            {msg.isStreaming && msg.content.length === 0 ? (
+              <span
+                className="inline-flex items-center gap-1.5 text-[12px] text-neutral-500 italic"
+                aria-live="polite"
+              >
+                <motion.span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ background: accent }}
+                  animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
+                  transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+                />
+                thinking…
+              </span>
+            ) : (
+              <>
+                <span>
+                  {renderWithCitations(
+                    msg.content,
+                    msg.retrievalHits,
+                    accent,
+                    onPillClick
+                  )}
+                </span>
+                {msg.isStreaming && (
+                  <motion.span
+                    className="inline-block ml-0.5 w-1.5 h-3 align-middle"
+                    style={{ background: accent }}
+                    animate={{ opacity: [0.3, 1, 0.3] }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
+              </>
             )}
           </>
         )}
@@ -195,6 +215,16 @@ export function ChatPane() {
   const [draft, setDraft] = useState("");
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Holds the in-flight stream's AbortController so the operator can
+  // cancel mid-stream. Cleared in the `send` finally block.
+  const abortRef = useRef<AbortController | null>(null);
+
+  const stop = useCallback(() => {
+    const c = abortRef.current;
+    if (!c) return;
+    c.abort();
+    abortRef.current = null;
+  }, []);
 
   // Hydrate vault counts on mount so retrieval is enabled even if the user
   // never visits the Vault tab.
@@ -261,6 +291,11 @@ export function ChatPane() {
     let firstTokenAt: number | null = null;
     let liveTokenCount = 0;
 
+    // Fresh AbortController per send so the Stop button can cancel
+    // just this request without touching anything else.
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -272,6 +307,7 @@ export function ChatPane() {
           useRetrieval,
           truthMode: useArgos.getState().truthMode,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -360,13 +396,26 @@ export function ChatPane() {
         }
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      patchLastMessage({
-        content: `[network error] ${msg}`,
-        errored: true,
-        isStreaming: false,
-      });
+      // Operator-initiated abort is NOT an error — it's a clean stop.
+      // Mark the message as no-longer-streaming and append a small
+      // hint so the transcript shows what happened.
+      if (e instanceof Error && (e.name === "AbortError" || /abort/i.test(e.message))) {
+        patchLastMessage({
+          content: useArgos.getState().messages.at(-1)?.content
+            ? `${useArgos.getState().messages.at(-1)?.content ?? ""}\n\n_[stopped by operator]_`
+            : "_[stopped by operator]_",
+          isStreaming: false,
+        });
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        patchLastMessage({
+          content: `[network error] ${msg}`,
+          errored: true,
+          isStreaming: false,
+        });
+      }
     } finally {
+      abortRef.current = null;
       patchLastMessage({ isStreaming: false });
       setStreaming(false);
     }
@@ -477,21 +526,37 @@ export function ChatPane() {
               }
               className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-24 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
             />
-            <button
-              onClick={() => void send()}
-              disabled={isStreaming || draft.trim().length === 0}
-              className="absolute right-1.5 bottom-1.5 rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
-              style={{
-                borderWidth: 1,
-                borderStyle: "solid",
-                borderColor:
-                  isStreaming || !draft.trim() ? "#404040" : accent,
-                color: isStreaming || !draft.trim() ? "#737373" : accent,
-                background: "rgba(0,0,0,0.4)",
-              }}
-            >
-              {isStreaming ? "…" : "Send"}
-            </button>
+            {isStreaming ? (
+              <button
+                onClick={stop}
+                title="Stop streaming"
+                className="absolute right-1.5 bottom-1.5 rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider transition-colors"
+                style={{
+                  borderWidth: 1,
+                  borderStyle: "solid",
+                  borderColor: "#ef4444",
+                  color: "#ef4444",
+                  background: "rgba(0,0,0,0.4)",
+                }}
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={() => void send()}
+                disabled={draft.trim().length === 0}
+                className="absolute right-1.5 bottom-1.5 rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
+                style={{
+                  borderWidth: 1,
+                  borderStyle: "solid",
+                  borderColor: !draft.trim() ? "#404040" : accent,
+                  color: !draft.trim() ? "#737373" : accent,
+                  background: "rgba(0,0,0,0.4)",
+                }}
+              >
+                Send
+              </button>
+            )}
           </div>
           <div className="mt-2 text-[10px] uppercase tracking-[0.18em] text-neutral-600 text-center">
             Network-off · 127.0.0.1:11434 only · Model {currentModel}
