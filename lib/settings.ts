@@ -56,6 +56,28 @@ export async function writeSettings(
     updatedAt: Date.now(),
   };
   await fsp.mkdir(configDir(), { recursive: true });
-  await fsp.writeFile(settingsPath(), JSON.stringify(next, null, 2), "utf8");
+  // Atomic write: write to a per-pid temp file in the same dir, fsync,
+  // then rename over the target. If the process is killed (or the USB
+  // is yanked) mid-write, the worst case is an orphaned .tmp file —
+  // settings.json itself is either the previous valid version or the
+  // new one, never partial.
+  //
+  // Filed as Gap A in methodology/threat-model-audit.md after the H8.5
+  // audit. Same place needed protection during the H8.5 NTFS-corruption-
+  // from-yank-during-write incident; this brings settings up to the
+  // same posture.
+  const finalPath = settingsPath();
+  const tmpPath = `${finalPath}.${process.pid}.tmp`;
+  const payload = JSON.stringify(next, null, 2);
+  const fh = await fsp.open(tmpPath, "w");
+  try {
+    await fh.writeFile(payload, "utf8");
+    // fsync forces the write to disk before we rename, so the rename
+    // can't make a stale-content file visible to readers.
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fsp.rename(tmpPath, finalPath);
   return next;
 }
