@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same ref when a new commit lands.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint + typecheck + build + verify-argos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Pinned to the version this project was built against. node 20.17.6
+          # is in package.json @types/node; the runtime here matches what
+          # developers use locally per docs/02-SCOPE-LOCK.md.
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Verify Seven USB-Native Rules
+        run: npm run verify
+
+      - name: Stub-honesty audit
+        run: node scripts/audit-stub-honesty.mjs
+
+      - name: Production-deps audit
+        run: node scripts/audit-production-deps.mjs
+
+      - name: Launcher static smoke
+        run: node scripts/smoke-launcher.mjs
+
+  # Optional matrix job to surface Windows-only path issues early.
+  # Disabled by default to keep CI minutes low; flip to `if: true` when
+  # actively iterating on launcher.bat or scripts/migrate-to-usb.mjs.
+  windows-static:
+    name: Windows static checks (optional)
+    if: false
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Seven USB-Native Rules
+        run: npm run verify
+
+      - name: Launcher static smoke
+        run: node scripts/smoke-launcher.mjs
