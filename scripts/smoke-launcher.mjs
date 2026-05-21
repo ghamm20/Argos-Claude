@@ -35,6 +35,18 @@ const LAUNCHERS = [
       nextPort: /7799/,
       envScoped: /NEXT_TELEMETRY_DISABLED=1/,
       curlPoll: /curl/,
+      // Phase B: daemon stderr must redirect to log
+      stderrCapture: />>.+OLLAMA_LOG/,
+      // Phase C: < NUL stdin detach for cmd /c daemon spawns
+      stdinDetach: /<\s*NUL/,
+      // Phase K: env-respecting OLLAMA_HOST default
+      ollamaHostRespect: /if not defined OLLAMA_HOST/,
+      // Phase K: env-respecting OLLAMA_MODELS default
+      ollamaModelsRespect: /if not defined OLLAMA_MODELS/,
+      // 3-tier Ollama binary lookup (bundled, system, PATH)
+      ollamaLookup: /ARGOS_ROOT.+bin.+ollama\.exe[\s\S]+LOCALAPPDATA[\s\S]+where ollama/,
+      // netstat-based cleanup (defends against Next renaming its window)
+      netstatCleanup: /netstat.+findstr.+7799/,
     },
   },
   {
@@ -50,6 +62,14 @@ const LAUNCHERS = [
       envScoped: /NEXT_TELEMETRY_DISABLED=1/,
       curlPoll: /curl/,
       browserOpen: /\bopen\s+["']http/,
+      // Phase B: daemon stderr capture (already had this via &> pattern)
+      stderrCapture: />>"\$OLLAMA_LOG"\s+2>&1/,
+      // Phase K: env-respecting OLLAMA_HOST default
+      ollamaHostRespect: /OLLAMA_HOST.+\$\{OLLAMA_HOST:-/,
+      // Phase K: env-respecting OLLAMA_MODELS default
+      ollamaModelsRespect: /OLLAMA_MODELS.+\$\{OLLAMA_MODELS:-/,
+      // SIGTERM-then-KILL graceful shutdown (Rule 6)
+      sigtermKill: /kill -TERM[\s\S]+kill -KILL/,
     },
   },
   {
@@ -66,6 +86,14 @@ const LAUNCHERS = [
       curlPoll: /curl/,
       browserOpen: /xdg-open/,
       headlessFallback: /DISPLAY/,
+      // Phase B: daemon stderr capture
+      stderrCapture: />>"\$OLLAMA_LOG"\s+2>&1/,
+      // Phase K: env-respecting OLLAMA_HOST default
+      ollamaHostRespect: /OLLAMA_HOST.+\$\{OLLAMA_HOST:-/,
+      // Phase K: env-respecting OLLAMA_MODELS default
+      ollamaModelsRespect: /OLLAMA_MODELS.+\$\{OLLAMA_MODELS:-/,
+      // SIGTERM-then-KILL graceful shutdown (Rule 6)
+      sigtermKill: /kill -TERM[\s\S]+kill -KILL/,
     },
   },
 ];
