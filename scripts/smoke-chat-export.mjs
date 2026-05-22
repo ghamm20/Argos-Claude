@@ -226,6 +226,88 @@ console.log("\n[T7] export filename");
   check("no double hyphens or leading-trailing", !/--+|-\.md$/.test(fn));
 }
 
+// ---------- T8: bundle to markdown ----------
+console.log("\n[T8] bundle multiple sessions");
+{
+  function bundleToMarkdown(sessions, ctx = {}) {
+    const exportedAt = ctx.exportedAt ?? Date.now();
+    const isoTs = new Date(exportedAt).toISOString();
+    const lines = [];
+    lines.push(`# ARGOS Chat Archive`);
+    lines.push("");
+    lines.push(`**Exported:** ${isoTs}  `);
+    lines.push(`**Sessions:** ${sessions.length}`);
+    lines.push("");
+    lines.push("## Table of Contents");
+    lines.push("");
+    for (const s of sessions) {
+      const anchor = `session-${s.id.replace(/[^a-zA-Z0-9-]/g, "")}`;
+      const updated = new Date(s.updatedAt).toISOString().split("T")[0];
+      const title = s.title.replace(/[|[\]]/g, (c) => `\\${c}`);
+      lines.push(`- [${title}](#${anchor}) — ${s.personaName} · ${s.messages.length} msg · ${updated}`);
+    }
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+    for (const s of sessions) {
+      const anchor = `session-${s.id.replace(/[^a-zA-Z0-9-]/g, "")}`;
+      lines.push(`## <a id="${anchor}"></a>${s.title.replace(/[|[\]]/g, (c) => `\\${c}`)}`);
+      lines.push("");
+      lines.push(`**Persona:** ${s.personaName}  `);
+      lines.push(`**Model:** ${s.model}  `);
+      lines.push(`**Session id:** \`${s.id}\``);
+      lines.push("");
+      for (const msg of s.messages) {
+        if (msg.role === "system") continue;
+        const speaker = msg.role === "user" ? "User" : s.personaName;
+        lines.push(`### ${speaker}`);
+        lines.push("");
+        lines.push(msg.content.trim() || "*(empty)*");
+        lines.push("");
+      }
+      lines.push("---");
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
+
+  const md = bundleToMarkdown(
+    [
+      {
+        id: "abc123",
+        title: "First session",
+        personaName: "Bartimaeus",
+        model: "llama3.1:8b",
+        createdAt: 0,
+        updatedAt: 0,
+        messages: [
+          { role: "user", content: "hi", timestamp: 0 },
+          { role: "assistant", content: "hello there", personaId: "bartimaeus", timestamp: 1 },
+        ],
+      },
+      {
+        id: "def456",
+        title: "Second session",
+        personaName: "Juniper",
+        model: "qwen2.5:3b",
+        createdAt: 0,
+        updatedAt: 0,
+        messages: [{ role: "user", content: "test", timestamp: 0 }],
+      },
+    ],
+    { exportedAt: 1779200000000 }
+  );
+  check("archive has H1 title", md.includes("# ARGOS Chat Archive"));
+  check("sessions count = 2", md.includes("**Sessions:** 2"));
+  check("TOC present", md.includes("## Table of Contents"));
+  check("TOC entry for first session", md.includes("[First session](#session-abc123)"));
+  check("TOC entry for second session", md.includes("[Second session](#session-def456)"));
+  check("first anchor present", md.includes('<a id="session-abc123"></a>First session'));
+  check("second anchor present", md.includes('<a id="session-def456"></a>Second session'));
+  check("includes user content", md.includes("hi"));
+  check("includes assistant content", md.includes("hello there"));
+}
+
 // ---------- summary ----------
 console.log("\n" + "=".repeat(64));
 console.log(`smoke-chat-export: ${passed} PASS, ${failed} FAIL`);

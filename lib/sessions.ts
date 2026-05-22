@@ -193,6 +193,110 @@ export async function deleteSession(id: string): Promise<boolean> {
   }
 }
 
+export interface SessionSearchHit {
+  id: string;
+  title: string;
+  personaId: string;
+  model: string;
+  messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Where the match landed: "title" or "message" */
+  matchedIn: "title" | "message";
+  /** Index of the matched message, if matchedIn === "message" */
+  matchedMessageIndex?: number;
+  /** Ellipsized snippet around the match. */
+  snippet: string;
+}
+
+/** Case-insensitive substring search across stored sessions. */
+export async function searchSessions(
+  rawQuery: string,
+  maxResults = 50
+): Promise<SessionSearchHit[]> {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return [];
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fsp.readdir(sessionsDir(), { withFileTypes: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw e;
+  }
+  const hits: SessionSearchHit[] = [];
+  for (const ent of entries) {
+    if (!ent.isFile()) continue;
+    if (!ent.name.endsWith(".json")) continue;
+    if (ent.name.includes(".tmp")) continue;
+    const id = ent.name.slice(0, -".json".length);
+    if (!isSafeSessionId(id)) continue;
+    try {
+      const raw = await fsp.readFile(path.join(sessionsDir(), ent.name), "utf8");
+      const parsed = JSON.parse(raw) as PersistedSession;
+      const validated = validateSession(parsed);
+      if (!validated) continue;
+      // Title match wins; otherwise scan messages for first hit.
+      const titleLow = validated.title.toLowerCase();
+      if (titleLow.includes(query)) {
+        hits.push({
+          id: validated.id,
+          title: validated.title,
+          personaId: validated.personaId,
+          model: validated.model,
+          messageCount: validated.messages.length,
+          createdAt: validated.createdAt,
+          updatedAt: validated.updatedAt,
+          matchedIn: "title",
+          snippet: ellipsize(validated.title, query),
+        });
+        continue;
+      }
+      let foundIdx = -1;
+      let foundSnippet = "";
+      for (let i = 0; i < validated.messages.length; i++) {
+        const m = validated.messages[i];
+        if (m.role === "system") continue;
+        const lc = m.content.toLowerCase();
+        const k = lc.indexOf(query);
+        if (k >= 0) {
+          foundIdx = i;
+          foundSnippet = ellipsize(m.content, query);
+          break;
+        }
+      }
+      if (foundIdx >= 0) {
+        hits.push({
+          id: validated.id,
+          title: validated.title,
+          personaId: validated.personaId,
+          model: validated.model,
+          messageCount: validated.messages.length,
+          createdAt: validated.createdAt,
+          updatedAt: validated.updatedAt,
+          matchedIn: "message",
+          matchedMessageIndex: foundIdx,
+          snippet: foundSnippet,
+        });
+      }
+    } catch {
+      continue;
+    }
+  }
+  hits.sort((a, b) => b.updatedAt - a.updatedAt);
+  return hits.slice(0, maxResults);
+}
+
+function ellipsize(text: string, query: string, radius = 60): string {
+  const lc = text.toLowerCase();
+  const i = lc.indexOf(query.toLowerCase());
+  if (i < 0) return text.slice(0, radius * 2);
+  const start = Math.max(0, i - radius);
+  const end = Math.min(text.length, i + query.length + radius);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
 export async function listSessions(): Promise<SessionSummary[]> {
   let entries: import("node:fs").Dirent[];
   try {

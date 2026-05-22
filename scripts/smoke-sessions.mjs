@@ -134,6 +134,36 @@ check("unsafe-char id rejected (400)", badRead.status === 400);
 const missingRead = await api("GET", `/api/chat/sessions/0000000000000000`);
 check("unknown id returns 404", missingRead.status === 404);
 
+// ===== Search (Z13) ===========================================
+console.log("\n[search]");
+// Title-match search
+const titleSearch = await api("GET", `/api/chat/sessions?q=${encodeURIComponent("rule 1")}`);
+check("search returns 200", titleSearch.status === 200);
+check("search returns hits array", Array.isArray(titleSearch.json?.hits));
+const titleHit = titleSearch.json?.hits?.find((h) => h.id === newId);
+check("search finds session via title", !!titleHit);
+check("title match flagged matchedIn='title'", titleHit?.matchedIn === "title");
+check("search snippet present", typeof titleHit?.snippet === "string" && titleHit.snippet.length > 0);
+
+// Message-match (content present but title doesn't include the query)
+const msgSearch = await api("GET", `/api/chat/sessions?q=${encodeURIComponent("never write outside")}`);
+const msgHit = msgSearch.json?.hits?.find((h) => h.id === newId);
+check("search finds session via message content", !!msgHit);
+check("message match flagged matchedIn='message'", msgHit?.matchedIn === "message");
+check("message match includes matchedMessageIndex", typeof msgHit?.matchedMessageIndex === "number");
+
+// No match
+const noMatch = await api("GET", `/api/chat/sessions?q=${encodeURIComponent("xyzzy_no_match_token")}`);
+check("no-match search returns hits=[]", Array.isArray(noMatch.json?.hits) && noMatch.json.hits.length === 0);
+
+// Empty query is allowed but returns no hits (consistent with no-match)
+const emptyQ = await api("GET", `/api/chat/sessions?q=`);
+check("empty q returns hits=[]", Array.isArray(emptyQ.json?.hits) && emptyQ.json.hits.length === 0);
+
+// Oversized query (>256 chars) → 400
+const longQ = await api("GET", `/api/chat/sessions?q=${"x".repeat(300)}`);
+check("oversized q rejected (400)", longQ.status === 400);
+
 // Delete
 const deleteRes = await api("DELETE", `/api/chat/sessions/${newId}`);
 check("delete returns 200", deleteRes.status === 200);

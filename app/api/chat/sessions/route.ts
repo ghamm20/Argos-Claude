@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import {
   listSessions,
+  searchSessions,
   writeSession,
   generateSessionId,
   deriveTitle,
@@ -12,9 +13,28 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/chat/sessions — list session summaries, most-recent first. */
-export async function GET() {
+const MAX_QUERY_LENGTH = 256;
+
+/**
+ * GET /api/chat/sessions
+ *   - no query → list summaries newest-first
+ *   - ?q=foo   → search across titles + message content, returns hits
+ *                with snippet + matchedIn ("title" | "message")
+ */
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const q = url.searchParams.get("q");
   try {
+    if (q !== null) {
+      if (q.length > MAX_QUERY_LENGTH) {
+        return Response.json(
+          { error: `q exceeds ${MAX_QUERY_LENGTH} chars` },
+          { status: 400 }
+        );
+      }
+      const hits = await searchSessions(q);
+      return Response.json({ hits, query: q, count: hits.length });
+    }
     const sessions = await listSessions();
     return Response.json({ sessions, count: sessions.length });
   } catch (e) {
