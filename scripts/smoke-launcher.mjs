@@ -39,14 +39,18 @@ const LAUNCHERS = [
       stderrCapture: />>.+OLLAMA_LOG/,
       // Phase C: < NUL stdin detach for cmd /c daemon spawns
       stdinDetach: /<\s*NUL/,
-      // Phase K: env-respecting OLLAMA_HOST default
-      ollamaHostRespect: /if not defined OLLAMA_HOST/,
+      // Phase K: env-respecting OLLAMA_HOST default.
+      // Phase 1 introduced port fallback (11434→11435); the respect-check
+      // now matches both the old `if not defined` and the new `if defined`
+      // (with else branch) forms — semantic intent is the same.
+      ollamaHostRespect: /if (?:not )?defined OLLAMA_HOST/,
       // Phase K: env-respecting OLLAMA_MODELS default
       ollamaModelsRespect: /if not defined OLLAMA_MODELS/,
       // 3-tier Ollama binary lookup (bundled, system, PATH)
       ollamaLookup: /ARGOS_ROOT.+bin.+ollama\.exe[\s\S]+LOCALAPPDATA[\s\S]+where ollama/,
-      // netstat-based cleanup (defends against Next renaming its window)
-      netstatCleanup: /netstat.+findstr.+7799/,
+      // netstat-based cleanup (defends against Next renaming its window).
+      // Phase 1: port var %NEXT_PORT% replaces literal 7799 to support fallback.
+      netstatCleanup: /netstat.+findstr.+(?:7799|%NEXT_PORT%)/,
     },
   },
   {
@@ -64,8 +68,11 @@ const LAUNCHERS = [
       browserOpen: /\bopen\s+["']http/,
       // Phase B: daemon stderr capture (already had this via &> pattern)
       stderrCapture: />>"\$OLLAMA_LOG"\s+2>&1/,
-      // Phase K: env-respecting OLLAMA_HOST default
-      ollamaHostRespect: /OLLAMA_HOST.+\$\{OLLAMA_HOST:-/,
+      // Phase K: env-respecting OLLAMA_HOST default.
+      // Phase 1 added port fallback; the new code branches on whether
+      // OLLAMA_HOST is set. Match either old `${OLLAMA_HOST:-default}`
+      // export or the new `[ -n "${OLLAMA_HOST:-}" ]` test form.
+      ollamaHostRespect: /(?:OLLAMA_HOST.+\$\{OLLAMA_HOST:-|-n\s+"?\$\{OLLAMA_HOST:-)/,
       // Phase K: env-respecting OLLAMA_MODELS default
       ollamaModelsRespect: /OLLAMA_MODELS.+\$\{OLLAMA_MODELS:-/,
       // SIGTERM-then-KILL graceful shutdown (Rule 6)
@@ -88,8 +95,11 @@ const LAUNCHERS = [
       headlessFallback: /DISPLAY/,
       // Phase B: daemon stderr capture
       stderrCapture: />>"\$OLLAMA_LOG"\s+2>&1/,
-      // Phase K: env-respecting OLLAMA_HOST default
-      ollamaHostRespect: /OLLAMA_HOST.+\$\{OLLAMA_HOST:-/,
+      // Phase K: env-respecting OLLAMA_HOST default.
+      // Phase 1 added port fallback; the new code branches on whether
+      // OLLAMA_HOST is set. Match either old `${OLLAMA_HOST:-default}`
+      // export or the new `[ -n "${OLLAMA_HOST:-}" ]` test form.
+      ollamaHostRespect: /(?:OLLAMA_HOST.+\$\{OLLAMA_HOST:-|-n\s+"?\$\{OLLAMA_HOST:-)/,
       // Phase K: env-respecting OLLAMA_MODELS default
       ollamaModelsRespect: /OLLAMA_MODELS.+\$\{OLLAMA_MODELS:-/,
       // SIGTERM-then-KILL graceful shutdown (Rule 6)

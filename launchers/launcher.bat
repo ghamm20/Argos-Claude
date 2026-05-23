@@ -45,14 +45,53 @@ REM Default OLLAMA_MODELS to the USB-payload location, but respect a
 REM caller-provided value (smoke tests, devs running against host models).
 if not defined OLLAMA_MODELS set "OLLAMA_MODELS=%ARGOS_ROOT%\models"
 set "TMPDIR=%ARGOS_ROOT%\tmp"
-REM Set OLLAMA_HOST explicitly so both the ollama daemon AND the Next.js
-REM app read the same address. lib/ollama-config.ts respects this. Defaults
-REM match Ollama's own default (127.0.0.1:11434).
-if not defined OLLAMA_HOST set "OLLAMA_HOST=127.0.0.1:11434"
+REM OLLAMA_HOST is resolved in the Port resolution block below — a
+REM caller-set value is honored, otherwise we pick 11434/11435 by
+REM netstat pre-flight and set OLLAMA_HOST to match. Both ollama
+REM daemon and the Next.js app read OLLAMA_HOST (lib/ollama-config.ts).
 
 REM --- Ensure runtime dirs ------------------------------------
 if not exist "%ARGOS_ROOT%\logs" mkdir "%ARGOS_ROOT%\logs"
 if not exist "%ARGOS_ROOT%\tmp" mkdir "%ARGOS_ROOT%\tmp"
+
+REM --- Port resolution with fallback (Phase 1) ----------------
+REM  Primary ports: Ollama 11434, Next.js 7799.
+REM  Fallback ports: Ollama 11435, Next.js 7800.
+REM  Honors a caller-set OLLAMA_HOST (skips Ollama-side fallback in that
+REM  case; the caller knows where it wants the daemon).
+if defined OLLAMA_HOST (
+  REM Parse port from caller-set OLLAMA_HOST (format host:port; IPv4 only).
+  for /f "tokens=2 delims=:" %%P in ("!OLLAMA_HOST!") do set "OLLAMA_PORT=%%P"
+) else (
+  set "OLLAMA_PORT=11434"
+  call :PORT_IN_USE 11434
+  if !errorlevel!==0 (
+    echo [INFO] Port 11434 in use; falling back to 11435.
+    set "OLLAMA_PORT=11435"
+    call :PORT_IN_USE 11435
+    if !errorlevel!==0 (
+      echo [ERROR] Both Ollama ports 11434 and 11435 are in use.
+      echo         Free one of them and re-run.
+      pause
+      exit /b 1
+    )
+  )
+  set "OLLAMA_HOST=127.0.0.1:!OLLAMA_PORT!"
+)
+
+set "NEXT_PORT=7799"
+call :PORT_IN_USE 7799
+if !errorlevel!==0 (
+  echo [INFO] Port 7799 in use; falling back to 7800.
+  set "NEXT_PORT=7800"
+  call :PORT_IN_USE 7800
+  if !errorlevel!==0 (
+    echo [ERROR] Both Next.js ports 7799 and 7800 are in use.
+    echo         Free one of them and re-run.
+    pause
+    exit /b 1
+  )
+)
 
 REM --- Locate Ollama binary (bundled first, system fallback, PATH fallback) --
 set "OLLAMA_BIN="
@@ -77,12 +116,20 @@ set "LAUNCHER_LOG=%ARGOS_ROOT%\logs\launcher.log"
 set "OLLAMA_LOG=%ARGOS_ROOT%\logs\ollama.log"
 set "NEXT_LOG=%ARGOS_ROOT%\logs\next.log"
 
+REM --- Log rotation (Phase 1) ---------------------------------
+REM  Roll each log if it exceeds 10 MB. Keep 3 generations (.1 .2 .3).
+REM  Done before daemons start so the rename can succeed (no open handles).
+call :ROTATE_LOG "%LAUNCHER_LOG%"
+call :ROTATE_LOG "%OLLAMA_LOG%"
+call :ROTATE_LOG "%NEXT_LOG%"
+
 echo.
 echo  ARGOS - local-first AI workstation
 echo  --------------------------------------------------------
 echo  ARGOS_ROOT  %ARGOS_ROOT%
 echo  Next.js     %NEXTJS_DIR%
 echo  Ollama      %OLLAMA_BIN%
+echo  Ports       Ollama %OLLAMA_PORT%  Next.js %NEXT_PORT%
 echo  Logs        %ARGOS_ROOT%\logs\
 echo.
 
@@ -105,13 +152,13 @@ REM starts. The Phase C investigation on 2026-05-20 confirmed the
 REM underlying ollama binary works (binds 127.0.0.1:11435 in 105ms
 REM via PowerShell Start-Process); the failure was always at the
 REM cmd /c wrapper layer.
-echo [1/4] Starting Ollama on 127.0.0.1:11434...
+echo [1/4] Starting Ollama on 127.0.0.1:%OLLAMA_PORT%...
 start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
 
 set /a TRIES=0
 :WAIT_OLLAMA
 set /a TRIES+=1
-curl -fs --max-time 2 http://127.0.0.1:11434/api/tags >NUL 2>&1
+curl -fs --max-time 2 http://127.0.0.1:%OLLAMA_PORT%/api/tags >NUL 2>&1
 if %errorlevel%==0 goto OLLAMA_READY
 if %TRIES% GEQ 30 (
   echo [ERROR] Ollama did not respond within 30s.
@@ -124,21 +171,21 @@ timeout /t 1 /nobreak >NUL
 goto WAIT_OLLAMA
 
 :OLLAMA_READY
-echo [2/4] Ollama ready on port 11434
+echo [2/4] Ollama ready on port %OLLAMA_PORT%
 
 REM ====== Stage 3/4: start Next.js prod server ===============
 REM Same < NUL stdin-detach as the Ollama line above — defends against
 REM non-console invocation contexts. node ignores stdin in `next start`
 REM mode but the wrapping cmd /c is still vulnerable.
-echo [3/4] Starting Next.js on 127.0.0.1:7799...
+echo [3/4] Starting Next.js on 127.0.0.1:%NEXT_PORT%...
 pushd "%NEXTJS_DIR%"
-start "ARGOS-NEXT" /MIN cmd /c "node node_modules\next\dist\bin\next start -p 7799 < NUL 1>>""%NEXT_LOG%"" 2>&1"
+start "ARGOS-NEXT" /MIN cmd /c "node node_modules\next\dist\bin\next start -p %NEXT_PORT% < NUL 1>>""%NEXT_LOG%"" 2>&1"
 popd
 
 set /a TRIES=0
 :WAIT_NEXT
 set /a TRIES+=1
-curl -fs --max-time 2 http://127.0.0.1:7799 >NUL 2>&1
+curl -fs --max-time 2 http://127.0.0.1:%NEXT_PORT% >NUL 2>&1
 if %errorlevel%==0 goto NEXT_READY
 if %TRIES% GEQ 30 (
   echo [ERROR] Next.js did not respond within 30s. See %NEXT_LOG%
@@ -149,8 +196,8 @@ timeout /t 1 /nobreak >NUL
 goto WAIT_NEXT
 
 :NEXT_READY
-echo [4/4] ARGOS ready - opening browser at http://127.0.0.1:7799
-start "" http://127.0.0.1:7799
+echo [4/4] ARGOS ready - opening browser at http://127.0.0.1:%NEXT_PORT%
+start "" http://127.0.0.1:%NEXT_PORT%
 echo.
 echo  ARGOS is running.
 echo  Press any key to shut down ARGOS cleanly.
@@ -163,7 +210,7 @@ echo Shutting down...
 REM  Next.js renames its cmd-window title to "next-server (vX.Y.Z)" once
 REM  the server is up, so taskkill by ARGOS-NEXT title misses it.
 REM  Resolve via netstat: kill whoever is listening on 7799.
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":7799" ^| findstr "LISTENING"') do (
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":%NEXT_PORT% " ^| findstr "LISTENING"') do (
   taskkill /F /PID %%P >NUL 2>&1
 )
 REM  Ollama gets the title-match path; if our launcher started it the
@@ -183,3 +230,27 @@ taskkill /F /FI "WINDOWTITLE eq ARGOS-NEXT*" >NUL 2>&1
 taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
 pause
 exit /b 1
+
+REM ============================================================
+REM  Subroutines (Phase 1)
+REM ============================================================
+
+:PORT_IN_USE
+REM  Returns errorlevel 0 if TCP port %1 has a LISTENING entry, else nonzero.
+REM  Trailing space in the netstat pattern avoids prefix-collision (e.g. 11434 vs 114340).
+netstat -ano | findstr ":%~1 " | findstr "LISTENING" >NUL 2>&1
+exit /b %errorlevel%
+
+:ROTATE_LOG
+REM  Rotate %1 if it exceeds 10 MB. Keep 3 backups: .1 (newest), .2, .3 (oldest).
+REM  10 MB = 10485760 bytes. cmd %%~z gives file size as integer.
+set "LOG_FILE=%~1"
+if not exist "%LOG_FILE%" exit /b 0
+set "FILE_SIZE=0"
+for %%I in ("%LOG_FILE%") do set "FILE_SIZE=%%~zI"
+if %FILE_SIZE% LSS 10485760 exit /b 0
+if exist "%LOG_FILE%.3" del /F /Q "%LOG_FILE%.3" >NUL 2>&1
+if exist "%LOG_FILE%.2" move /Y "%LOG_FILE%.2" "%LOG_FILE%.3" >NUL 2>&1
+if exist "%LOG_FILE%.1" move /Y "%LOG_FILE%.1" "%LOG_FILE%.2" >NUL 2>&1
+move /Y "%LOG_FILE%" "%LOG_FILE%.1" >NUL 2>&1
+exit /b 0

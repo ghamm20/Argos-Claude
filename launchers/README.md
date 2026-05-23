@@ -49,16 +49,29 @@ and Next.js. They never touch the user shell's persistent env.
 
 ## Ports
 
-| Service | Port | Why |
-|---|---|---|
-| Ollama daemon | 11434 | Ollama's hard-coded default; cannot reassign in v1 |
-| Next.js (prod) | 7799 | Distinct from the dev port (3000) so dev + launcher can coexist on the same machine without colliding |
+| Service | Primary | Fallback | Why |
+|---|---|---|---|
+| Ollama daemon | 11434 | 11435 | Ollama's default; fallback added Phase 1 (v1.0) |
+| Next.js (prod) | 7799 | 7800 | Distinct from dev port (3000); fallback added Phase 1 (v1.0) |
 
-Port collision handling for v1: if either port is busy and the
-respective server fails to come up within the 30-second wait, the
-launcher logs the failure and exits. Auto-fallback to the next free
-port is a v2 concern (clients would need a way to learn the chosen
-port, which adds a discovery layer we have not designed yet).
+Port collision handling (Phase 1, v1.0): each launcher pre-flights
+both primary ports via a `LISTENING`-state check (Windows `netstat`,
+Unix bash `/dev/tcp`) BEFORE starting daemons. If the primary is
+busy, it falls back to the secondary and continues. If BOTH are
+busy, it exits with a clear error rather than the prior 30-second
+silent wait.
+
+The chosen ports are echoed in the splash (`Ports  Ollama X  Next.js Y`)
+and used everywhere downstream — curl polls, browser-open URL, and
+cleanup. The browser-open uses the fallback URL automatically.
+
+A caller-set `OLLAMA_HOST` (smoke harnesses, devs pointing at a
+remote daemon) is honored verbatim — the launcher skips its own
+Ollama-side fallback in that case and parses the port out of
+`OLLAMA_HOST` for the curl-poll. Skipping the daemon start when
+`OLLAMA_HOST` points to a remote is a v2 concern (clients today
+still spawn a local daemon in that case; harmless if the local
+port is free).
 
 ## Process management
 
@@ -73,7 +86,8 @@ Each launcher:
 
 ## Splash output
 
-Four stages, each printed before the work that follows it:
+Four stages, each printed before the work that follows it. The
+resolved ports (primary or fallback) substitute in:
 
 ```
 [1/4] Starting Ollama on 127.0.0.1:11434...
@@ -85,8 +99,26 @@ Four stages, each printed before the work that follows it:
 [4/4] ARGOS ready — opening browser at http://127.0.0.1:7799
 ```
 
+If a fallback fires, the splash also includes an `[INFO]` line
+above stage 1:
+
+```
+[INFO] Port 11434 in use; falling back to 11435.
+```
+
 No fake progress bar. The `… waiting (N/30)` counter is real — each
 tick is a real curl poll against the service.
+
+## Log rotation (Phase 1, v1.0)
+
+The launcher rotates `logs/launcher.log`, `logs/ollama.log`, and
+`logs/next.log` BEFORE spawning daemons if any has exceeded **10 MB**.
+Rotation keeps 3 generations: `.1` (most recent prior), `.2`, `.3`
+(oldest). Anything beyond `.3` is deleted. The current log is renamed
+to `.1` and a fresh one is created when the daemon writes.
+
+Done pre-spawn so the rename can succeed — Windows holds an exclusive
+write handle on the log file while Ollama / Next.js are running.
 
 ## Cold-start budget
 

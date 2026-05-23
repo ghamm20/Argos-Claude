@@ -6,6 +6,36 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-22 — Port fallback + log rotation in launchers (Phase 1 of v1.0)
+
+**Decision:** All three launchers (`launcher.bat`, `launcher.sh`, `launcher.command`) gain (a) port pre-flight with fallback (Ollama 11434→11435, Next.js 7799→7800) and (b) pre-spawn log rotation at 10 MB with 3 generations (`.1`, `.2`, `.3`).
+
+**Context:** The v1.0 finish-line plan added two stabilization gates that the launcher as previously written would fail: "port collision graceful fallback" and "logs do not grow unbounded." The original `launchers/README.md` filed port auto-fallback as a v2 concern ("clients would need a way to learn the chosen port, which adds a discovery layer we have not designed yet"). That deferral assumed a port-discovery API for external clients; in practice the only client is the operator's browser, the launcher already controls the URL it opens, and the chosen port is echoed in the splash. The discovery layer is not needed — passing the port through to `start "" http://127.0.0.1:%NEXT_PORT%` covers it.
+
+Log rotation had no prior decision recorded. The ops runbook (`docs/05-OPERATIONS.md`) documented "Delete files between sessions if they grow unwieldy — the launcher recreates them" as the manual posture. For a personal tool this was acceptable but fragile (the owner has to remember). 10 MB × 4 generations = 40 MB max per log file class — tight enough to bound USB pressure, loose enough to capture useful history for diagnostics.
+
+**Alternatives considered:**
+- **Keep port collision as exit-with-error.** Rejected: directly conflicts with Phase 1 gate. The "discovery layer" worry was overblown for a loopback single-operator tool.
+- **Fall back further (11434→11435→11436…).** Rejected: two slots is enough to handle the common "ARGOS is already running and I double-clicked the launcher" case. Three+ slots would mask a real conflict.
+- **Use a port range and pick the first free.** Rejected: less predictable, harder to debug.
+- **Log rotation by date instead of size.** Rejected: a noisy day produces a multi-GB log before rotation; size-cap is the right cap.
+- **Log rotation via `logrotate` / Windows Task Scheduler.** Rejected: violates Rule 1 (host artifacts) and Rule 7 (no host install).
+- **Truncate logs instead of rotating.** Rejected: loses the prior session's diagnostic context.
+- **Rotate post-shutdown instead of pre-spawn.** Rejected: a crashed launcher would skip rotation entirely; pre-spawn is robust.
+
+**Implementation:**
+- `launchers/launcher.bat`: `:PORT_IN_USE` subroutine using `netstat -ano | findstr ":<port> " | findstr LISTENING`. `:ROTATE_LOG` subroutine using `%%~zI` for file size and `move /Y` for ring rotation. Main flow does port pre-flight before binary lookup; log rotation between log-path declaration and splash.
+- `launchers/launcher.sh` + `launcher.command`: `port_in_use()` using bash `/dev/tcp/127.0.0.1/$1` (works in bash 2.04+ on macOS 3.2 and Linux). `rotate_log()` using `wc -c` for size. Identical structure to the .bat.
+- Splash gains a `Ports  Ollama X  Next.js Y` line so operator can see what was picked.
+- Caller-set `OLLAMA_HOST` is honored verbatim (Phase K invariant preserved): the launcher parses the port out for its own curl-poll and skips Ollama-side fallback in that case.
+- `scripts/smoke-launcher.mjs` updated to accept both old and new shapes of the `OLLAMA_HOST`-respect and netstat-cleanup patterns. All 7 verify-argos rules continue to pass.
+
+**Why this one:** Both gates are real stability concerns at the operator-facing layer, not contrived. Implementing them inside the launcher keeps the change scoped — no app-layer changes, no new dependencies, no schema migrations. The two-slot fallback handles the realistic collision case (double-launch) without trying to be cleverer than that. The rotation policy uses standard shell-level primitives that don't require new packages, matching Rule 7.
+
+**Scope note:** This is a scope expansion past the original `launchers/README.md` deferral. Calling it out explicitly: the change is contained to the three launcher scripts + README + a smoke regex update + this entry. No source-tree changes, no API changes, no UI changes, no dependencies added. CI green via `npm run verify` (7/7) + `node scripts/smoke-launcher.mjs` (PASS).
+
+---
+
 ## 2026-05-21 — Server-side chat-session persistence in v1 (Phase Z9)
 
 **Decision:** Ship basic chat-history persistence in v1. Sessions auto-save to `ARGOS_ROOT/state/sessions/<id>.json` after each assistant turn. Memory page remains a v2 stub (it documents *semantic* memory, which is a different concept).
