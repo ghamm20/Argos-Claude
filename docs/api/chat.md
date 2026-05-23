@@ -29,7 +29,7 @@ Content-Type: application/json
 | `messages` | `WireMessage[]` | yes | — | 1–200 messages |
 | `messages[].role` | `"user" \| "assistant" \| "system"` | yes | — | Strict enum |
 | `messages[].content` | `string` | yes | — | ≤ 100,000 chars per message |
-| `personaId` | `"bartimaeus" \| "juniper" \| "cipher"` | yes | — | See `lib/personas.ts` |
+| `personaId` | `"bartimaeus" \| "juniper" \| "sage" \| "bobby"` | yes | — | See `lib/personas.ts`. Each persona is bound to a specific Ollama model (Phase 2). |
 | `model` | `string` | yes | — | Must be in `AVAILABLE_MODELS` |
 | `useRetrieval` | `boolean` | no | `true` | Set `false` to skip vault lookup |
 | `topK` | `number` | no | `5` | 1–50; out-of-range silently defaults |

@@ -15,6 +15,8 @@
     "smoke": "npm run verify",
     "smoke:launcher-e2e": "node scripts/smoke-launcher-e2e.mjs",
     "warm": "node scripts/warm-ollama.mjs",
+    "integrity:check": "node scripts/check-model-integrity.mjs",
+    "integrity:hash": "node scripts/check-model-integrity.mjs --hash",
     "demo-check": "node scripts/demo-check.mjs",
     "demo-prep": "node scripts/demo-check.mjs && node -e \"console.log('\\n  Open: http://127.0.0.1:7799  (launch via ARGOS\\\\launcher.bat from your USB)')\""
   },

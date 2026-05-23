@@ -28,7 +28,7 @@ Every commit runs the full `npm run check`. CI (`.github/workflows/ci.yml`) re-r
 
 Four working surfaces:
 
-- **Chat** with three personas (`bartimaeus`, `juniper`, `cipher`), each with a distinct system prompt
+- **Chat** with four personas (`bartimaeus`, `juniper`, `sage`, `bobby`), each with a distinct system prompt and a Phase 2-bound Ollama model
 - **Vault** with PDF/DOCX/MD/TXT ingest, nomic-embed-text embeddings, cosine retrieval
 - **Hardware detection** with platform-aware fallback (CUDA → Metal → CPU)
 - **Settings** with persistent per-machine config (`ARGOS_ROOT/config/settings.json`)

@@ -42,8 +42,8 @@ After the launcher reports "Done.", eject the USB drive normally via OS. The dri
 
 Change via Settings UI in the app, or edit the file directly when the app is stopped. The app reads on every settings page render — no restart needed.
 
-Valid `defaultPersona`: `bartimaeus`, `juniper`, `cipher`.
-Valid `defaultModel`: any in the on-disk Ollama models dir that the daemon can load. The UI lists them.
+Valid `defaultPersona`: `bartimaeus`, `juniper`, `sage`, `bobby` (Phase 2 roster).
+Valid `defaultModel`: any in `AVAILABLE_MODELS` (`lib/store.ts`). Switching persona also auto-sets the model to the persona-bound choice; `defaultModel` is the manual override for ad-hoc use.
 
 ### Pointing at a different Ollama daemon
 

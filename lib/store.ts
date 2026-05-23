@@ -55,8 +55,18 @@ const EMPTY_VAULT: VaultStatus = {
   ingesting: null,
 };
 
-const DEFAULT_MODEL = "llama3.1:8b-instruct-q4_K_M";
+// Phase 2 (v1.0) model roster. The four persona-bound models are the
+// owner-specified canonical set; llama3.1:8b + qwen2.5:3b retained as
+// fallbacks for low-VRAM / non-NVIDIA hardware tiers driven by
+// lib/hardware.ts. nomic-embed-text isn't a chat model — vault only.
+const DEFAULT_MODEL = "huihui_ai/gpt-oss-abliterated:20b";
 export const AVAILABLE_MODELS: readonly string[] = [
+  // Persona-bound (Phase 2)
+  "huihui_ai/gpt-oss-abliterated:20b",                                  // Bartimaeus
+  "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",    // Juniper
+  "alfaxad/wild-gemma4:e4b",                                            // Sage
+  "Jarcgon/gemma-4-abliterated:e2b-v2",                                 // Bobby
+  // Hardware fallbacks (existing)
   "llama3.1:8b-instruct-q4_K_M",
   "qwen2.5:3b-instruct-q4_K_M",
 ] as const;
@@ -123,7 +133,11 @@ export const useArgos = create<ArgosState>((set, get) => ({
   activeCitation: null,
   truthMode: false,
 
-  switchPersona: (id) => set({ currentPersonaId: id }),
+  // Phase 2: persona-bound model. switchPersona ALSO updates currentModel
+  // to the persona's bound model. setModel remains separately callable
+  // for the Settings page's manual override.
+  switchPersona: (id) =>
+    set({ currentPersonaId: id, currentModel: PERSONA_BY_ID[id].model }),
   setModel: (m) => set({ currentModel: m }),
   setTab: (t) => set({ currentTab: t }),
 

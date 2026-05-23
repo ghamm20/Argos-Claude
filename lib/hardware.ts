@@ -22,8 +22,14 @@ export interface HardwareProfile {
   detectedAt: number;
 }
 
+// Hardware-recommended fallbacks. Persona selection (Phase 2) is what
+// actually drives the runtime model — these names feed /api/hardware's
+// `recommendedModel` for the Settings UI's first-launch hint.
 const MODEL_LARGE = "llama3.1:8b-instruct-q4_K_M";
 const MODEL_SMALL = "qwen2.5:3b-instruct-q4_K_M";
+// Bartimaeus's 20B abliterated; only recommended on hardware that
+// actually holds it (≥16 GB VRAM or ≥32 GB unified).
+const MODEL_BARTIMAEUS = "huihui_ai/gpt-oss-abliterated:20b";
 
 let cached: HardwareProfile | null = null;
 
@@ -165,12 +171,20 @@ function decide(profile: {
 }): { mode: RuntimeMode; model: string; ctx: number; reason: string } {
   const { vendor, gpuName, vramGB, totalRamGB } = profile;
 
+  if (vendor === "nvidia" && vramGB >= 16) {
+    return {
+      mode: "gpu",
+      model: MODEL_BARTIMAEUS,
+      ctx: 4096,
+      reason: `${gpuName ?? "NVIDIA GPU"} (${vramGB.toFixed(0)} GB VRAM) — fits the 20B Bartimaeus model`,
+    };
+  }
   if (vendor === "nvidia" && vramGB >= 6) {
     return {
       mode: "gpu",
       model: MODEL_LARGE,
       ctx: 4096,
-      reason: `${gpuName ?? "NVIDIA GPU"} (${vramGB.toFixed(0)} GB VRAM) detected — running 8B at full quality`,
+      reason: `${gpuName ?? "NVIDIA GPU"} (${vramGB.toFixed(0)} GB VRAM) — under 16 GB, using safe 8B fallback; pick a persona to swap to its bound model`,
     };
   }
   if (vendor === "nvidia" && vramGB > 0 && vramGB < 6) {
@@ -181,12 +195,20 @@ function decide(profile: {
       reason: `${gpuName ?? "NVIDIA GPU"} has ${vramGB.toFixed(0)} GB VRAM — under 6 GB threshold, falling back to compact 3B model`,
     };
   }
+  if (vendor === "apple" && totalRamGB >= 32) {
+    return {
+      mode: "metal",
+      model: MODEL_BARTIMAEUS,
+      ctx: 4096,
+      reason: `${gpuName ?? "Apple Silicon"} with ${totalRamGB} GB unified memory — fits the 20B Bartimaeus model`,
+    };
+  }
   if (vendor === "apple" && totalRamGB >= 16) {
     return {
       mode: "metal",
       model: MODEL_LARGE,
       ctx: 4096,
-      reason: `${gpuName ?? "Apple Silicon"} detected with ${totalRamGB} GB unified memory — Metal acceleration, 8B model`,
+      reason: `${gpuName ?? "Apple Silicon"} with ${totalRamGB} GB unified memory — under 32 GB, using safe 8B fallback; pick a persona to swap`,
     };
   }
   if (vendor === "apple") {
