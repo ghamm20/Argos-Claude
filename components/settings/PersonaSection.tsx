@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PERSONAS, type PersonaId } from "@/lib/personas";
+import { PERSONAS, isPersonaSelectable, type PersonaId } from "@/lib/personas";
 import { useArgos } from "@/lib/store";
 
 export function PersonaSection() {
@@ -30,7 +30,10 @@ export function PersonaSection() {
 
   async function pick(id: PersonaId) {
     setDefaultPersona(id);
-    switchPersona(id);
+    // Phase 2-RB: switchPersona is now async + does the warm-load.
+    // We don't await here so the radio updates instantly; the HUD
+    // and the toast handle visible state.
+    void switchPersona(id);
     setSaveState("saving");
     setError(null);
     try {
@@ -72,17 +75,29 @@ export function PersonaSection() {
         {PERSONAS.map((p) => {
           const isDefault = defaultPersona === p.id;
           const isActive = currentPersonaId === p.id;
+          const selectable = isPersonaSelectable(p);
+          const isLive = p.status === "live";
           return (
             <label
               key={p.id}
               data-testid={`persona-option-${p.id}`}
-              className="block rounded-md border px-3 py-2.5 cursor-pointer transition-colors"
+              className={
+                "block rounded-md border px-3 py-2.5 transition-colors " +
+                (selectable ? "cursor-pointer" : "cursor-not-allowed opacity-60")
+              }
               style={{
                 borderColor: isDefault ? p.eyeColor : "rgba(64,64,64,0.6)",
                 background: isDefault
                   ? `${p.eyeColor}14`
                   : "rgba(10,10,10,0.4)",
               }}
+              title={
+                !selectable
+                  ? p.intendedModel
+                    ? `Not configured — install ${p.intendedModel} to enable this persona`
+                    : "Not configured — no model intended"
+                  : undefined
+              }
             >
               <div className="flex items-start gap-3">
                 <input
@@ -91,10 +106,11 @@ export function PersonaSection() {
                   value={p.id}
                   checked={isDefault}
                   onChange={() => void pick(p.id)}
-                  className="mt-1 accent-neutral-300"
+                  disabled={!selectable}
+                  className="mt-1 accent-neutral-300 disabled:cursor-not-allowed"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span
                       className="h-2 w-2 rounded-full"
                       style={{ background: p.eyeColor }}
@@ -102,15 +118,43 @@ export function PersonaSection() {
                     <span className="text-[13px] font-medium text-neutral-100">
                       {p.name}
                     </span>
+                    {isLive && (
+                      <span className="text-[9px] uppercase tracking-[0.18em] text-emerald-400 border border-emerald-500/40 rounded-sm px-1.5 py-0.5">
+                        Live
+                      </span>
+                    )}
                     {isActive && (
                       <span className="text-[9px] uppercase tracking-[0.18em] text-neutral-500 border border-neutral-700 rounded-sm px-1.5 py-0.5">
                         Active
+                      </span>
+                    )}
+                    {!selectable && (
+                      <span
+                        className="text-[9px] uppercase tracking-[0.18em] text-amber-400 border border-amber-500/40 rounded-sm px-1.5 py-0.5"
+                        data-testid={`persona-status-${p.id}`}
+                      >
+                        Model not configured
                       </span>
                     )}
                   </div>
                   <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed">
                     {p.description}
                   </div>
+                  {selectable ? (
+                    <div className="text-[10px] text-neutral-600 font-mono mt-1.5 truncate">
+                      Model: {p.model}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-amber-500/70 mt-1.5 leading-relaxed">
+                      Intended model:{" "}
+                      <span className="font-mono">
+                        {p.intendedModel ?? "(none)"}
+                      </span>
+                      <br />
+                      Install via Ollama and re-bind in lib/personas.ts to
+                      enable this persona.
+                    </div>
+                  )}
                 </div>
               </div>
             </label>

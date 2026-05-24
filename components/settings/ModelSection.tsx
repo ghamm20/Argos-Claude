@@ -5,16 +5,18 @@ import { Cpu, Zap, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useArgos, AVAILABLE_MODELS } from "@/lib/store";
 import type { HardwareProfile } from "@/lib/hardware";
 
+// Phase 2-RB labels — the two models currently installed + validated.
+// Update lib/store.ts AVAILABLE_MODELS alongside if adding more.
 const MODEL_LABELS: Record<string, { name: string; size: string; note: string }> = {
-  "llama3.1:8b-instruct-q4_K_M": {
-    name: "Llama 3.1 — 8B Instruct",
-    size: "4.9 GB · Q4_K_M",
-    note: "Full quality. Needs ≥6 GB VRAM (NVIDIA) or 16 GB unified (Apple Silicon).",
+  "e4b:latest": {
+    name: "Gemma 4 — 7.5B (e4b)",
+    size: "5.3 GB · Q4_K_M",
+    note: "Bartimaeus persona. Validated 20-21 tok/s sustained on 8 GB VRAM, 305-412ms TTFT warm. think:false is set in /api/chat — required because gemma4 ships with extended thinking on by default.",
   },
-  "qwen2.5:3b-instruct-q4_K_M": {
-    name: "Qwen 2.5 — 3B Instruct",
-    size: "1.9 GB · Q4_K_M",
-    note: "Compact. Runs comfortably on CPU or low-VRAM GPU.",
+  "gemma2-2b-local:latest": {
+    name: "Gemma 2 — 2B (local)",
+    size: "1.7 GB · Q4_K_M",
+    note: "Bobby persona / lightweight fallback. ~132 tok/s, ~3s TTFT cold. Use for fast snappy replies or as a swap-stress diagnostic.",
   },
 };
 

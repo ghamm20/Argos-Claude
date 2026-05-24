@@ -97,6 +97,10 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const truthMode = useArgos((s) => s.truthMode);
   const setVaultCounts = useArgos((s) => s.setVaultCounts);
   const currentSessionId = useArgos((s) => s.currentSessionId);
+  // Phase 2-RB: visible model swap state (loading / ready / failed /
+  // not_configured / idle). Drives the "Status" row in the Model section.
+  const modelStatus = useArgos((s) => s.modelStatus);
+  const modelStatusMessage = useArgos((s) => s.modelStatusMessage);
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -245,6 +249,27 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
 
       <Section title="Model">
         <Row label="Model" value={model} />
+        {/* Phase 2-RB: visible swap state. The store sets these during
+            switchPersona → /api/model/warm → idle. Shown only when not
+            "idle" so it doesn't permanently occupy a row. */}
+        {modelStatus !== "idle" && (
+          <Row
+            label="Status"
+            value={modelStatusMessage ?? modelStatus}
+            accent={
+              modelStatus === "loading"
+                ? "#eab308"
+                : modelStatus === "ready"
+                  ? "#10b981"
+                  : modelStatus === "failed"
+                    ? "#ef4444"
+                    : modelStatus === "not_configured"
+                      ? "#f59e0b"
+                      : undefined
+            }
+            title={modelStatusMessage ?? undefined}
+          />
+        )}
         <Row label="Mode" value={modeLabel} accent={modeAccent} />
         <Row
           label="Reason"

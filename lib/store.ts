@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PERSONA_BY_ID, type PersonaId } from "./personas";
+import { PERSONA_BY_ID, isPersonaSelectable, type PersonaId } from "./personas";
 
 export type ChatRole = "user" | "assistant" | "system";
 export type Tab = "chat" | "vault";
@@ -58,30 +58,45 @@ const EMPTY_VAULT: VaultStatus = {
   ingesting: null,
 };
 
-// Phase 2 (v1.0) model roster. The four persona-bound models are the
-// owner-specified canonical set; llama3.1:8b + qwen2.5:3b retained as
-// fallbacks for low-VRAM / non-NVIDIA hardware tiers driven by
-// lib/hardware.ts. nomic-embed-text isn't a chat model — vault only.
+// Phase 2-RB (2026-05-24): roster reset to match the actual Ollama
+// store on this machine. The owner wiped the previous 4-model roster
+// down to two models; validation harness confirmed both are stable on
+// the RTX 3060 Ti / 8 GB VRAM hardware envelope.
 //
-// Phase 2 hardware-aligned (Phase 1.5 evidence): DEFAULT_MODEL is Bobby's
-// model. Bobby measured 31 tok/s + stable across swap-stress on 8 GB
-// VRAM — the rig's "primary daily-driver." Pairs with currentPersonaId
-// default = "bobby" below. See project-argos-bobby-default memory entry
-// and PHASE_1_5_HARDWARE_REALITY_ALIGNMENT.md.
-const DEFAULT_MODEL = "Jarcgon/gemma-4-abliterated:e2b-v2";
+// Bart (live default) → e4b:latest             (gemma4 7.5B Q4_K_M, 5.3 GB)
+// Bobby (selectable)  → gemma2-2b-local:latest (gemma2 2B,           1.7 GB)
+// Juniper             → not_configured (model not in store)
+// Sage                → not_configured (model not in store)
+//
+// See PHASE_2_MODEL_VALIDATION.md for the measurement detail and
+// methodology/decisions.md for the rationale.
+const DEFAULT_MODEL = "e4b:latest";
 export const AVAILABLE_MODELS: readonly string[] = [
-  // Persona-bound (Phase 2)
-  "huihui_ai/gpt-oss-abliterated:20b",                                  // Bartimaeus
-  "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",    // Juniper
-  "alfaxad/wild-gemma4:e4b",                                            // Sage
-  "Jarcgon/gemma-4-abliterated:e2b-v2",                                 // Bobby
-  // Hardware fallbacks (existing)
-  "llama3.1:8b-instruct-q4_K_M",
-  "qwen2.5:3b-instruct-q4_K_M",
+  "e4b:latest",                // Bartimaeus (validated, primary)
+  "gemma2-2b-local:latest",    // Bobby (validated fallback)
 ] as const;
 export function isAvailableModel(m: string): boolean {
   return AVAILABLE_MODELS.includes(m);
 }
+
+/**
+ * Phase 2-RB model-swap visibility state.
+ *
+ * Drives the HUD's "Model status" row + the persona-switch toast. The
+ * directive (2026-05-24) requires explicit user-visible states for:
+ *   - Loading <persona>…   (modelStatus="loading", with modelStatusPersona)
+ *   - Model ready          (modelStatus="ready", auto-clear after ~1.5s)
+ *   - Model failed         (modelStatus="failed", with message)
+ *   - Model not configured (modelStatus="not_configured")
+ *
+ * `idle` is the steady state once a swap has resolved.
+ */
+export type ModelStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "failed"
+  | "not_configured";
 const LATENCY_WINDOW = 10;
 
 function p50(values: number[]): number {
@@ -106,8 +121,12 @@ interface ArgosState {
   /** The persisted-session id this chat belongs to, or null if not
    *  yet saved. Set on first auto-save after assistant completes. */
   currentSessionId: string | null;
+  /** Phase 2-RB: visible model load/swap status for the HUD + toasts. */
+  modelStatus: ModelStatus;
+  modelStatusPersona: PersonaId | null;
+  modelStatusMessage: string | null;
 
-  switchPersona: (id: PersonaId) => void;
+  switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
   setTab: (t: Tab) => void;
   appendMessage: (m: ChatMessage) => void;
@@ -132,11 +151,10 @@ interface ArgosState {
 }
 
 export const useArgos = create<ArgosState>((set, get) => ({
-  // Phase 2 hardware-aligned default: Bobby is the primary persona at first
-  // launch (locked decision based on Phase 1.5 measurement — fastest stable
-  // persona on 8 GB VRAM). Operator can switch to Bart/Sage/Juniper anytime;
-  // the switch auto-rebinds currentModel to the persona's bound model.
-  currentPersonaId: "bobby",
+  // Phase 2-RB default: Bart is the primary persona at first launch
+  // (owner directive 2026-05-24). e4b:latest validated on this rig;
+  // see PHASE_2_MODEL_VALIDATION.md.
+  currentPersonaId: "bartimaeus",
   currentModel: DEFAULT_MODEL,
   currentTab: "chat",
   messages: [],
@@ -145,12 +163,83 @@ export const useArgos = create<ArgosState>((set, get) => ({
   vaultStatus: { ...EMPTY_VAULT },
   activeCitation: null,
   truthMode: false,
+  modelStatus: "idle",
+  modelStatusPersona: null,
+  modelStatusMessage: null,
 
-  // Phase 2: persona-bound model. switchPersona ALSO updates currentModel
-  // to the persona's bound model. setModel remains separately callable
-  // for the Settings page's manual override.
-  switchPersona: (id) =>
-    set({ currentPersonaId: id, currentModel: PERSONA_BY_ID[id].model }),
+  // Phase 2-RB: persona-bound model with visible swap state. Steps:
+  //   1. If persona is not_configured, set modelStatus=not_configured
+  //      and bail without touching currentModel (no fake binding).
+  //   2. Else, set modelStatus="loading" + rebind currentPersonaId +
+  //      currentModel synchronously (so UI re-renders immediately).
+  //   3. Fire /api/model/warm in the background. On 200 → "ready"
+  //      (auto-clear after 1500ms). On failure → "failed".
+  switchPersona: async (id) => {
+    const p = PERSONA_BY_ID[id];
+    if (!isPersonaSelectable(p)) {
+      set({
+        modelStatus: "not_configured",
+        modelStatusPersona: id,
+        modelStatusMessage: p.intendedModel
+          ? `${p.name}: model "${p.intendedModel}" not in local Ollama store. Install + re-bind in lib/personas.ts.`
+          : `${p.name} has no configured model.`,
+      });
+      return;
+    }
+    set({
+      currentPersonaId: id,
+      currentModel: p.model,
+      modelStatus: "loading",
+      modelStatusPersona: id,
+      modelStatusMessage: `Loading ${p.name}…`,
+    });
+    // Background warm — never blocks the UI. /api/model/warm POSTs an
+    // empty prompt to Ollama which forces a model load (or no-op if
+    // already loaded) and replies when ready.
+    try {
+      const r = await fetch("/api/model/warm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: p.model }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        set({
+          modelStatus: "failed",
+          modelStatusPersona: id,
+          modelStatusMessage: body.error
+            ? `${p.name}: ${body.error}`
+            : `${p.name}: HTTP ${r.status}`,
+        });
+        return;
+      }
+      set({
+        modelStatus: "ready",
+        modelStatusPersona: id,
+        modelStatusMessage: "Model ready",
+      });
+      // Auto-clear after 1.5s back to idle.
+      setTimeout(() => {
+        // Only clear if still on this persona and still "ready".
+        const cur = get();
+        if (cur.modelStatus === "ready" && cur.modelStatusPersona === id) {
+          set({
+            modelStatus: "idle",
+            modelStatusPersona: null,
+            modelStatusMessage: null,
+          });
+        }
+      }, 1500);
+    } catch (e) {
+      set({
+        modelStatus: "failed",
+        modelStatusPersona: id,
+        modelStatusMessage: `${p.name}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      });
+    }
+  },
   setModel: (m) => set({ currentModel: m }),
   setTab: (t) => set({ currentTab: t }),
 

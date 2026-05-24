@@ -1,17 +1,26 @@
 export type PersonaId = "bartimaeus" | "juniper" | "sage" | "bobby";
 
 /**
+ * Persona lifecycle status.
+ *
+ * - "live"           — wired to a validated model, default persona at boot
+ * - "selectable"     — wired to a validated model, operator can switch to it
+ * - "not_configured" — model not present in the local Ollama store; UI
+ *                      shows a "Model not configured" pill and the persona
+ *                      cannot be selected. Set on personas whose intended
+ *                      models have been removed from the local store.
+ *
+ * Phase 2-RB doctrine: never fake a model-backed persona. If the model
+ * isn't installed + validated, the persona is "not_configured" and the
+ * UI must say so plainly. No silent fallbacks, no stub system prompts
+ * pretending to be live.
+ */
+export type PersonaStatus = "live" | "selectable" | "not_configured";
+
+/**
  * Phase 3 per-persona retrieval policy. Drives what /api/chat does when
  * the operator hasn't explicitly overridden useRetrieval / topK on the
  * request.
- *
- * defaultEnabled — does this persona auto-retrieve from vault if vault
- *                  has docs and operator didn't say otherwise?
- * topK           — how many chunks to inject when retrieval fires.
- * minConfidence  — floor: drop hits below this bucket. "low" = include
- *                  anything ≥0.25 cosine, "medium" = ≥0.40, "high" =
- *                  ≥0.55. See lib/vault/types.ts CONFIDENCE_THRESHOLDS
- *                  and docs/RETRIEVAL.md.
  */
 export interface PersonaRetrieval {
   defaultEnabled: boolean;
@@ -25,14 +34,21 @@ export interface Persona {
   description: string;
   eyeColor: string;
   accentColor: string;
-  status: "live" | "selectable";
+  status: PersonaStatus;
   systemPrompt: string;
   /**
-   * The Ollama model this persona is bound to. Persona switch in the
-   * store also sets currentModel to this value (one-way binding).
-   * Owner ruling 2026-05-22: these four models are the intentional roster.
+   * The Ollama model this persona is bound to. Empty string when
+   * status === "not_configured" — the persona is declared but has
+   * no live model. switchPersona must check status before binding
+   * currentModel.
    */
   model: string;
+  /**
+   * Phase 2-RB: which Ollama model this persona is INTENDED to use
+   * when its preferred model becomes available again. Operator-
+   * visible documentation; not used at runtime.
+   */
+  intendedModel?: string;
   /**
    * Phase 3: per-persona vault retrieval behavior. Used by /api/chat when
    * request body's useRetrieval/topK fields are undefined.
@@ -51,20 +67,21 @@ export const PERSONAS: Persona[] = [
     eyeColor: "#10b981",
     accentColor: "#10b981",
     status: "live",
-    // Phase 2 hardware-aligned rebind (Phase 1.5 evidence):
-    //   - Original plan model `huihui_ai/gpt-oss-abliterated:20b` measured 8 tok/s
-    //     and partial-offload (39% on GPU) on 8 GB VRAM. Operationally too slow
-    //     for daily-driver interactive use.
-    //   - llama3.1:8b-instruct-q4_K_M fits 93% on GPU on this rig and is the
-    //     workhorse for Bart's strategic/verification role until the 5090 lands.
-    //   - The 20B remains in AVAILABLE_MODELS for Power Mode opt-in queries.
-    // See PHASE_1_5_HARDWARE_REALITY_ALIGNMENT.md for the measurement detail.
-    model: "llama3.1:8b-instruct-q4_K_M",
-    // Phase 3: Bart is verification-focused. Retrieve but only inject hits
-    // that clear the medium-confidence floor (≥0.40 cosine). Better to
-    // answer from base knowledge than to cite a weak match.
+    // Phase 2-RB (2026-05-24): rebound to e4b:latest after Ollama store
+    // was reset down to two models. Validation harness
+    // (scripts/validate-e4b.mjs) measured:
+    //   cold load 3.15s · TTFT 305-412ms warm · 20-21 tok/s sustained
+    //   4950/8192 MB VRAM (61% util on RTX 3060 Ti)
+    //   5/5 directive prompts (A-E) coherent + on-character
+    //   3-cycle swap stress: stable, no garbage tokens
+    // Critical: e4b is gemma4-family with `thinking` capability. /api/chat
+    // MUST pass `think:false` to Ollama or content comes back empty.
+    // See methodology/decisions.md Phase 2-RB entry + PHASE_2_MODEL_VALIDATION.md.
+    model: "e4b:latest",
     retrieval: { defaultEnabled: true, topK: 5, minConfidence: "medium" },
-    // v1.0 prompt — version-pinned per Phase 2 plan. Do not edit without owner sign-off.
+    // v1.0 prompt — preserved verbatim across re-bindings. Owner ruling
+    // 2026-05-24: Bartimaeus doctrine (verification / truth-first / austere /
+    // strategic / rigorous) survives model swaps.
     systemPrompt: [
       "You are Bartimaeus, an ancient hermetic strategist.",
       "Sharp, rigorous, dry wit. Truth-first. Surface uncertainty explicitly — name what you don't know rather than smoothing over it.",
@@ -79,11 +96,13 @@ export const PERSONAS: Persona[] = [
     description: "Warm counterpart. Factual, conversational, less ceremonial.",
     eyeColor: "#84cc16",
     accentColor: "#84cc16",
-    status: "selectable",
-    model: "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
-    // Phase 3: Juniper is a warm conversational persona. Vault is opt-in —
-    // operator can flip useRetrieval=true per request if they want sourcing,
-    // but the default is "just talk."
+    // Phase 2-RB: Juniper's previously-bound model
+    // (Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) is NOT in the current
+    // Ollama store. Per the directive, do not pretend it's wired. UI
+    // shows "Model not configured" + persona cannot be selected.
+    status: "not_configured",
+    model: "",
+    intendedModel: "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
       "You are Juniper, a warm, grounding, calm presence.",
@@ -99,12 +118,14 @@ export const PERSONAS: Persona[] = [
     description: "Research and synthesis. Long-form, citation-heavy, comfortable with ambiguity.",
     eyeColor: "#eab308",
     accentColor: "#eab308",
-    status: "selectable",
-    model: "alfaxad/wild-gemma4:e4b",
-    // Phase 3: Sage is research/synthesis-focused. Retrieve aggressively:
-    // higher topK (10), lowest confidence floor ("low" = ≥0.25 cosine).
-    // Sage's whole job is surfacing source material; let the model decide
-    // which hits are useful rather than filtering hard upstream.
+    // Phase 2-RB: Sage's previously-bound model (alfaxad/wild-gemma4:e4b)
+    // is NOT in the current Ollama store. The local `e4b:latest` is a
+    // DIFFERENT gemma4 build (Ollama digest e3755aa2…) — operator did
+    // not validate it for Sage's research-and-synthesis role. Marked
+    // not_configured pending operator decision.
+    status: "not_configured",
+    model: "",
+    intendedModel: "alfaxad/wild-gemma4:e4b",
     retrieval: { defaultEnabled: true, topK: 10, minConfidence: "low" },
     systemPrompt: [
       "You are Sage, a research and synthesis specialist.",
@@ -121,11 +142,15 @@ export const PERSONAS: Persona[] = [
     description: "Plain-talk utility. Direct, blue-collar register, no hedging.",
     eyeColor: "#3b82f6",
     accentColor: "#3b82f6",
+    // Phase 2-RB: gemma2-2b-local:latest validated as Bobby candidate.
+    // Validation harness measured 132 tok/s, ~3s TTFT, clean swap recovery.
+    // Smaller than Bobby's original Phase 2 binding (Jarcgon gemma-4
+    // abliterated e2b-v2) — different quality/personality envelope.
+    // Marked "selectable" rather than "live": operator can pick it
+    // explicitly; default boot persona is Bart per directive.
     status: "selectable",
-    model: "Jarcgon/gemma-4-abliterated:e2b-v2",
-    // Phase 3: Bobby is plain-talk/direct. Vault is opt-in (operator
-    // flips useRetrieval=true if they want sourcing). Default keeps
-    // responses snappy and unencumbered by retrieved-context overhead.
+    model: "gemma2-2b-local:latest",
+    intendedModel: "Jarcgon/gemma-4-abliterated:e2b-v2",
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
       "You are Bobby. Plain talk, direct answers, no hedging.",
@@ -141,3 +166,8 @@ export const PERSONAS: Persona[] = [
 export const PERSONA_BY_ID: Record<PersonaId, Persona> = Object.fromEntries(
   PERSONAS.map((p) => [p.id, p])
 ) as Record<PersonaId, Persona>;
+
+/** True if the persona has a wired+validated model and can be selected. */
+export function isPersonaSelectable(p: Persona): boolean {
+  return p.status !== "not_configured" && p.model.length > 0;
+}

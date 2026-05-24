@@ -1,0 +1,181 @@
+{
+  "timestamp": "2026-05-24T23:26:44.015Z",
+  "ollamaHost": "http://127.0.0.1:11434",
+  "primary": {
+    "model": "e4b:latest",
+    "tests": {
+      "coldLoad": {
+        "loadDurationMs": 3152.899,
+        "totalMs": 8405,
+        "timeToFirstTokenMs": 3412,
+        "tokensPerSec": 20.386354858184568,
+        "evalCount": 100,
+        "vramAfterLoad": {
+          "usedMB": 4950,
+          "totalMB": 8192
+        },
+        "promptKey": "A",
+        "response": "I am Bartimaeus, an ancient hermetic strategist and scholar. My role is to analyze situations and provide strategic advice based on rigorous analysis, drawing from historical examples and established principles of war and conflict. My advice is meant to guide you towards optimal outcomes, though I will always preface my pronouncements with the necessary caveats regarding the fallibility of human judgment and the unpredictability of variables outside our control. I have no divine omniscience, merely accumulated knowledge and a keen eye for pattern recognition.",
+        "thinkingChars": 0,
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "promptB": {
+        "totalMs": 12863,
+        "timeToFirstTokenMs": 308,
+        "tokensPerSec": 20.210803715158054,
+        "evalCount": 249,
+        "response": "The notion that truth is more important than comfort is a widely held belief, but it's important to understand why this is the case.\n\nFirst, truth is the basis of understanding. It allows us to see the world as it really is, free from the distortions of our own biases and emotions. When we are faced with uncomfortable truths, we are forced to confront our own ignorance and the limitations of our own perception. This can be difficult, but it is also necessary for our intellectual and spiritual growth.\n\nSecondly, truth allows us to make informed decisions. If we base our actions on falsehoods, we are likely to make poor choices that will lead to negative consequences. By understanding the truth, we can make choices that are more likely to lead to positive outcomes, both for ourselves and for those around us.\n\nFurthermore, truth builds trust. When we are honest and transparent, we are more likely to be trusted by others. This is crucial for building strong relationships, both personal and professional.\n\nUltimately, the value of truth is not that it is comfortable, but that it is necessary. While the truth can be painful, it is also the foundation upon which we can build a more accurate and meaningful understanding of the world.",
+        "thinkingChars": 0,
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "promptC": {
+        "totalMs": 1718,
+        "timeToFirstTokenMs": 305,
+        "tokensPerSec": 20.97845845078859,
+        "evalCount": 29,
+        "response": "In plain English, ARGOS is an AI workstation that stores all of its data locally on your device, rather than relying on cloud storage.",
+        "thinkingChars": 0,
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "promptD": {
+        "totalMs": 16387,
+        "timeToFirstTokenMs": 305,
+        "tokensPerSec": 19.19671929967834,
+        "evalCount": 303,
+        "response": "I disagree with the claim that all live data is automatically useful. The utility of live data depends entirely on the context in which it is collected and analyzed.\n\nFirst, raw data often contains noise, bias, and missing values that must be cleaned and preprocessed before it can be used effectively. For instance, a stream of sensor readings may contain outliers due to sensor malfunctions or environmental interference, which can skew any analysis performed on the data. Without proper filtering and cleaning, any conclusions drawn from such data may be misleading.\n\nSecond, the relevance of live data depends on the specific problem or question being addressed. Data that seems useful in one context may be irrelevant or even misleading in another. For example, a stream of real-time stock prices may be useful for high-frequency trading, but may be irrelevant for analyzing long-term market trends. Similarly, a stream of user location data may be useful for analyzing traffic patterns, but may be irrelevant for understanding user preferences in e-commerce.\n\nThird, the sheer volume of live data can make it difficult to extract meaningful insights. Data streams can generate massive amounts of data that can overwhelm analytical tools and human analysts alike. Without appropriate sampling, aggregation, or dimensionality reduction techniques, it can be difficult to extract meaningful insights from the data.\n\nIn conclusion, while live data can be a valuable resource for a wide range of applications, it is not automatically useful. It requires careful collection, processing, and analysis in the context of the specific problem being addressed.",
+        "thinkingChars": 0,
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "promptE": {
+        "totalMs": 2539,
+        "timeToFirstTokenMs": 412,
+        "tokensPerSec": 19.72650689703634,
+        "evalCount": 41,
+        "response": "I should verify the sensor's physical calibration status, check the data stream for outliers or sudden spikes that might indicate data corruption, and cross-reference the reading with a secondary sensor or manual measurement.",
+        "thinkingChars": 0,
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "swapRecovery": {
+        "totalSwapCycleMs": 9539,
+        "fallbackTtftMs": 2678,
+        "primaryReloadTtftMs": 3483,
+        "primaryReloadResponse": "Loaded. Ready to proceed.",
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "threeSwapRepeat": [
+        {
+          "iteration": 1,
+          "primaryTtft": 3843,
+          "primaryDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "fallbackTtft": 3364,
+          "fallbackDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "primaryResponse": "Unknown. Waiting.",
+          "fallbackResponse": "Ready. \n"
+        },
+        {
+          "iteration": 2,
+          "primaryTtft": 3895,
+          "primaryDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "fallbackTtft": 3399,
+          "fallbackDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "primaryResponse": "Uncertain. Needs context.",
+          "fallbackResponse": "Operational. \n"
+        },
+        {
+          "iteration": 3,
+          "primaryTtft": 3687,
+          "primaryDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "fallbackTtft": 3633,
+          "fallbackDegen": {
+            "degenerate": false,
+            "reason": null
+          },
+          "primaryResponse": "Unknown. Needs data.",
+          "fallbackResponse": "Online. \n"
+        }
+      ]
+    }
+  },
+  "fallback": {
+    "model": "gemma2-2b-local:latest",
+    "tests": {
+      "basic": {
+        "loadDurationMs": 2782.0633,
+        "totalMs": 2850,
+        "timeToFirstTokenMs": 2817,
+        "tokensPerSec": 132.67790448517655,
+        "vramAfterLoad": {
+          "usedMB": 5040,
+          "totalMB": 8192
+        },
+        "response": "4 \n",
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      },
+      "swapBack": {
+        "totalMs": 3639,
+        "timeToFirstTokenMs": 3598,
+        "response": "Proceed. \n",
+        "degenerate": {
+          "degenerate": false,
+          "reason": null
+        }
+      }
+    }
+  },
+  "preFlight": {
+    "loadedAtStart": [
+      {
+        "name": "gemma2-2b-local:latest",
+        "sizeBytes": 2667750400
+      }
+    ],
+    "baselineVram": {
+      "usedMB": 4888,
+      "totalMB": 8192
+    }
+  },
+  "summary": {
+    "primaryGarbageFree": true,
+    "fallbackGarbageFree": true,
+    "primaryUsableLatency": true,
+    "swapRecoverable": true,
+    "threeSwapStable": true,
+    "recommendedBinding": "Bartimaeus → e4b:latest"
+  }
+}

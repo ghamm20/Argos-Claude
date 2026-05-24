@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
+import { PERSONA_BY_ID, isPersonaSelectable, type PersonaId } from "@/lib/personas";
 import { retrieve } from "@/lib/vault/store";
 import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
@@ -140,6 +140,22 @@ export async function POST(req: NextRequest) {
   if (!persona) {
     return jsonError(400, `unknown persona: ${String(body.personaId)}`);
   }
+  // Phase 2-RB: refuse to dispatch a chat for a persona whose model
+  // isn't wired. Doctrine: never fake a model-backed persona; let the
+  // UI render an honest "not configured" state instead of a vague
+  // 404 from Ollama. The store's switchPersona already blocks the UI
+  // path; this is the API-level enforcement.
+  if (!isPersonaSelectable(persona)) {
+    return jsonError(
+      503,
+      `persona "${persona.name}" is not configured (no validated model wired)`,
+      {
+        hint: persona.intendedModel
+          ? `Install ${persona.intendedModel} into Ollama and re-bind in lib/personas.ts, or pick a different persona.`
+          : `No intended model recorded. Pick a different persona.`,
+      }
+    );
+  }
 
   // ---- Retrieval (graceful: never breaks the chat) ----
   // Phase 3: persona's retrieval config supplies defaults when request
@@ -198,6 +214,17 @@ export async function POST(req: NextRequest) {
         model: body.model,
         messages: ollamaMessages,
         stream: true,
+        // Phase 2-RB CRITICAL: e4b (gemma4 family) ships with the
+        // `thinking` capability enabled by default — if `think` is not
+        // explicitly false, the model emits its entire response into
+        // `message.thinking` and zero into `message.content`. We display
+        // content only; thinking traces aren't part of the persona UX.
+        // Validation harness (scripts/validate-e4b.mjs) caught this:
+        // prompt D returned 637 tokens at 21 tok/s with empty content
+        // until `think:false` was added.
+        // Safe for non-thinking models too — Ollama ignores the flag.
+        think: false,
+        options: { think: false },
       }),
       signal: controller.signal,
     });

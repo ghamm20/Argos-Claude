@@ -1,0 +1,77 @@
+﻿
+=== Pre-flight ===
+loaded models at start: gemma2-2b-local:latest
+baseline VRAM: 4888 / 8192 MB
+unloading gemma2-2b-local:latest…
+
+=== Primary: e4b:latest (Bartimaeus candidate) ===
+
+[T1] Cold load — first call after unload
+  load=3153ms ttft=3412ms total=8405ms tps=20.4
+  VRAM after load: 4950/8192 MB
+  [degenerate-check] {"degenerate":false,"reason":null}
+  --- RESPONSE A ---
+I am Bartimaeus, an ancient hermetic strategist and scholar. My role is to analyze situations and provide strategic advice based on rigorous analysis, drawing from historical examples and established principles of war and conflict. My advice is meant to guide you towards optimal outcomes, though I will always preface my pronouncements with the necessary caveats regarding the fallibility of human judgment and the unpredictability of variables outside our control. I have no divine omniscience, merely accumulated knowledge and a keen eye for pattern recognition.
+  ---
+
+[T2-T5] Warm — prompts B,C,D,E
+  prompt B: ttft=308ms total=12863ms tps=20.2 degen=false
+  --- RESPONSE B ---
+The notion that truth is more important than comfort is a widely held belief, but it's important to understand why this is the case.
+
+First, truth is the basis of understanding. It allows us to see the world as it really is, free from the distortions of our own biases and emotions. When we are faced with uncomfortable truths, we are forced to confront our own ignorance and the limitations of our own perception. This can be difficult, but it is also necessary for our intellectual and spiritual growth.
+
+Secondly, truth allows us to make informed decisions. If we base our actions on falsehoods, w
+  ---
+  prompt C: ttft=305ms total=1718ms tps=21.0 degen=false
+  --- RESPONSE C ---
+In plain English, ARGOS is an AI workstation that stores all of its data locally on your device, rather than relying on cloud storage.
+  ---
+  prompt D: ttft=305ms total=16387ms tps=19.2 degen=false
+  --- RESPONSE D ---
+I disagree with the claim that all live data is automatically useful. The utility of live data depends entirely on the context in which it is collected and analyzed.
+
+First, raw data often contains noise, bias, and missing values that must be cleaned and preprocessed before it can be used effectively. For instance, a stream of sensor readings may contain outliers due to sensor malfunctions or environmental interference, which can skew any analysis performed on the data. Without proper filtering and cleaning, any conclusions drawn from such data may be misleading.
+
+Second, the relevance of live
+  ---
+  prompt E: ttft=412ms total=2539ms tps=19.7 degen=false
+  --- RESPONSE E ---
+I should verify the sensor's physical calibration status, check the data stream for outliers or sudden spikes that might indicate data corruption, and cross-reference the reading with a secondary sensor or manual measurement.
+  ---
+
+=== Model swap stress ===
+
+[T6] Swap → gemma2-2b-local → back to e4b
+  swap to fallback ttft=2678ms
+  cycle=9539ms reload ttft=3483ms degen=false
+  reload response: Loaded. Ready to proceed.
+
+[T7] 3 sequential swap cycles
+  cycle 1: primary=3843ms fallback=3364ms — primary="Unknown. Waiting.…" fallback="Ready.…"
+  cycle 2: primary=3895ms fallback=3399ms — primary="Uncertain. Needs context.…" fallback="Operational.…"
+  cycle 3: primary=3687ms fallback=3633ms — primary="Unknown. Needs data.…" fallback="Online.…"
+
+=== Fallback: gemma2-2b-local:latest (lightweight diagnostic / Bobby candidate) ===
+
+[F1] basic load + short response
+  load=2782ms ttft=2817ms total=2850ms tps=132.7 VRAM=5040/8192 MB
+  response: 4
+
+[F2] swap away to e4b, back to gemma2-2b
+  ttft=3598ms total=3639ms degen=false
+  response: Proceed.
+
+=== Summary ===
+{
+  "primaryGarbageFree": true,
+  "fallbackGarbageFree": true,
+  "primaryUsableLatency": true,
+  "swapRecoverable": true,
+  "threeSwapStable": true,
+  "recommendedBinding": "Bartimaeus → e4b:latest"
+}
+
+Full report written to validation-e4b.json
+
+VALIDATION PASS — primary model is safe to wire.

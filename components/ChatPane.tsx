@@ -265,6 +265,43 @@ export function ChatPane() {
     };
   }, [setVaultCounts]);
 
+  // Phase 2-RB: hydrate last-used persona from settings.json on mount.
+  // Persists across app restarts. If the persisted persona is now
+  // not_configured (model was removed), switchPersona's own gate
+  // surfaces a visible "Model not configured" state — no fake binding.
+  // Only fires once per mount; persona changes during the session are
+  // saved by PersonaSection.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/api/settings", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as { defaultPersona?: string };
+        if (cancelled) return;
+        const persistedId = j.defaultPersona;
+        if (
+          persistedId &&
+          (persistedId === "bartimaeus" ||
+            persistedId === "juniper" ||
+            persistedId === "sage" ||
+            persistedId === "bobby") &&
+          persistedId !== useArgos.getState().currentPersonaId
+        ) {
+          // Fire-and-forget switchPersona — sets the UI immediately
+          // and warms the model in the background. Failures show in
+          // the HUD's Status row, not as a thrown error here.
+          void useArgos.getState().switchPersona(persistedId);
+        }
+      } catch {
+        /* offline, ignore — defaults already applied */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!scrollerRef.current) return;
     scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;

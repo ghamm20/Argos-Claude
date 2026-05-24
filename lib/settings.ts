@@ -13,10 +13,14 @@ export interface PersistedSettings {
   updatedAt: number;
 }
 
+// Phase 2-RB defaults — Bart on e4b:latest is the only "live" persona
+// at boot on this hardware. See PHASE_2_MODEL_VALIDATION.md for the
+// measurement evidence. Operator-overridable via the Settings UI;
+// writes to ARGOS_ROOT/config/settings.json (atomic temp+rename).
 const DEFAULT_SETTINGS: PersistedSettings = {
   version: SETTINGS_VERSION,
   defaultPersona: "bartimaeus",
-  defaultModel: "llama3.1:8b-instruct-q4_K_M",
+  defaultModel: "e4b:latest",
   updatedAt: 0,
 };
 

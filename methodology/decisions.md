@@ -6,6 +6,60 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-24 — Phase 2-RB: persona rebinding to current Ollama store (`e4b:latest`)
+
+**Decision:** Rebind Bartimaeus (the lone "live" persona at boot) to `e4b:latest` — the gemma4-family 7.5B Q4_K_M model currently in the local Ollama store. Bind Bobby to `gemma2-2b-local:latest` as a "selectable" (not live) fast/diagnostic persona. Mark Juniper + Sage as `not_configured` because their previously-bound models (`hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive` and `alfaxad/wild-gemma4:e4b`) are no longer in the local store. Add a `PersonaStatus = "live" | "selectable" | "not_configured"` type + an `isPersonaSelectable()` helper. Wire a visible-state model-swap UX: `Loading <persona>…` → `Model ready` (1500 ms autoclear) → `Failed` / `Model not configured`. Set `think: false` globally in `/api/chat` because e4b is gemma4-thinking-capable and defaults to emitting all output via `message.thinking` (zero `message.content`).
+
+**Context:** Directive 2026-05-24 from owner. The previous persona roster (set during Phase 2 hardware-aligned) bound four models that are NOT in the current local Ollama store — the owner's Ollama installation was reset down to two models. Without rebinding, the app would 500 on every persona at boot. The directive explicitly forbids pulling new models, faking model-backed personas, or wiring unstable models. Phases 3/4/5 are untouched per the directive's negative clauses.
+
+**Alternatives considered:**
+
+- **Wire all four personas to one model and disambiguate via system prompts only.** Rejected: violates the directive's "don't pretend to be model-backed unless wired and validated" rule. The personality differences are real but the operator should never be confused about whether Juniper is wired to a Juniper-character model or a Bart-character one wearing a costume.
+- **Default boot persona = Bobby (Phase 1.5 measured-fastest decision).** Rejected for this phase: directive explicitly says "Wire Bartimaeus to e4b:latest" and treats Bart as the primary. The Phase-1.5 "Bobby is the daily-driver primary" rule from prior memory still stands but is overridden by this directive's explicit Bart wiring.
+- **Mark Juniper/Sage as `live` and bind them to `e4b:latest` too.** Rejected: their original models were chosen for distinct voice (warm-9B for Juniper, research-tuned for Sage). Binding both to a 7.5B gemma4 would erase the meaningful difference and mislead the operator about what's actually different between personas.
+- **Drop Juniper + Sage from the persona registry entirely.** Rejected: removing them is destructive; the directive only asks for them to be "honest stub/not-configured." Keeping them visible (greyed out, with `intendedModel` + install instructions) preserves the intent + makes re-wiring a one-line change.
+- **Default `think: true` for thinking-capable models and surface the thinking trace in the UI.** Rejected: doctrine is "personas don't expose reasoning traces unless explicitly desired." All four current personas want clean content. Future personas can opt in via a `Persona.exposeThinking` flag (filed; not built).
+- **Show modelStatus persistently in the HUD (always-rendered row, even when idle).** Rejected: when nothing is happening, an empty/idle row is just clutter. The transient-row pattern (only render when `modelStatus !== "idle"`) keeps the HUD clean during steady-state usage.
+- **Pre-warm the model on app startup (before any chat).** Considered. Decided: not yet — adds boot complexity and forces a 3-9s wait every launcher invocation. The current "warm on first persona-switch / first chat" pattern is already responsive (3s to first token after cold load) and matches what the operator does anyway.
+- **Update launcher.bat to also re-warm on startup.** Rejected per directive ("Leave deployed payload launcher.bat in place for now").
+
+**Implementation:**
+
+- `lib/personas.ts` — `PersonaStatus` type, `isPersonaSelectable()`, `Persona.intendedModel` field. Bart's system prompt preserved verbatim across the rebinding (per directive's "preserve Bartimaeus doctrine"). Juniper + Sage retain their original system prompts so re-wiring is a single-line change.
+- `lib/store.ts` — `ModelStatus` type. `switchPersona` is now async, drives the visible state transitions via `/api/model/warm`. AVAILABLE_MODELS trimmed to the 2 installed + validated models.
+- `lib/settings.ts` — `DEFAULT_SETTINGS.defaultPersona = "bartimaeus"`, `defaultModel = "e4b:latest"`.
+- `app/api/chat/route.ts` — `think: false` (Critical: e4b defaults to thinking-only output). 503 + hint when persona is `not_configured`.
+- `app/api/model/warm/route.ts` — NEW. POSTs empty prompt to Ollama `/api/generate` with `keep_alive:60m` to force load + report timings.
+- `components/settings/PersonaSection.tsx` — "Live" badge, "Model not configured" pill (amber), disabled radio + inline install instructions for unconfigured personas.
+- `components/settings/ModelSection.tsx` — MODEL_LABELS rewritten for the two current models with validated tok/s + TTFT numbers.
+- `components/HUD.tsx` — Status row visible only when `modelStatus !== "idle"`. Color-coded (amber/emerald/red).
+- `components/ChatPane.tsx` — On mount, hydrate `defaultPersona` from `/api/settings` and `switchPersona` if it differs. Persistence-across-restart.
+- `scripts/validate-e4b.mjs` — NEW. 10-point validation harness: cold load, warm prompts A-E, swap stress, 3-cycle repeat, fallback model, thinking-channel capture. Writes `validation-e4b.json`. Exit 0 on PASS.
+
+**Result:**
+
+- `npm run lint` clean · `npm run typecheck` clean · `npm run verify` 7/7 PASS · `npm run build` clean
+- e4b cold load 3.15 s · warm TTFT 305–412 ms · 19–21 tok/s · VRAM 4950/8192 MB
+- 5/5 directive prompts coherent + on-character (Bart's strategist tone preserved)
+- 3-cycle swap stress stable, no garbage tokens
+- Live `/api/chat` round-trip with `think:false` returns 553 chars of on-character content for the previously-empty prompt D
+- `npm run voice:smoke` 23/23 PASS — no Phase 5 regression
+- Acceptance criteria 14/14 PASS per directive
+
+**Self-correction noted:**
+
+First validation pass had `think` defaulted to ON. Prompt D ("push back on this claim") returned 637 tokens at 21 tok/s with empty `message.content` — all output went to `message.thinking` (gemma4's reasoning channel). Harness flagged as `degenerate: empty`. Investigated; confirmed it was the thinking channel, not a model failure. Fixed in both the harness AND `/api/chat` route so production traffic gets clean content. This is a model-capability surface we hadn't faced before — any future thinking-capable model (gemma3+, qwen3+, o-style) will need the same gate. Filed as a doctrine pattern.
+
+**Out of scope (filed for later):**
+
+- `Persona.exposeThinking` flag for personas that genuinely want reasoning-trace visibility
+- Rebinding Sage to `e4b:latest` (acceptable to operator) — held as `not_configured` per "no faking" rule, awaits owner approval
+- Rebinding Juniper to `gemma2-2b-local:latest` (would lose warm-9B character) — same gate
+- Re-pulling `nomic-embed-text` to restore Phase 3 vault retrieval — operator's one-command fix; documented in PHASE_2_REPORT.md owner-action items
+- Power Mode / 5090 deferred mapping recorded in PHASE_2_MODEL_VALIDATION.md
+
+---
+
 ## 2026-05-24 — Phase 5: voice I/O scaffold (Whisper STT + Kokoro TTS)
 
 **Decision:** Ship the **scaffold** for voice in/out — API routes, UI buttons, audit-chain wiring, launcher presence-check, smoke test, operator documentation — with the binaries and models **operator-supplied** (not bundled in the repo). When the binaries are absent the UI silently hides the mic + play buttons and the audit chain logs nothing; nothing in the chat surface changes. When the operator installs per `docs/VOICE.md`, voice lights up without code edits.
