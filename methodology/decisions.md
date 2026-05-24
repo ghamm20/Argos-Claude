@@ -6,6 +6,51 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-24 — Phase 3: per-persona retrieval + confidence labels + auto-ingest
+
+**Decision:** Three related changes to the vault subsystem:
+
+1. **Retrieval hits gain a `confidence: "high" | "medium" | "low"` bucket** derived from cosine score. Thresholds: 0.55 / 0.40 / 0.25. Hits below 0.25 are filtered out before reaching the chat route or HUD.
+
+2. **Each persona declares a `retrieval` policy** in `lib/personas.ts`:
+   - Bart: `defaultEnabled=true, topK=5, minConfidence="medium"` (verification posture)
+   - Sage: `defaultEnabled=true, topK=10, minConfidence="low"` (research posture)
+   - Bobby: `defaultEnabled=false, topK=3, minConfidence="low"` (opt-in)
+   - Juniper: `defaultEnabled=false, topK=3, minConfidence="low"` (opt-in)
+
+   Request body's `useRetrieval` / `topK` still wins when set — operator override always honored.
+
+3. **New `POST /api/vault/auto-ingest`** scans `$ARGOS_ROOT/vault/dropbox/`, ingests every supported file (`.txt/.md/.pdf/.docx`), archives originals to `dropbox/.processed/<ts>__<filename>`. Errored files land in `dropbox/.errored/`. Launcher calls it after `[4/4] ARGOS ready`. Operator workflow becomes: drop file → relaunch → indexed.
+
+**Context:** Phase 3 v1.0 plan items (`PHASE_PLAN_NOTES.md` § Phase 3 + `methodology/argos-defined.md` Phase 3). The vault already had: ingest pipeline, /api/vault/upload route, cosine retrieval, citation tail, HUD retrieval row. What was missing: confidence labels, per-persona behavior, dropbox auto-ingest, scaling docs.
+
+**Alternatives considered:**
+
+- **Score thresholds at 0.65 / 0.50 / 0.35 (stricter).** Rejected after testing — nomic-embed-text rarely scores above 0.65 even for strong topical matches. Would have classified almost everything as "low." 0.55 / 0.40 / 0.25 better matches the observed distribution.
+- **Per-persona behavior as request-time middleware vs persona-level config.** Rejected: the persona owns its identity, including how it uses context. Config-on-persona is the natural home. Middleware would scatter the policy.
+- **Auto-ingest as Node script (`scripts/auto-ingest-dropbox.mjs`).** Rejected: would require shipping `scripts/` in the deployed payload, breaking the existing migration which only ships `.next/`. API route is cleaner — already in the Next.js build, called via curl after launcher ready.
+- **Auto-ingest on file-system watch (always-on).** Rejected: ARGOS doesn't run a watcher process; the launcher is the lifecycle boundary. Per-launch ingest is the right cadence for a single-operator personal tool.
+- **Confidence as a separate analytical layer NOT exposed in HUD.** Rejected: operator wants to know whether the model is citing strong or weak matches at a glance. HUD breakdown ("Last: 4 hits · 2H 1M 1L") makes this visible without scrolling.
+
+**Implementation:**
+
+- `lib/vault/types.ts` — `Confidence` type, `CONFIDENCE_THRESHOLDS`, `scoreToConfidence()`, `confidence` field on `RetrievalHit`.
+- `lib/vault/store.ts` — `retrieve(query, topK, opts)` adds `opts.minConfidence`. Hits filtered cheaply before allocation.
+- `lib/personas.ts` — `PersonaRetrieval` interface, per-persona config inline alongside `model` field.
+- `app/api/chat/route.ts` — uses `persona.retrieval` for defaults; honors body overrides; passes `minConfidence` to `retrieve()`; includes `confidence` in retrieval-tail.
+- `lib/store.ts` — `CitedHit.confidence` field (optional for back-compat with persisted sessions).
+- `components/HUD.tsx` — retrieval row gains confidence breakdown `"NH NM NL"`.
+- `app/api/vault/auto-ingest/route.ts` — new POST + GET handlers; idempotent; archives.
+- `launchers/launcher.{bat,sh,command}` — post-ready curl call to auto-ingest, logged to launcher.log, fire-and-forget (failure doesn't block ARGOS startup).
+- `docs/RETRIEVAL.md` — new doc covering architecture, thresholds, per-persona policy, scaling ceiling (~1000 docs / ~50k chunks before vector-DB upgrade).
+- Seed corpus shipped via `vault/dropbox/` on deployed payloads (Doctrine, Seven Rules, Scope Lock, Operations, ARGOS-defined — 5 docs, ~29 KB). First-launch auto-ingest indexes them.
+
+**Why this one:** Three changes that compound. Per-persona policy makes operator's "which persona answers" choice also a "how much sourcing" choice — natural. Confidence labels let operator see at a glance whether the model is citing strong matches; visible upstream when shifting from research to plain-talk. Auto-ingest closes the bulk-seeding gap that previously required manual UI uploads one-at-a-time.
+
+**Scope note:** No new dependencies. No new Ollama calls (still just `embedText` via the existing `/api/embeddings`). The vault index format is unchanged — existing persisted chunks remain readable. Back-compat with persisted ChatMessage.retrievalHits arrays that lack `confidence` (the field is optional in lib/store.ts:CitedHit).
+
+---
+
 ## 2026-05-23 — Phase 2 hardware-aligned: Bart → llama 8B, Bobby = primary default
 
 **Decision:** Three persona-defaults changes, all driven by Phase 1.5's measured operating envelope on the actual RTX 3060 Ti / 8 GB VRAM rig:

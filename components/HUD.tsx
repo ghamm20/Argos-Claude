@@ -147,6 +147,20 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     .find((msg) => msg.role === "assistant");
   const lastHitCount = lastAssistant?.retrievalHits?.length ?? 0;
 
+  // Phase 3: confidence breakdown for the last assistant's retrieval set.
+  // Counts hits by bucket so HUD can show "Last: 4 hits · 2H 1M 1L".
+  const confidenceCounts = { high: 0, medium: 0, low: 0 };
+  if (lastAssistant?.retrievalHits) {
+    for (const h of lastAssistant.retrievalHits) {
+      const c = h.confidence;
+      if (c === "high" || c === "medium" || c === "low") confidenceCounts[c]++;
+    }
+  }
+  const confBreakdown =
+    confidenceCounts.high + confidenceCounts.medium + confidenceCounts.low > 0
+      ? ` · ${confidenceCounts.high}H ${confidenceCounts.medium}M ${confidenceCounts.low}L`
+      : "";
+
   let retrievalLabel: string;
   let retrievalAccent: string | undefined;
   if (isStreaming && vault.docs > 0 && lastHitCount === 0) {
@@ -155,7 +169,7 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   } else if (vault.docs === 0) {
     retrievalLabel = "empty (no vault)";
   } else if (lastHitCount > 0) {
-    retrievalLabel = `Last: ${lastHitCount} hit${lastHitCount === 1 ? "" : "s"}`;
+    retrievalLabel = `Last: ${lastHitCount} hit${lastHitCount === 1 ? "" : "s"}${confBreakdown}`;
   } else {
     retrievalLabel = `ON (${vault.docs} ${vault.docs === 1 ? "doc" : "docs"}, ${vault.chunks} ${vault.chunks === 1 ? "chunk" : "chunks"})`;
   }

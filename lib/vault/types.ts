@@ -56,10 +56,34 @@ export interface IngestProgress {
   error?: string;
 }
 
+/**
+ * Phase 3 confidence buckets for retrieval hits.
+ * Thresholds calibrated to nomic-embed-text cosine score distribution.
+ * See docs/RETRIEVAL.md for derivation + how to tune.
+ */
+export type Confidence = "high" | "medium" | "low";
+
+export const CONFIDENCE_THRESHOLDS = {
+  high: 0.55,
+  medium: 0.40,
+  low: 0.25,
+  // hits scoring below `low` are filtered out before returning.
+} as const;
+
+export function scoreToConfidence(score: number): Confidence | null {
+  if (score >= CONFIDENCE_THRESHOLDS.high) return "high";
+  if (score >= CONFIDENCE_THRESHOLDS.medium) return "medium";
+  if (score >= CONFIDENCE_THRESHOLDS.low) return "low";
+  return null;
+}
+
 export interface RetrievalHit {
   chunkId: string;
   text: string;
   score: number;
+  /** Phase 3: bucketed confidence. null only if explicitly disabled; the
+   *  store's retrieve() filters below-low hits before returning. */
+  confidence: Confidence;
   docId: string;
   filename: string;
   chunkIndex: number;

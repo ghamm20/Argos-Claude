@@ -187,6 +187,11 @@ else
   echo "  (substitute the host's LAN IP if accessing from a different box)"
 fi
 
+# Phase 3: auto-ingest any files dropped in vault/dropbox/
+# Fire-and-forget; output logged.
+echo "Auto-ingest check (vault/dropbox)..."
+curl -fs --max-time 60 -X POST "http://127.0.0.1:$NEXT_PORT/api/vault/auto-ingest" >>"$LAUNCHER_LOG" 2>&1 || true
+
 
 # ============================================================
 #  Tool integration (post-Phase-1 patch) — cross-platform note

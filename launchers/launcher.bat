@@ -200,6 +200,14 @@ echo [4/4] ARGOS ready - opening browser at http://127.0.0.1:%NEXT_PORT%
 start "" http://127.0.0.1:%NEXT_PORT%
 
 REM ============================================================
+REM  Phase 3: auto-ingest any files dropped in vault/dropbox/
+REM  Fire-and-forget — failure here does not block ARGOS startup.
+REM  Output goes to logs/launcher.log; UI also shows the new docs.
+REM ============================================================
+echo Auto-ingest check (vault/dropbox)...
+curl -fs --max-time 60 -X POST http://127.0.0.1:%NEXT_PORT%/api/vault/auto-ingest 1>>"%LAUNCHER_LOG%" 2>>"%LAUNCHER_LOG%"
+
+REM ============================================================
 REM  Tool integration (post-Phase-1 patch)
 REM  Boots Oculus + SuperAGI in background via docker compose.
 REM  Skips silently if Docker Desktop isn't running.

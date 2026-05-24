@@ -193,6 +193,11 @@ done
 echo "[4/4] ARGOS ready — opening browser at http://127.0.0.1:$NEXT_PORT"
 open "http://127.0.0.1:$NEXT_PORT" 2>/dev/null || true
 
+# Phase 3: auto-ingest any files dropped in vault/dropbox/
+# Fire-and-forget; output logged.
+echo "Auto-ingest check (vault/dropbox)..."
+curl -fs --max-time 60 -X POST "http://127.0.0.1:$NEXT_PORT/api/vault/auto-ingest" >>"$LAUNCHER_LOG" 2>&1 || true
+
 
 # ============================================================
 #  Tool integration (post-Phase-1 patch) — cross-platform note

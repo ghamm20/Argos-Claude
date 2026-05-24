@@ -17,12 +17,14 @@ import { embedText } from "./embed";
 import type {
   Chunk,
   ChunksFile,
+  Confidence,
   DocumentMeta,
   IngestProgress,
   IngestResult,
   Manifest,
   RetrievalHit,
 } from "./types";
+import { CONFIDENCE_THRESHOLDS, scoreToConfidence } from "./types";
 
 const MANIFEST_VERSION = 1;
 const CHUNKS_VERSION = 1;
@@ -192,10 +194,21 @@ export async function totalChunkCount(): Promise<number> {
   return docs.reduce((sum, d) => sum + d.chunkCount, 0);
 }
 
+export interface RetrieveOpts {
+  /** Floor confidence — hits below this bucket are filtered out.
+   *  Default "low" (= CONFIDENCE_THRESHOLDS.low, ≈ 0.25). Set "medium"
+   *  for verification-style personas, "low" for research-style. */
+  minConfidence?: Confidence;
+}
+
 export async function retrieve(
   query: string,
-  topK = 5
+  topK = 5,
+  opts: RetrieveOpts = {}
 ): Promise<RetrievalHit[]> {
+  const minConf: Confidence = opts.minConfidence ?? "low";
+  const floor = CONFIDENCE_THRESHOLDS[minConf];
+
   const qvec = await embedText(query);
   const manifest = await readManifest();
 
@@ -211,10 +224,17 @@ export async function retrieve(
     }
     for (const ch of chunksFile.chunks) {
       const score = cosine(qvec, ch.embedding);
+      // Filter below-floor hits cheaply BEFORE allocating the hit object.
+      if (score < floor) continue;
+      const conf = scoreToConfidence(score);
+      // scoreToConfidence returns null only when score < CONFIDENCE_THRESHOLDS.low;
+      // we already filtered by floor (which is >= that) so conf is non-null.
+      if (!conf) continue;
       hits.push({
         chunkId: ch.chunkId,
         text: ch.text,
         score,
+        confidence: conf,
         docId: ch.metadata.docId,
         filename: doc.filename,
         chunkIndex: ch.metadata.chunkIndex,

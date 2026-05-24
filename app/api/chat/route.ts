@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { retrieve } from "@/lib/vault/store";
-import type { RetrievalHit } from "@/lib/vault/types";
+import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getOllamaBase } from "@/lib/ollama-config";
 
@@ -51,6 +51,8 @@ interface CitedHit {
   filename: string;
   chunkIndex: number;
   score: number;
+  /** Phase 3: bucketed confidence — "high" | "medium" | "low" */
+  confidence: Confidence;
   docId: string;
 }
 
@@ -140,18 +142,26 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- Retrieval (graceful: never breaks the chat) ----
-  const wantsRetrieval = body.useRetrieval !== false;
+  // Phase 3: persona's retrieval config supplies defaults when request
+  // body doesn't override. Explicit body fields still win — operator can
+  // force retrieval on a normally-no-retrieval persona (Bobby/Juniper),
+  // or bump topK above persona default, or disable on Bart/Sage.
+  const wantsRetrieval =
+    body.useRetrieval !== undefined
+      ? body.useRetrieval !== false
+      : persona.retrieval.defaultEnabled;
   const topK =
     typeof body.topK === "number" && body.topK > 0 && body.topK <= 50
       ? body.topK
-      : DEFAULT_TOP_K;
+      : persona.retrieval.topK ?? DEFAULT_TOP_K;
+  const minConfidence = persona.retrieval.minConfidence;
 
   let retrievedHits: RetrievalHit[] = [];
   let retrievalError: string | null = null;
   const queryText = wantsRetrieval ? lastUserText(body.messages) : null;
   if (wantsRetrieval && queryText) {
     try {
-      retrievedHits = await retrieve(queryText, topK);
+      retrievedHits = await retrieve(queryText, topK, { minConfidence });
     } catch (e) {
       retrievalError = e instanceof Error ? e.message : String(e);
       console.warn(`[chat] retrieval failed, continuing without context: ${retrievalError}`);
@@ -230,6 +240,7 @@ export async function POST(req: NextRequest) {
     filename: h.filename,
     chunkIndex: h.chunkIndex,
     score: h.score,
+    confidence: h.confidence,
     docId: h.docId,
   }));
   const retrievalEvent = {

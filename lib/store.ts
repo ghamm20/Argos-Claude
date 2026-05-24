@@ -10,6 +10,9 @@ export interface CitedHit {
   filename: string;
   chunkIndex: number;
   score: number;
+  /** Phase 3: bucketed confidence — "high" | "medium" | "low".
+   *  Optional for back-compat with persisted sessions that don't carry it. */
+  confidence?: "high" | "medium" | "low";
   docId: string;
 }
 
