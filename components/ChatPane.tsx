@@ -6,6 +6,8 @@ import { Download, History, Trash2 } from "lucide-react";
 import { Eye } from "./Eye";
 import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
+import { MicButton } from "./voice/MicButton";
+import { PlayButton } from "./voice/PlayButton";
 import {
   useArgos,
   type ChatMessage,
@@ -63,9 +65,11 @@ function renderWithCitations(
 function MessageBubble({
   msg,
   onPillClick,
+  sessionId,
 }: {
   msg: ChatMessage;
   onPillClick: (hit: CitedHit) => void;
+  sessionId?: string;
 }) {
   const isUser = msg.role === "user";
   const persona = msg.personaId ? PERSONA_BY_ID[msg.personaId] : undefined;
@@ -93,10 +97,19 @@ function MessageBubble({
       >
         {persona && (
           <div
-            className="text-[10px] uppercase tracking-[0.18em] mb-1.5"
+            className="text-[10px] uppercase tracking-[0.18em] mb-1.5 flex items-center"
             style={{ color: accent }}
           >
-            {persona.name}
+            <span>{persona.name}</span>
+            {/* TTS only on finalized, non-errored assistant turns. The
+                PlayButton self-hides if the server reports TTS off. */}
+            {!msg.errored && !msg.isStreaming && msg.content.length > 0 && (
+              <PlayButton
+                text={msg.content}
+                accent={accent}
+                sessionId={sessionId}
+              />
+            )}
           </div>
         )}
         {msg.errored ? (
@@ -167,6 +180,7 @@ export function ChatPane() {
   const personaName = useArgos((s) => s.personaName());
   const accent = useArgos((s) => s.accentColor());
   const vaultDocs = useArgos((s) => s.vaultStatus.docs);
+  const currentSessionId = useArgos((s) => s.currentSessionId);
 
   const appendMessage = useArgos((s) => s.appendMessage);
   const appendToLastMessage = useArgos((s) => s.appendToLastMessage);
@@ -594,6 +608,7 @@ export function ChatPane() {
                 key={m.id}
                 msg={m}
                 onPillClick={(hit) => setActiveCitation(hit)}
+                sessionId={currentSessionId ?? undefined}
               />
             ))
           )}
@@ -615,7 +630,18 @@ export function ChatPane() {
                   ? "Streaming…"
                   : `Message ${personaName} (Cmd/Ctrl+Enter to send)`
               }
-              className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-24 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
+              className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-32 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
+            />
+            {/* Mic input — self-hides when STT unavailable. Appends
+                transcribed text to the current draft so the operator
+                can dictate then type a tweak before sending. */}
+            <MicButton
+              accent={accent}
+              disabled={isStreaming}
+              sessionId={currentSessionId ?? undefined}
+              onTranscribed={(text) =>
+                setDraft((d) => (d.trim() ? `${d.trimEnd()} ${text}` : text))
+              }
             />
             {isStreaming ? (
               <button

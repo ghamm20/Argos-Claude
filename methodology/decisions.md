@@ -6,6 +6,70 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-24 — Phase 5: voice I/O scaffold (Whisper STT + Kokoro TTS)
+
+**Decision:** Ship the **scaffold** for voice in/out — API routes, UI buttons, audit-chain wiring, launcher presence-check, smoke test, operator documentation — with the binaries and models **operator-supplied** (not bundled in the repo). When the binaries are absent the UI silently hides the mic + play buttons and the audit chain logs nothing; nothing in the chat surface changes. When the operator installs per `docs/VOICE.md`, voice lights up without code edits.
+
+Three new API routes: `GET /api/voice/status` (capability snapshot), `POST /api/voice/stt` (audio/wav → text), `POST /api/voice/tts` (text → audio/wav). Two new audit kinds: `voice.transcribed` and `voice.spoken`. Two new UI components: `MicButton` on the composer, `PlayButton` on each completed assistant message. Browser-side audio capture done with `MediaRecorder` + `OfflineAudioContext` for resample-to-16kHz-mono-PCM WAV — no ffmpeg / no native audio dep.
+
+**Context:** v1.0 plan Phase 5 ("Voice — Kokoro TTS + Whisper STT"). Voice is foundational for the long-running operator UX (drive-time / hands-busy / accessibility) and the Tier 7 (Workflow) future, but the actual neural model binaries are large platform-specific blobs that violate the "no new deps without owner approval + USB-native non-negotiable" working rules if bundled silently. The scaffold-first stance respects both: shipping the wiring is real progress, and the install step is the operator's explicit consent for the binaries.
+
+**Alternatives considered:**
+
+- **Bundle whisper.cpp + Kokoro binaries + GGML/ONNX model files in the repo.** Rejected: 100–300 MB platform-specific blobs; "no new deps without owner approval" rule; bloats the repo + payload mirror by a multiple. Documented install path is one command per binary.
+- **Python whisper / faster-whisper.** Rejected: requires Python runtime + pip ecosystem (CUDA/cuDNN drama) — fights the single-binary doctrine. whisper.cpp is the right call: one C++ binary, GGML quantized models, CPU-only viable.
+- **OpenAI Whisper API.** Rejected: violates Rule 2 (no remote service deps) + Rule 5 (no remote fetch). v1.0 is local-only.
+- **Cloud TTS (ElevenLabs, Azure, etc).** Same rejection — local-only.
+- **Coqui XTTS / Piper / Bark for TTS.** Considered. Kokoro picked for size (82M params vs 200M+) + speed (real-time CPU on modest hardware) + permissive license. Piper is a viable v1.1 swap if Kokoros forks become flaky.
+- **Server-side ffmpeg to convert browser webm/opus → WAV.** Rejected: adds ffmpeg as a hard binary dep + an extra subprocess per STT call. Browser-side `OfflineAudioContext` does decode + resample + mono-mix natively in every modern browser; no dep needed.
+- **MediaRecorder → stream to server, decode/resample server-side via libraries.** Same rejection — wants a node-side audio library (e.g. wavefile / fluent-ffmpeg). Browser-side is cleaner.
+- **WAV via AudioWorklet vs OfflineAudioContext.** AudioWorklet is more flexible (real-time monitoring, VAD hooks) but heavier (separate worker file + message channel). OfflineAudioContext fits the "record then encode then send" model perfectly and is one file. Worklet can come if/when we add real-time partial transcripts.
+- **stdin/stdout streaming with whisper-cli + kokoros.** Rejected: both binaries support file-in/file-out reliably across forks; stdin/stdout flag set varies. Disk-temp via `state/voice/cache/` is Rule-5 compliant and one short `await fsp.writeFile` away.
+- **Tap-to-record vs hold-to-record on the mic button.** Tap-to-record chosen — on a laptop trackpad, hold is awkward; tap lets the operator pause to compose without losing the buffer. 60s safety cap auto-stops if the operator walks away.
+- **Block chat while STT/TTS in flight.** Rejected: voice is best-effort + auxiliary. The composer mic + per-message play button operate independently of the chat stream. A failed STT shows an error icon on the mic for 3.5s then resets; the operator can keep typing.
+- **One global audio player vs per-button audio elements.** Per-button + module-level "currently playing" registry chosen. Starting a new playback aborts any in-flight fetch + pauses any playing audio. Simpler than a global player context.
+- **Always-render buttons (always visible, error on click if voice off).** Rejected: violates the "no surprise UI" doctrine. The capability probe is one `fs.exists()` so cheap; hiding the buttons when unavailable matches the same pattern as the ToolsDock (foundation tools show "pending" rather than fake-online).
+- **Mandatory voice presence-check in launcher (refuse to boot if missing).** Rejected: voice is optional. Launcher prints status (`whisper STT missing | kokoro TTS missing`) and continues; ARGOS works fine without it.
+
+**Implementation:**
+
+- `lib/voice.ts` — `voiceToolsDir()` / `whisperDir()` / `kokoroDir()` / `voiceCacheDir()` (all under `ARGOS_ROOT`), `whisperBinary()` / `kokoroBinary()` cross-platform probes, `whisperModel()` / `kokoroModel()` / `kokoroVoices()` async file probes, `detectVoiceCapability()` snapshot with structured `reason` for the UI, `spawnVoice(bin, args, opts)` with 60s default timeout, `transcribeWav(wav, opts)` + `synthesizeText(text, opts)` end-to-end pipelines.
+- `lib/voice-client.ts` — `startVoiceRecorder()` → handle with `stop()` returning 16 kHz mono PCM WAV `ArrayBuffer`, `convertToWav16k(input)` decode+resample+mono+encode, `transcribeBlob(wav, opts)` + `synthesizeToBlob(text, opts)` wrappers around the routes.
+- `lib/audit.ts` — added `voice.transcribed` and `voice.spoken` to `AuditKind` union.
+- `app/api/voice/status/route.ts` — GET capability probe; always 200 (so UI can read `available` safely).
+- `app/api/voice/stt/route.ts` — POST audio/wav → JSON. 503 capability gate, 413 size gate (25 MB), 500 on spawn failure. Best-effort `voice.transcribed` audit append on success.
+- `app/api/voice/tts/route.ts` — POST JSON → audio/wav. 503 capability gate, 400 empty/oversized text gate (4000 char cap), 500 on spawn failure. Best-effort `voice.spoken` audit append.
+- `components/voice/MicButton.tsx` — capability-gated mic on composer. Idle / recording (red pulsing) / transcribing (spinning) / error (red mic-off) visual states. 60s max recording auto-stop.
+- `components/voice/PlayButton.tsx` — capability-gated per-message TTS. Module-level "currently playing" registry preempts older playbacks. Idle / loading (spinner) / playing (pause icon) / error (alert) states.
+- `components/ChatPane.tsx` — imports both, threads `currentSessionId` for audit scoping, MicButton in composer pre-Send/Stop area, PlayButton inline with persona name label on completed assistant messages.
+- `launchers/launcher.bat/.sh/.command` — read-only presence-check after the existing auto-ingest block. Logs `[voice] whisper STT ready|missing | kokoro TTS ready|missing`. Never blocks boot.
+- `docs/VOICE.md` — architecture + install guide + API reference + failure-mode table. Operator's single-stop install reference.
+- `scripts/smoke-voice.mjs` — two layers: A (scaffold; always runs) verifies routes exist, status returns valid snapshot, 503 paths return `hint`, audit kinds declared, Rule-5 compliance via source-grep; B (roundtrip; only if binaries installed) actually exercises STT + TTS + audit chain.
+- `package.json` — `voice:smoke` + `voice:smoke-offline` script aliases.
+
+**Result:**
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm run verify` 7/7 PASS (no new launcher / path / dep violations)
+- `npm run build` clean — three new Dynamic routes registered: `/api/voice/status`, `/api/voice/stt`, `/api/voice/tts`
+- `npm run voice:smoke-offline` 12/12 PASS (scaffold-only)
+- `npm run voice:smoke` against a live server with no binaries installed: 23/23 PASS, 5 skipped (binary-dependent paths correctly skipped)
+
+**Self-correction noted during build:**
+
+The first smoke pass used Node's built-in `fetch()` (undici). On Windows Node 24, undici's keepalive socket pool occasionally raises a libuv `UV_HANDLE_CLOSING` assertion AFTER `process.exit()` — the smoke prints PASS but exits with code 9. Switched the smoke's HTTP transport to `node:http` with `keepAlive: false` + explicit `agent.destroy()` — clean exit 0 on PASS. The functional smoke result was always correct; the bug was a node-internal teardown issue, not a smoke logic error. Logged as a node-on-Windows quirk worth knowing for any future smoke scripts.
+
+**Out of scope (filed for later):**
+
+- Voice activity detection / real-time partial transcripts (would want AudioWorklet + streaming whisper; v1.1+)
+- Multi-language UI (whisper handles language hint already; UI doesn't expose it)
+- Voice settings panel (operator can edit `kokoro` voice via API; no settings UI yet)
+- Voice receipts as a UI affordance (audit entries are queryable via `/api/receipts?sessionId=` but no dedicated voice-history UI)
+- Real-time interruption ("hey ARGOS, stop") — wake-word infrastructure is its own Phase
+
+---
+
 ## 2026-05-24 — Phase 4: hash-chained audit + tamper-evident session export
 
 **Decision:** Ship the foundation Tier 11 of the autonomy ladder will write to: append-only JSONL chain at `$ARGOS_ROOT/state/audit/chain.jsonl`, each entry hash-linked to its predecessor; a `GET /api/receipts` query endpoint; a `GET /api/chat/sessions/:id/export` JSON bundle; a standalone verifier (`scripts/verify-audit-chain.mjs` + `npm run audit:verify`) that walks the chain and detects tampering without needing the framework runtime.

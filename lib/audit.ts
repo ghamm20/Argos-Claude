@@ -35,6 +35,9 @@ export type AuditKind =
   | "vault.auto-ingest"
   | "settings.changed"
   | "persona.switched"
+  // Phase 5: voice I/O
+  | "voice.transcribed"
+  | "voice.spoken"
   // Reserved for later phases — declared here so the type is stable:
   | "research.fetched"
   | "memory.written"

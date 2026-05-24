@@ -192,6 +192,29 @@ fi
 echo "Auto-ingest check (vault/dropbox)..."
 curl -fs --max-time 60 -X POST "http://127.0.0.1:$NEXT_PORT/api/vault/auto-ingest" >>"$LAUNCHER_LOG" 2>&1 || true
 
+# ============================================================
+# Phase 5: voice presence-check.
+# Read-only probe — never spawns the binaries. If either tool is
+# missing, the UI hides its button + the audit chain logs no
+# voice events. Operator installs per tools/voice/README.md.
+# ============================================================
+voice_whisper="missing"
+voice_kokoro="missing"
+for cand in whisper-cli whisper main; do
+  if [ -x "$ARGOS_ROOT/tools/voice/whisper/$cand" ]; then
+    voice_whisper="ready"
+    break
+  fi
+done
+for cand in kokoros kokoro kokoro-tts; do
+  if [ -x "$ARGOS_ROOT/tools/voice/kokoro/$cand" ]; then
+    voice_kokoro="ready"
+    break
+  fi
+done
+echo "[voice] whisper STT $voice_whisper  |  kokoro TTS $voice_kokoro"
+echo "Voice scan: whisper=$voice_whisper kokoro=$voice_kokoro" >>"$LAUNCHER_LOG"
+
 
 # ============================================================
 #  Tool integration (post-Phase-1 patch) — cross-platform note

@@ -208,6 +208,23 @@ echo Auto-ingest check (vault/dropbox)...
 curl -fs --max-time 60 -X POST http://127.0.0.1:%NEXT_PORT%/api/vault/auto-ingest 1>>"%LAUNCHER_LOG%" 2>>"%LAUNCHER_LOG%"
 
 REM ============================================================
+REM  Phase 5: voice presence-check.
+REM  Pure read-only probe — never spawns the binaries. If either
+REM  whisper or kokoro is missing, the UI hides its button + the
+REM  audit chain logs no voice events. Operator installs per
+REM  tools/voice/README.md.
+REM ============================================================
+set "VOICE_WHISPER=missing"
+set "VOICE_KOKORO=missing"
+if exist "%ARGOS_ROOT%\tools\voice\whisper\whisper-cli.exe" set "VOICE_WHISPER=ready"
+if exist "%ARGOS_ROOT%\tools\voice\whisper\whisper.exe"     set "VOICE_WHISPER=ready"
+if exist "%ARGOS_ROOT%\tools\voice\whisper\main.exe"        set "VOICE_WHISPER=ready"
+if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoros.exe"      set "VOICE_KOKORO=ready"
+if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoro.exe"       set "VOICE_KOKORO=ready"
+echo [voice] whisper STT %VOICE_WHISPER%  ^|  kokoro TTS %VOICE_KOKORO%
+echo Voice scan: whisper=%VOICE_WHISPER% kokoro=%VOICE_KOKORO% >>"%LAUNCHER_LOG%"
+
+REM ============================================================
 REM  Tool integration (post-Phase-1 patch)
 REM  Boots Oculus + SuperAGI in background via docker compose.
 REM  Skips silently if Docker Desktop isn't running.
