@@ -6,6 +6,36 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-23 — Phase 2 hardware-aligned: Bart → llama 8B, Bobby = primary default
+
+**Decision:** Three persona-defaults changes, all driven by Phase 1.5's measured operating envelope on the actual RTX 3060 Ti / 8 GB VRAM rig:
+
+1. **Bartimaeus rebinds from `huihui_ai/gpt-oss-abliterated:20b` to `llama3.1:8b-instruct-q4_K_M`** for the active v1.0 runtime. The 20B remains in `AVAILABLE_MODELS` for Power Mode opt-in queries; it does not power the default Bart persona on 8 GB hardware.
+2. **`DEFAULT_MODEL` (`lib/store.ts`) becomes Bobby's model** (`Jarcgon/gemma-4-abliterated:e2b-v2`). Bobby measured 31 tok/s + stable across 5-cycle swap stress — the rig's fastest stable persona.
+3. **`currentPersonaId` initial state becomes `"bobby"`**, making Bobby the first-launch landing persona.
+
+**Context:** The v1.0 plan locked the four persona-model bindings as "intentional choices — do not swap without owner approval." Phase 1.5 (`PHASE_1_5_HARDWARE_REALITY_ALIGNMENT.md`) measured those bindings against the actual 8 GB VRAM and found Bart's 20B model operates at 8 tok/s with 39% GPU offload — slow but stable (Task B confirmed the "degraded calls 2-4" reading was a classifier artifact). Owner explicitly approved the rebind in the Phase 1.5 directive, with Bobby specifically locked as "primary default LLM per measurement data."
+
+**Alternatives considered:**
+- Keep 20B for Bart, accept the latency. Rejected: 25-300s per-prompt wall on chat surface defeats interactive UX.
+- Move 20B to a CPU-only path. Rejected: Phase 1.5 § 5 measured CPU-fallback at 7.7 tok/s — essentially same speed as partial-GPU. No upside; same latency cap.
+- Drop the 20B from `AVAILABLE_MODELS` entirely. Rejected: removes Power Mode option. Keep it; just don't bind it to a default persona.
+- Default to Bart on first launch with 20B model. Rejected by Phase 1.5 + Bobby-default directive: Bobby's responsiveness is the better landing experience; Bart available one click away.
+- Default to Sage. Rejected: Sage emits JSON-wrapped output by default (Phase 1.5 § 2 finding) — not ideal for a first-launch greeting.
+
+**Implementation:**
+- `lib/personas.ts`: Bart's `model` field changes to `llama3.1:8b-instruct-q4_K_M`. Inline comment cross-references the Phase 1.5 evidence and the Power Mode reservation.
+- `lib/store.ts`: `DEFAULT_MODEL` constant + `currentPersonaId` initial state both change. Comments cross-reference the Bobby-default memory entry and Phase 1.5 report.
+- `AVAILABLE_MODELS` unchanged — still includes the 20B, the HauhauCS Qwen3.5, the gemma4 pair, llama 8B, qwen 3B. Persona binding is per-persona; the model registry stays full.
+- `lib/hardware.ts` unchanged — its ≥16 GB tier still recommends the 20B (correct for a 24+ GB rig); the 6-15 GB tier still recommends llama 8B (now coincidentally = Bart's new binding). Hardware recommendation is independent of persona bindings.
+- Juniper persona definition NOT touched (owner re-pulling the model in parallel; the persona binding string is still valid, just the blob is being refreshed).
+
+**Why this one:** Plan + measurement align. The 20B binding was a paper choice; the 8 GB VRAM is the real constraint. Bobby-default surfaces the rig's strongest stable performer first; Bart available without losing the strategic-persona option. 5090 / Power Mode branch is the future home for the 20B-as-Bart restoration.
+
+**Scope note:** This is a planned-then-measured rebind, not a doctrine drift. The owner-approval requirement on "model integrity" was honored: owner explicitly locked the changes after Phase 1.5 measurement evidence. Recorded here so the decision is visible to any future Claude session reading the log.
+
+---
+
 ## 2026-05-22 — Port fallback + log rotation in launchers (Phase 1 of v1.0)
 
 **Decision:** All three launchers (`launcher.bat`, `launcher.sh`, `launcher.command`) gain (a) port pre-flight with fallback (Ollama 11434→11435, Next.js 7799→7800) and (b) pre-spawn log rotation at 10 MB with 3 generations (`.1`, `.2`, `.3`).

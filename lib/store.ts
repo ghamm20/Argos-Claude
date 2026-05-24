@@ -59,7 +59,13 @@ const EMPTY_VAULT: VaultStatus = {
 // owner-specified canonical set; llama3.1:8b + qwen2.5:3b retained as
 // fallbacks for low-VRAM / non-NVIDIA hardware tiers driven by
 // lib/hardware.ts. nomic-embed-text isn't a chat model — vault only.
-const DEFAULT_MODEL = "huihui_ai/gpt-oss-abliterated:20b";
+//
+// Phase 2 hardware-aligned (Phase 1.5 evidence): DEFAULT_MODEL is Bobby's
+// model. Bobby measured 31 tok/s + stable across swap-stress on 8 GB
+// VRAM — the rig's "primary daily-driver." Pairs with currentPersonaId
+// default = "bobby" below. See project-argos-bobby-default memory entry
+// and PHASE_1_5_HARDWARE_REALITY_ALIGNMENT.md.
+const DEFAULT_MODEL = "Jarcgon/gemma-4-abliterated:e2b-v2";
 export const AVAILABLE_MODELS: readonly string[] = [
   // Persona-bound (Phase 2)
   "huihui_ai/gpt-oss-abliterated:20b",                                  // Bartimaeus
@@ -123,7 +129,11 @@ interface ArgosState {
 }
 
 export const useArgos = create<ArgosState>((set, get) => ({
-  currentPersonaId: "bartimaeus",
+  // Phase 2 hardware-aligned default: Bobby is the primary persona at first
+  // launch (locked decision based on Phase 1.5 measurement — fastest stable
+  // persona on 8 GB VRAM). Operator can switch to Bart/Sage/Juniper anytime;
+  // the switch auto-rebinds currentModel to the persona's bound model.
+  currentPersonaId: "bobby",
   currentModel: DEFAULT_MODEL,
   currentTab: "chat",
   messages: [],

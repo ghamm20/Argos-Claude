@@ -27,7 +27,15 @@ export const PERSONAS: Persona[] = [
     eyeColor: "#10b981",
     accentColor: "#10b981",
     status: "live",
-    model: "huihui_ai/gpt-oss-abliterated:20b",
+    // Phase 2 hardware-aligned rebind (Phase 1.5 evidence):
+    //   - Original plan model `huihui_ai/gpt-oss-abliterated:20b` measured 8 tok/s
+    //     and partial-offload (39% on GPU) on 8 GB VRAM. Operationally too slow
+    //     for daily-driver interactive use.
+    //   - llama3.1:8b-instruct-q4_K_M fits 93% on GPU on this rig and is the
+    //     workhorse for Bart's strategic/verification role until the 5090 lands.
+    //   - The 20B remains in AVAILABLE_MODELS for Power Mode opt-in queries.
+    // See PHASE_1_5_HARDWARE_REALITY_ALIGNMENT.md for the measurement detail.
+    model: "llama3.1:8b-instruct-q4_K_M",
     // v1.0 prompt — version-pinned per Phase 2 plan. Do not edit without owner sign-off.
     systemPrompt: [
       "You are Bartimaeus, an ancient hermetic strategist.",
