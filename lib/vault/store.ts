@@ -14,6 +14,7 @@ import {
 import { extractText } from "./extract";
 import { chunkText } from "./chunk";
 import { embedText } from "./embed";
+import { appendAudit } from "../audit";
 import type {
   Chunk,
   ChunksFile,
@@ -160,6 +161,23 @@ export async function ingest(
     embeddingDurationMs,
   };
   opts.onProgress?.({ stage: "done", result });
+
+  // Phase 4 audit: record ingest event. Best-effort; never breaks ingest.
+  try {
+    await appendAudit("vault.ingested", {
+      docId,
+      filename,
+      sha256,
+      byteSize: buf.length,
+      chunkCount: chunks.length,
+      durationMs: Math.round(result.durationMs),
+    });
+  } catch (auditErr) {
+    console.warn(
+      `[vault] audit append failed (non-fatal): ${(auditErr as Error).message}`
+    );
+  }
+
   return result;
 }
 
@@ -186,6 +204,20 @@ export async function deleteDocument(docId: string): Promise<boolean> {
 
   manifest.documents = manifest.documents.filter((d) => d.id !== docId);
   await writeManifest(manifest);
+
+  // Phase 4 audit: record delete. Best-effort.
+  try {
+    await appendAudit("vault.deleted", {
+      docId,
+      filename: doc.filename,
+      chunkCount: doc.chunkCount,
+    });
+  } catch (auditErr) {
+    console.warn(
+      `[vault] audit append failed (non-fatal): ${(auditErr as Error).message}`
+    );
+  }
+
   return true;
 }
 

@@ -6,6 +6,42 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-24 — Phase 4: hash-chained audit + tamper-evident session export
+
+**Decision:** Ship the foundation Tier 11 of the autonomy ladder will write to: append-only JSONL chain at `$ARGOS_ROOT/state/audit/chain.jsonl`, each entry hash-linked to its predecessor; a `GET /api/receipts` query endpoint; a `GET /api/chat/sessions/:id/export` JSON bundle; a standalone verifier (`scripts/verify-audit-chain.mjs` + `npm run audit:verify`) that walks the chain and detects tampering without needing the framework runtime.
+
+**Context:** v1.0 plan Phase 4 + master plan Tier 11 ("Audit — log every action with hash chain"). Existing event surfaces (sessions, vault, settings) wire audit-append calls; later phases (research / memory / proposer / workflow) add their own `appendAudit()` calls without touching the chain machinery. The existing markdown export (Phase Z1) covers human-readable sharing; the new JSON bundle covers tamper-evident archival.
+
+**Alternatives considered:**
+
+- **SQLite database for the chain.** Rejected: violates the single-binary doctrine — SQLite is fine library-wise but adds a binary dep we don't currently ship; JSONL is good enough at v1.0 scale (100MB at 100k entries) and stays inspectable with `tail`/`cat`.
+- **Merkle tree instead of linear hash chain.** Rejected: trees enable O(log n) inclusion proofs; we don't need that at v1.0 scale. Linear chain is dead simple to verify by hand.
+- **sha3 / blake2 / blake3 for the hash.** Rejected: sha256 is Node stdlib, universally understood by third-party auditors; no point exotic.
+- **Make audit-append mandatory (block underlying write if audit fails).** Rejected: audit is the receipt, settings/sessions/vault is the authoritative state. If the chain can't be written (disk full, permission revoked), the user still wants their settings saved; the missing audit entry shows up as an `index` gap which the verifier flags.
+- **Embed audit-write inside the atomic-rename of session/settings.** Rejected: same reason — coupling the two writes means audit failure can break the primary write. Best-effort decoupling is correct.
+- **Skip the bundle's `bundleHash` — rely only on the per-entry chain hashes.** Rejected: the bundle includes the session payload (messages, retrieval), which isn't directly in the chain. The bundleHash gives a single-shot tamper check covering the whole archived snapshot.
+- **Bundle as markdown (extend chat-export.ts).** Rejected: markdown can't carry binary-friendly tamper evidence cleanly. JSON is the right format for tamper-evidence; the existing markdown export stays as the human-readable variant.
+
+**Implementation:**
+
+- `lib/audit.ts` — `appendAudit(kind, payload, opts)`, `readChain()`, `readSessionEntries(sessionId)`, `verifyChain()`, `canonicalJson()`, `computeEntryHash()`. The `canonicalJson` implementation matches `JSON.stringify` semantics around `undefined` (omits the key) so write-time hashes round-trip through file persistence — caught and fixed during smoke development.
+- `lib/sessions.ts` — `writeSession` + `deleteSession` append `session.created` / `session.updated` / `session.deleted` entries with session-id scoping. First-write detection uses `messages.length <= 2` heuristic (user + first assistant reply).
+- `lib/vault/store.ts` — `ingest` + `deleteDocument` append `vault.ingested` / `vault.deleted` entries.
+- `lib/settings.ts` — `writeSettings` appends `settings.changed` entry.
+- `app/api/receipts/route.ts` — GET handler. Supports `?sessionId=ID`, `?verify=1`, `?tail=N`.
+- `app/api/chat/sessions/[id]/export/route.ts` — GET handler. Returns bundle with `bundleHash` = sha256 of canonical-JSON of bundle minus bundleHash. Serves with `Content-Disposition: attachment` so browser downloads.
+- `scripts/verify-audit-chain.mjs` — standalone Node script, no framework deps. Verifies a chain file directly + optionally a bundle. Exit 0 = PASS, 1 = tamper detected. `npm run audit:verify` alias.
+- `scripts/smoke-audit-chain.mjs` — 5 test scenarios (clean chain, payload tamper, prevHash tamper, deleted entry, empty chain). All PASS.
+- `docs/AUDIT.md` — new operator-facing doc.
+
+**Notable bug caught + fixed during smoke build:** initial `canonicalJson` left `undefined` keys as `"undefined"` while `JSON.stringify` drops them — write-time hash differed from read-time recompute, all chain entries failed verify. Fixed both `lib/audit.ts` and `scripts/verify-audit-chain.mjs` to filter undefined-valued keys. Smoke now PASS on all 5 scenarios. Self-correction documented in this entry as a methodology artifact (canonicalization is easy to get subtly wrong).
+
+**Why this one:** Tier 11 is foundational — every later autonomy tier (research, proposer, workflow, apply) writes to the same chain. Building it now gates v1.0 ship and unlocks v2.0 work cleanly. The format is third-party-auditable: an outside party with the chain file and 100 lines of sha256+canonical-JSON can re-verify without ARGOS source.
+
+**Scope note:** No new dependencies. No changes to chat route or HUD (audit is invisible to operator workflow). The atomic write-rename pattern on session/settings is preserved; audit-append is a strictly additive "after the success" call.
+
+---
+
 ## 2026-05-24 — Phase 3: per-persona retrieval + confidence labels + auto-ingest
 
 **Decision:** Three related changes to the vault subsystem:

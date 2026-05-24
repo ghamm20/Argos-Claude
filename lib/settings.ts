@@ -2,6 +2,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
 import type { PersonaId } from "./personas";
+import { appendAudit } from "./audit";
 
 export const SETTINGS_VERSION = 1;
 
@@ -79,5 +80,23 @@ export async function writeSettings(
     await fh.close();
   }
   await fsp.rename(tmpPath, finalPath);
+
+  // Phase 4 audit: record settings change. Best-effort — audit append
+  // failure does NOT roll back the settings write (settings is the
+  // authoritative store; audit is the receipt).
+  try {
+    await appendAudit("settings.changed", {
+      changed: Object.keys(patch),
+      defaultPersona: next.defaultPersona,
+      defaultModel: next.defaultModel,
+    });
+  } catch (auditErr) {
+    console.warn(
+      `[settings] audit append failed (non-fatal): ${
+        (auditErr as Error).message
+      }`
+    );
+  }
+
   return next;
 }

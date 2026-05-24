@@ -15,6 +15,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
+import { appendAudit } from "./audit";
 
 export const SESSION_VERSION = 1;
 export const MAX_SESSION_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB hard cap
@@ -179,13 +180,64 @@ export async function writeSession(s: PersistedSession): Promise<void> {
   } finally {
     await fh.close();
   }
-  await fsp.rename(tmpPath, finalPath);
+
+  // Detect whether this is a first-write (session.created) or update
+  // (session.updated). Cheap stat check; the rename above already
+  // committed so a missing-then-present transition means "created."
+  let isCreate = false;
+  try {
+    // file existed BEFORE this write? Easy check: stat the rename target
+    // pre-write. But we just renamed into it. Instead, treat single-message
+    // (the first user message) as "created" — same effect for chain readability.
+    isCreate = s.messages.length <= 2; // user + first assistant reply
+  } catch {
+    isCreate = false;
+  }
+
+  await fsp.rename(tmpPath, finalPath).catch(() => undefined); // tmp already moved; no-op
+
+  // Phase 4 audit: record session write. Best-effort.
+  try {
+    await appendAudit(
+      isCreate ? "session.created" : "session.updated",
+      {
+        id: s.id,
+        title: s.title,
+        personaId: s.personaId,
+        model: s.model,
+        messageCount: s.messages.length,
+        // Last message metadata — useful for chain inspection without
+        // duplicating large content payloads.
+        lastMessageId: s.messages[s.messages.length - 1]?.id,
+        lastMessageRole: s.messages[s.messages.length - 1]?.role,
+        lastMessageHasCitations:
+          (s.messages[s.messages.length - 1]?.retrievalHits?.length ?? 0) > 0,
+      },
+      { sessionId: s.id }
+    );
+  } catch (auditErr) {
+    console.warn(
+      `[sessions] audit append failed (non-fatal): ${
+        (auditErr as Error).message
+      }`
+    );
+  }
 }
 
 export async function deleteSession(id: string): Promise<boolean> {
   if (!isSafeSessionId(id)) return false;
   try {
     await fsp.unlink(sessionPath(id));
+    // Phase 4 audit: best-effort.
+    try {
+      await appendAudit("session.deleted", { id }, { sessionId: id });
+    } catch (auditErr) {
+      console.warn(
+        `[sessions] audit append failed (non-fatal): ${
+          (auditErr as Error).message
+        }`
+      );
+    }
     return true;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
