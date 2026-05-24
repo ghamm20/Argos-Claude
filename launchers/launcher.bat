@@ -198,6 +198,41 @@ goto WAIT_NEXT
 :NEXT_READY
 echo [4/4] ARGOS ready - opening browser at http://127.0.0.1:%NEXT_PORT%
 start "" http://127.0.0.1:%NEXT_PORT%
+
+REM ============================================================
+REM  Tool integration (post-Phase-1 patch)
+REM  Boots Oculus + SuperAGI in background via docker compose.
+REM  Skips silently if Docker Desktop isn't running.
+REM  See tools/registry.json for the full tool list and LAUNCHER_PATCH.bat
+REM  in the integration package for the canonical source of this block.
+REM ============================================================
+if not defined OCULUS_ROOT      set "OCULUS_ROOT=C:\Users\Gordy\Desktop\Oculus-osint-main"
+if not defined SUPERAGI_ROOT    set "SUPERAGI_ROOT=F:\AI\SuperAGI"
+if not defined LOOKINGGLASS_ROOT set "LOOKINGGLASS_ROOT=E:\AgenticLookingGlass"
+
+docker info >nul 2>&1
+if errorlevel 1 (
+    echo [TOOLS] Docker Desktop not running. Skipping tool auto-start.
+    echo [TOOLS] Tools available via Tools Dock once Docker is up; or run start.bat manually.
+    goto :skip_tools
+)
+
+REM  cmd /c spawn pattern mirrors the OLLAMA/NEXT spawns above:
+REM  triple-quote escaping ("" inside the outer "...") tolerates paths
+REM  with spaces; < NUL detaches stdin (Phase C/E lesson, Rule 7).
+echo [5/6] Starting Oculus OSINT ^(port 3011^)...
+start "ARGOS-Oculus" /MIN cmd /c """%ARGOS_ROOT%\tools\oculus\start.bat"" < NUL 1>>""%ARGOS_ROOT%\logs\oculus.log"" 2>&1"
+
+echo [6/6] Starting SuperAGI ^(port 3002^)...
+start "ARGOS-SuperAGI" /MIN cmd /c """%ARGOS_ROOT%\tools\superagi\start.bat"" < NUL 1>>""%ARGOS_ROOT%\logs\superagi.log"" 2>&1"
+
+echo.
+echo  Tools booting in background. Status in the ARGOS Tools dock.
+echo  Oculus:   http://127.0.0.1:3011
+echo  SuperAGI: http://127.0.0.1:3002
+
+:skip_tools
+
 echo.
 echo  ARGOS is running.
 echo  Press any key to shut down ARGOS cleanly.
@@ -221,6 +256,19 @@ REM  this also kills any host-installed Ollama tray daemon - known
 REM  cost for the USB-isolated scenario where ARGOS owns Ollama
 REM  exclusively. See launchers/README.md.
 taskkill /F /IM ollama.exe >NUL 2>&1
+
+REM --- Stop tool integration (post-Phase-1 patch) ---
+REM  Idempotent: stop.bat's docker compose down is safe if tool wasn't running.
+REM  Errors swallowed so a missing/un-bootable tool can't block ARGOS shutdown.
+if exist "%ARGOS_ROOT%\tools\oculus\stop.bat" (
+    echo Stopping Oculus...
+    call "%ARGOS_ROOT%\tools\oculus\stop.bat" >NUL 2>&1
+)
+if exist "%ARGOS_ROOT%\tools\superagi\stop.bat" (
+    echo Stopping SuperAGI...
+    call "%ARGOS_ROOT%\tools\superagi\stop.bat" >NUL 2>&1
+)
+
 echo Done.
 exit /b 0
 

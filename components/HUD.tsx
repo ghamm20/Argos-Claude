@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useArgos } from "@/lib/store";
 import { TruthModeToggle } from "./TruthModeToggle";
+import { ToolsDock } from "@/components/panels/ToolsDock";
 import { ShieldCheck } from "lucide-react";
 import type { HardwareProfile } from "@/lib/hardware";
 
@@ -283,6 +284,15 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         <Row label="Build" value={`v${version}`} />
         <Row label="Uptime" value={fmtUptime(uptimeMs)} />
       </Section>
+
+      {/* Tools integration (post-Phase-1). Self-contained component that polls
+          /api/tools/status every 15s and renders tool cards by category. Sits
+          inside HUD aside as the last block — non-destructive to existing
+          telemetry layout. Move to a sibling panel later if right-rail space
+          becomes contested. */}
+      <div className="mt-4 -mx-4 -mb-5 border-t border-neutral-800/70">
+        <ToolsDock />
+      </div>
     </aside>
   );
 }

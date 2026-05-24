@@ -193,6 +193,22 @@ done
 echo "[4/4] ARGOS ready — opening browser at http://127.0.0.1:$NEXT_PORT"
 open "http://127.0.0.1:$NEXT_PORT" 2>/dev/null || true
 
+
+# ============================================================
+#  Tool integration (post-Phase-1 patch) — cross-platform note
+#
+#  The tool auto-start scripts (tools/oculus/start.bat, tools/superagi/
+#  start.bat) are Windows-only in this release. On macOS:
+#    - the ToolsDock in the UI works the same (polls /api/tools/status)
+#    - operator can boot tools manually: cd to the tool dir + docker compose up -d
+#  See tools/registry.json for the canonical tool list + ports.
+#
+#  Honest cross-platform stance: rather than fabricate .command equivalents
+#  for the Windows-specific start/stop logic, this block exists as a
+#  cross-platform doctrine marker. Add real .command tool spawns here if/when
+#  Mac operator need is real.
+# ============================================================
+
 echo ""
 echo " ARGOS is running."
 echo " Press Ctrl-C in this Terminal window to shut down ARGOS cleanly."
