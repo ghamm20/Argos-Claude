@@ -58,22 +58,28 @@ const EMPTY_VAULT: VaultStatus = {
   ingesting: null,
 };
 
-// Phase 2-RB (2026-05-24): roster reset to match the actual Ollama
-// store on this machine. The owner wiped the previous 4-model roster
-// down to two models; validation harness confirmed both are stable on
-// the RTX 3060 Ti / 8 GB VRAM hardware envelope.
+// Phase 2 (2026-05-25): full persona model assignment per owner directive.
+// Roster matches actual Ollama store on the RTX 3060 Ti / 8 GB VRAM rig.
+// One model loaded at a time; persona switch = model swap (3-8s cold,
+// acceptable).
 //
-// Bart (live default) → e4b:latest             (gemma4 7.5B Q4_K_M, 5.3 GB)
-// Bobby (selectable)  → gemma2-2b-local:latest (gemma2 2B,           1.7 GB)
-// Juniper             → not_configured (model not in store)
-// Sage                → not_configured (model not in store)
+//   Bartimaeus / Juniper → fredrezones55/Qwen3.5-...:9b   (6.5 GB) — shared
+//   Sage                 → alfaxad/wild-gemma4:e4b        (6.3 GB)
+//   Bobby                → nexusriot/Qwen3.5-...:4b       (3.4 GB)
 //
-// See PHASE_2_MODEL_VALIDATION.md for the measurement detail and
-// methodology/decisions.md for the rationale.
-const DEFAULT_MODEL = "e4b:latest";
+// DEFAULT_MODEL = Bart's model (Bart is the boot default per lib/settings.ts).
+// AVAILABLE_MODELS lists exactly what /api/chat will accept; Power Mode
+// additions land via config/persona-overrides.json (lib/persona-server.ts).
+//
+// See PHASE_2_REPORT.md for the validation runs and methodology/decisions.md
+// for the Phase 2 entry.
+const DEFAULT_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 export const AVAILABLE_MODELS: readonly string[] = [
-  "e4b:latest",                // Bartimaeus (validated, primary)
-  "gemma2-2b-local:latest",    // Bobby (validated fallback)
+  "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b", // Bart + Juniper
+  "alfaxad/wild-gemma4:e4b",                                  // Sage
+  "nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b",      // Bobby
+  // Kept for back-compat with the v1.1 work — small fallback / diagnostic.
+  "gemma2-2b-local:latest",
 ] as const;
 export function isAvailableModel(m: string): boolean {
   return AVAILABLE_MODELS.includes(m);

@@ -11,7 +11,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { appendAudit } from "@/lib/audit";
-import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
+import { resolvePersona } from "@/lib/persona-server";
+import { type PersonaId } from "@/lib/personas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,9 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const persona = PERSONA_BY_ID[body.personaId];
+  // v1.1: resolve persona with overrides applied so the audit
+  // entry reflects effective wiring (not source defaults).
+  const persona = await resolvePersona(body.personaId);
 
   try {
     const entry = await appendAudit(

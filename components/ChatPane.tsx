@@ -116,9 +116,10 @@ function MessageBubble({
           <div className="text-red-400">{msg.content}</div>
         ) : (
           <>
-            {/* Pre-first-token state: model is loading. Show explicit
-                "thinking" hint so the operator doesn't think the app
-                is frozen during the 5-10s cold-load window. */}
+            {/* Pre-first-token state: model is cold-loading or warming.
+                Phase 2 (2026-05-25) directive: surface persona name in
+                the loading label so the operator sees which model is
+                being loaded during the 3-8s cold swap. */}
             {msg.isStreaming && msg.content.length === 0 ? (
               <span
                 className="inline-flex items-center gap-1.5 text-[12px] text-neutral-500 italic"
@@ -130,7 +131,7 @@ function MessageBubble({
                   animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
                   transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
                 />
-                thinking…
+                Loading {persona?.name ?? "model"}…
               </span>
             ) : (
               <>
@@ -265,14 +266,42 @@ export function ChatPane() {
     };
   }, [setVaultCounts]);
 
-  // Phase 2-RB: hydrate last-used persona from settings.json on mount.
-  // Persists across app restarts. If the persisted persona is now
-  // not_configured (model was removed), switchPersona's own gate
-  // surfaces a visible "Model not configured" state — no fake binding.
-  // Only fires once per mount; persona changes during the session are
-  // saved by PersonaSection.
+  // Phase 2 (2026-05-25) persona persistence — two-layer:
+  //   1. localStorage `argos_active_persona` (browser-side, instant)
+  //   2. /api/settings → config/settings.json (USB-native, canonical
+  //      across machines/browsers)
+  //
+  // Resolution priority on mount: localStorage first (zero round-trip),
+  // then /api/settings (authoritative). If they disagree, settings.json
+  // wins because it's the doctrine-correct persistence — but localStorage
+  // gets the UI re-skinned faster while the fetch is in flight.
+  //
+  // Doctrine note: USB-native persistence (settings.json on the drive)
+  // is canonical. localStorage is a per-browser hint that survives a
+  // page reload but doesn't survive moving the USB to another machine.
+  // Both layers write on persona-switch (see PersonaSection.tsx +
+  // additive localStorage call wired in store.switchPersona effect).
   useEffect(() => {
     let cancelled = false;
+
+    // Layer 1 — localStorage (synchronous, no await)
+    try {
+      const localSaved = window.localStorage?.getItem("argos_active_persona");
+      if (
+        localSaved &&
+        (localSaved === "bartimaeus" ||
+          localSaved === "juniper" ||
+          localSaved === "sage" ||
+          localSaved === "bobby") &&
+        localSaved !== useArgos.getState().currentPersonaId
+      ) {
+        void useArgos.getState().switchPersona(localSaved);
+      }
+    } catch {
+      /* localStorage might be blocked (private mode); fall through to settings.json */
+    }
+
+    // Layer 2 — /api/settings (USB-native, authoritative)
     void (async () => {
       try {
         const r = await fetch("/api/settings", { cache: "no-store" });
@@ -288,9 +317,6 @@ export function ChatPane() {
             persistedId === "bobby") &&
           persistedId !== useArgos.getState().currentPersonaId
         ) {
-          // Fire-and-forget switchPersona — sets the UI immediately
-          // and warms the model in the background. Failures show in
-          // the HUD's Status row, not as a thrown error here.
           void useArgos.getState().switchPersona(persistedId);
         }
       } catch {
@@ -300,6 +326,25 @@ export function ChatPane() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Phase 2 (2026-05-25) — mirror persona changes to localStorage as
+  // they happen. Subscribes to currentPersonaId; writes the new id on
+  // every change. Synchronous; no UI feedback needed.
+  useEffect(() => {
+    const unsubscribe = useArgos.subscribe((state, prevState) => {
+      if (state.currentPersonaId !== prevState.currentPersonaId) {
+        try {
+          window.localStorage?.setItem(
+            "argos_active_persona",
+            state.currentPersonaId
+          );
+        } catch {
+          /* localStorage might be blocked; settings.json carries the canonical state */
+        }
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {

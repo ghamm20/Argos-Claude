@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { isAvailableModel, AVAILABLE_MODELS } from "@/lib/store";
+import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase } from "@/lib/ollama-config";
 
 export const runtime = "nodejs";
@@ -40,11 +41,15 @@ export async function POST(req: NextRequest) {
   if (!model) {
     return NextResponse.json({ error: "model is required" }, { status: 400 });
   }
-  if (!isAvailableModel(model)) {
+  // v1.1: allowed list = static AVAILABLE_MODELS + Power Mode additions
+  // declared via config/persona-overrides.json.
+  const overrideModels = await getAvailableModelsAdditions();
+  const effectiveAllowed = [...AVAILABLE_MODELS, ...overrideModels];
+  if (!isAvailableModel(model) && !overrideModels.includes(model)) {
     return NextResponse.json(
       {
         error: `model not in AVAILABLE_MODELS: ${model}`,
-        availableModels: AVAILABLE_MODELS,
+        availableModels: effectiveAllowed,
       },
       { status: 400 }
     );

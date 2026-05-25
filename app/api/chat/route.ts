@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
-import { PERSONA_BY_ID, isPersonaSelectable, type PersonaId } from "@/lib/personas";
+import { isPersonaSelectable, type PersonaId } from "@/lib/personas";
+import { resolvePersona } from "@/lib/persona-server";
 import { retrieve } from "@/lib/vault/store";
 import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
+import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase } from "@/lib/ollama-config";
 
 export const runtime = "nodejs";
@@ -131,12 +133,26 @@ export async function POST(req: NextRequest) {
   if (typeof body.model !== "string" || !body.model.trim()) {
     return jsonError(400, "model is required");
   }
-  if (!isAvailableModel(body.model)) {
+  // v1.1: allowed list = static AVAILABLE_MODELS + Power Mode additions.
+  // Operator can declare extra models via config/persona-overrides.json
+  // without source-code changes when running on better hardware.
+  const overrideModels = await getAvailableModelsAdditions();
+  const effectiveAllowed = [...AVAILABLE_MODELS, ...overrideModels];
+  if (!isAvailableModel(body.model) && !overrideModels.includes(body.model)) {
     return jsonError(400, `model not in allowed list: ${body.model}`, {
-      availableModels: AVAILABLE_MODELS,
+      availableModels: effectiveAllowed,
     });
   }
-  const persona = PERSONA_BY_ID[body.personaId];
+  // v1.1: resolve persona with config overrides applied. Static
+  // PERSONA_BY_ID still drives identity (name, color, prompt); only
+  // model + status + intendedModel can be overridden via
+  // config/persona-overrides.json.
+  let persona;
+  try {
+    persona = await resolvePersona(body.personaId);
+  } catch {
+    return jsonError(400, `unknown persona: ${String(body.personaId)}`);
+  }
   if (!persona) {
     return jsonError(400, `unknown persona: ${String(body.personaId)}`);
   }

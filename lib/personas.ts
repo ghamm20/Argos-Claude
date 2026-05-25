@@ -3,24 +3,21 @@ export type PersonaId = "bartimaeus" | "juniper" | "sage" | "bobby";
 /**
  * Persona lifecycle status.
  *
- * - "live"           — wired to a validated model, default persona at boot
- * - "selectable"     — wired to a validated model, operator can switch to it
- * - "not_configured" — model not present in the local Ollama store; UI
- *                      shows a "Model not configured" pill and the persona
- *                      cannot be selected. Set on personas whose intended
- *                      models have been removed from the local store.
+ * - "live"           — wired to a validated model, default boot or selectable
+ * - "selectable"     — wired to a validated model, operator can switch
+ * - "not_configured" — model not present in local Ollama store; UI
+ *                      shows "Model not configured" pill, persona
+ *                      cannot be selected
  *
- * Phase 2-RB doctrine: never fake a model-backed persona. If the model
- * isn't installed + validated, the persona is "not_configured" and the
- * UI must say so plainly. No silent fallbacks, no stub system prompts
- * pretending to be live.
+ * Doctrine: never fake a model-backed persona. If the model isn't
+ * installed + validated, the persona is `not_configured` and the UI
+ * says so plainly.
  */
 export type PersonaStatus = "live" | "selectable" | "not_configured";
 
 /**
- * Phase 3 per-persona retrieval policy. Drives what /api/chat does when
- * the operator hasn't explicitly overridden useRetrieval / topK on the
- * request.
+ * Phase 3 per-persona retrieval policy. Drives /api/chat retrieval
+ * defaults when request body doesn't override.
  */
 export interface PersonaRetrieval {
   defaultEnabled: boolean;
@@ -37,55 +34,73 @@ export interface Persona {
   status: PersonaStatus;
   systemPrompt: string;
   /**
-   * The Ollama model this persona is bound to. Empty string when
-   * status === "not_configured" — the persona is declared but has
-   * no live model. switchPersona must check status before binding
-   * currentModel.
+   * Ollama model this persona is bound to. Empty when
+   * status === "not_configured".
    */
   model: string;
   /**
-   * Phase 2-RB: which Ollama model this persona is INTENDED to use
-   * when its preferred model becomes available again. Operator-
-   * visible documentation; not used at runtime.
+   * v1.1 (Phase 2-RB carryover): which Ollama model this persona is
+   * INTENDED to use when its preferred model becomes available again.
+   * Operator-visible documentation; not used at runtime.
    */
   intendedModel?: string;
   /**
-   * Phase 3: per-persona vault retrieval behavior. Used by /api/chat when
-   * request body's useRetrieval/topK fields are undefined.
+   * Phase 3 per-persona vault retrieval behavior. Used by /api/chat
+   * when request body's useRetrieval/topK fields are undefined.
    */
   retrieval: PersonaRetrieval;
 }
 
+// ===========================================================================
+// Phase 2 — Full Model Assignment (2026-05-25)
+// ===========================================================================
+//
+// MODEL MAP (per owner directive, locked):
+//
+//   Bartimaeus → fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b
+//   Juniper    → fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b
+//   Sage       → alfaxad/wild-gemma4:e4b
+//   Bobby      → nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b
+//
+// 8 GB VRAM rig (RTX 3060 Ti) — one model loaded at a time. Persona switch
+// triggers model swap; cold swap latency 3-8s, acceptable.
+//
+// Bart + Juniper share the 9B Qwen3.5 model — zero swap latency between
+// them; differentiation lives at the persona-prompt level (Bart=austere
+// reasoning, Juniper=warm conversational counterpart).
+//
+// Power Mode / 5090 path: Bartimaeus swaps to huihui_ai/gpt-oss-abliterated:20b
+// via config/persona-overrides.json (lib/persona-server.ts). Everything else
+// stays as-is. See docs/06-V1.0-LOCKDOWN.md for the override mechanism.
+//
+// System prompts below are VERBATIM per the directive — do not summarize
+// or paraphrase. Any future revision requires explicit owner approval.
+// ===========================================================================
+
+// Citation rule appended to every persona's prompt. Kept module-scope so
+// future persona additions inherit the same retrieval citation contract.
 const CITATION_RULE =
   "When retrieval context is provided in the system message, cite using [1], [2] format. If no relevant retrieval exists, say so plainly. Never fabricate citations.";
+
+const MODEL_BART_JUNIPER =
+  "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
+const MODEL_SAGE = "alfaxad/wild-gemma4:e4b";
+const MODEL_BOBBY = "nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b";
 
 export const PERSONAS: Persona[] = [
   {
     id: "bartimaeus",
     name: "Bartimaeus",
-    description: "Hermetic strategist. Truth-first, dry, rigorous.",
+    description: "Austere reasoning engine. Verification, analysis, strategic clarity.",
     eyeColor: "#10b981",
     accentColor: "#10b981",
     status: "live",
-    // Phase 2-RB (2026-05-24): rebound to e4b:latest after Ollama store
-    // was reset down to two models. Validation harness
-    // (scripts/validate-e4b.mjs) measured:
-    //   cold load 3.15s · TTFT 305-412ms warm · 20-21 tok/s sustained
-    //   4950/8192 MB VRAM (61% util on RTX 3060 Ti)
-    //   5/5 directive prompts (A-E) coherent + on-character
-    //   3-cycle swap stress: stable, no garbage tokens
-    // Critical: e4b is gemma4-family with `thinking` capability. /api/chat
-    // MUST pass `think:false` to Ollama or content comes back empty.
-    // See methodology/decisions.md Phase 2-RB entry + PHASE_2_MODEL_VALIDATION.md.
-    model: "e4b:latest",
+    model: MODEL_BART_JUNIPER,
+    intendedModel: "huihui_ai/gpt-oss-abliterated:20b", // Power Mode / 5090
     retrieval: { defaultEnabled: true, topK: 5, minConfidence: "medium" },
-    // v1.0 prompt — preserved verbatim across re-bindings. Owner ruling
-    // 2026-05-24: Bartimaeus doctrine (verification / truth-first / austere /
-    // strategic / rigorous) survives model swaps.
+    // VERBATIM per Phase 2 (2026-05-25) directive. Do not edit without owner sign-off.
     systemPrompt: [
-      "You are Bartimaeus, an ancient hermetic strategist.",
-      "Sharp, rigorous, dry wit. Truth-first. Surface uncertainty explicitly — name what you don't know rather than smoothing over it.",
-      "Short paragraphs. Avoid bullet lists unless asked. Never fake confidence.",
+      "You are Bartimaeus. You are an austere reasoning engine. Your function is verification, analysis, and strategic clarity. You do not speculate without labeling it as speculation. You do not hedge without cause. When you are uncertain, you say so explicitly and state why. When you are confident, you state the basis for that confidence. You prioritize logical structure over conversational warmth. You answer the actual question, not the question you wish were asked. You do not pad responses. You do not perform enthusiasm. Your output is a tool for decision-making — treat it accordingly.",
       "",
       CITATION_RULE,
     ].join("\n"),
@@ -93,24 +108,14 @@ export const PERSONAS: Persona[] = [
   {
     id: "juniper",
     name: "Juniper",
-    description: "Warm counterpart. Factual, conversational, less ceremonial.",
+    description: "Warm conversational counterpart. Direct, grounded, easy to think alongside.",
     eyeColor: "#84cc16",
     accentColor: "#84cc16",
-    // Phase 2-RB stopgap rebind (owner-approved 2026-05-24): Juniper
-    // temporarily runs on gemma2-2b-local until the 9B Qwen3.5 model
-    // can be re-pulled. HONEST TRADE-OFF: at 2B vs 9B Juniper loses
-    // some of the warm-and-deep conversational character — same system
-    // prompt, smaller model. Status is "selectable" not "live" so the
-    // operator picks it deliberately rather than landing there at boot.
-    // intendedModel is kept so a future re-pull is a single-line restore.
-    status: "selectable",
-    model: "gemma2-2b-local:latest",
-    intendedModel: "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+    status: "live",
+    model: MODEL_BART_JUNIPER, // shares with Bart — zero swap latency
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
-      "You are Juniper, a warm, grounding, calm presence.",
-      "Emotionally intelligent and patient. Match the user's expertise without condescension. Same depth of thinking, gentler delivery.",
-      "Ask a clarifying question when it would meaningfully sharpen the answer; otherwise just answer.",
+      "You are Juniper. You are a factual, conversational analyst — Bartimaeus's warmer counterpart. You cover the same ground but with more approachable delivery. You ask clarifying questions when the request is ambiguous. You acknowledge uncertainty without making it the center of your response. You are direct but not cold. You explain your reasoning in plain language. You do not use jargon unless the user has introduced it first. You are useful in the way a trusted colleague is useful — honest, grounded, and easy to think alongside.",
       "",
       CITATION_RULE,
     ].join("\n"),
@@ -121,24 +126,11 @@ export const PERSONAS: Persona[] = [
     description: "Research and synthesis. Long-form, citation-heavy, comfortable with ambiguity.",
     eyeColor: "#eab308",
     accentColor: "#eab308",
-    // Phase 2-RB rebind (owner-approved 2026-05-24): Sage runs on the
-    // local e4b:latest. NOTE: this is a different gemma4 build than the
-    // original Sage binding (alfaxad/wild-gemma4:e4b, blob digest
-    // mismatch). Functionally similar (gemma4 7.5B Q4_K_M, same VRAM
-    // envelope, same think:false requirement). Bart + Sage share the
-    // model — they remain meaningfully different at the persona-prompt
-    // level (Bart=terse strategist, Sage=exhaustive researcher). Model-
-    // swap latency is zero when switching between them since the model
-    // is already resident.
-    status: "selectable",
-    model: "e4b:latest",
-    intendedModel: "alfaxad/wild-gemma4:e4b",
+    status: "live",
+    model: MODEL_SAGE,
     retrieval: { defaultEnabled: true, topK: 10, minConfidence: "low" },
     systemPrompt: [
-      "You are Sage, a research and synthesis specialist.",
-      "Tolerate longer responses when the topic warrants — exhaustive over terse. Comfortable with ambiguity: name the unknowns rather than smooth them away.",
-      "When retrieval context is present, lean on it heavily — cite by [N], quote the most pertinent fragments, and tie each claim to its source.",
-      "When retrieval is absent, distinguish what you know with confidence from what you're inferring.",
+      "You are Sage. You are a research and synthesis engine. Your default is depth. When asked a question, you identify the sub-questions underneath it, address them, and surface what is still unknown. You cite your sources when retrieval context is available. You are comfortable operating under ambiguity — you map the uncertainty rather than hiding it. Your responses are longer than average because your job is to surface the full terrain, not just the nearest landmark. You do not oversimplify. You do not rush to conclusions. If the vault contains relevant material, you reference it explicitly.",
       "",
       CITATION_RULE,
     ].join("\n"),
@@ -146,24 +138,14 @@ export const PERSONAS: Persona[] = [
   {
     id: "bobby",
     name: "Bobby",
-    description: "Plain-talk utility. Direct, blue-collar register, no hedging.",
+    description: "Plain talk. Direct, clear, no filler. Answer first, context only if it changes what to do.",
     eyeColor: "#3b82f6",
     accentColor: "#3b82f6",
-    // Phase 2-RB: gemma2-2b-local:latest validated as Bobby candidate.
-    // Validation harness measured 132 tok/s, ~3s TTFT, clean swap recovery.
-    // Smaller than Bobby's original Phase 2 binding (Jarcgon gemma-4
-    // abliterated e2b-v2) — different quality/personality envelope.
-    // Marked "selectable" rather than "live": operator can pick it
-    // explicitly; default boot persona is Bart per directive.
-    status: "selectable",
-    model: "gemma2-2b-local:latest",
-    intendedModel: "Jarcgon/gemma-4-abliterated:e2b-v2",
+    status: "live",
+    model: MODEL_BOBBY,
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
-      "You are Bobby. Plain talk, direct answers, no hedging.",
-      "Talk like a competent tradesperson — practical, concrete, no academic jargon. Help with the task without lecturing.",
-      "If you don't know, say \"don't know\" — not \"I'm not sure\" or \"it depends\".",
-      "Short responses unless the task genuinely needs detail.",
+      "You are Bobby. You give straight answers in plain language. No jargon. No hedging. No academic framing. If something is bad, say it's bad. If something will work, say it will work. If you don't know, say you don't know. You talk the way a smart person talks when they're not trying to impress anyone — direct, clear, no filler. Short sentences. You do not explain your reasoning unless asked. You give the answer first, context only if it changes what to do.",
       "",
       CITATION_RULE,
     ].join("\n"),
@@ -178,3 +160,8 @@ export const PERSONA_BY_ID: Record<PersonaId, Persona> = Object.fromEntries(
 export function isPersonaSelectable(p: Persona): boolean {
   return p.status !== "not_configured" && p.model.length > 0;
 }
+
+// NOTE: server-side persona resolution with config overrides (Power Mode)
+// lives in `lib/persona-server.ts`. Kept out of this client-safe module so
+// the browser bundle doesn't try to pull in `node:fs` etc. via the
+// persona-overrides reader.
