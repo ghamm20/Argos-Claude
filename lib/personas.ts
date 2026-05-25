@@ -96,12 +96,15 @@ export const PERSONAS: Persona[] = [
     description: "Warm counterpart. Factual, conversational, less ceremonial.",
     eyeColor: "#84cc16",
     accentColor: "#84cc16",
-    // Phase 2-RB: Juniper's previously-bound model
-    // (Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) is NOT in the current
-    // Ollama store. Per the directive, do not pretend it's wired. UI
-    // shows "Model not configured" + persona cannot be selected.
-    status: "not_configured",
-    model: "",
+    // Phase 2-RB stopgap rebind (owner-approved 2026-05-24): Juniper
+    // temporarily runs on gemma2-2b-local until the 9B Qwen3.5 model
+    // can be re-pulled. HONEST TRADE-OFF: at 2B vs 9B Juniper loses
+    // some of the warm-and-deep conversational character — same system
+    // prompt, smaller model. Status is "selectable" not "live" so the
+    // operator picks it deliberately rather than landing there at boot.
+    // intendedModel is kept so a future re-pull is a single-line restore.
+    status: "selectable",
+    model: "gemma2-2b-local:latest",
     intendedModel: "hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
@@ -118,13 +121,17 @@ export const PERSONAS: Persona[] = [
     description: "Research and synthesis. Long-form, citation-heavy, comfortable with ambiguity.",
     eyeColor: "#eab308",
     accentColor: "#eab308",
-    // Phase 2-RB: Sage's previously-bound model (alfaxad/wild-gemma4:e4b)
-    // is NOT in the current Ollama store. The local `e4b:latest` is a
-    // DIFFERENT gemma4 build (Ollama digest e3755aa2…) — operator did
-    // not validate it for Sage's research-and-synthesis role. Marked
-    // not_configured pending operator decision.
-    status: "not_configured",
-    model: "",
+    // Phase 2-RB rebind (owner-approved 2026-05-24): Sage runs on the
+    // local e4b:latest. NOTE: this is a different gemma4 build than the
+    // original Sage binding (alfaxad/wild-gemma4:e4b, blob digest
+    // mismatch). Functionally similar (gemma4 7.5B Q4_K_M, same VRAM
+    // envelope, same think:false requirement). Bart + Sage share the
+    // model — they remain meaningfully different at the persona-prompt
+    // level (Bart=terse strategist, Sage=exhaustive researcher). Model-
+    // swap latency is zero when switching between them since the model
+    // is already resident.
+    status: "selectable",
+    model: "e4b:latest",
     intendedModel: "alfaxad/wild-gemma4:e4b",
     retrieval: { defaultEnabled: true, topK: 10, minConfidence: "low" },
     systemPrompt: [
