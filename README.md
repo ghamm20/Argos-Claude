@@ -7,11 +7,16 @@ Plug in. Launch. Use. Unplug. Host machine is byte-for-byte identical to its pre
 ## What it is
 
 - **Next.js 14** App Router + TypeScript + Tailwind v3 (shadcn primitives, Radix UI)
-- **Local LLM** via Ollama daemon on `127.0.0.1:11434`, models served from the USB drive
-- **Vault** — drag-drop docs (PDF, DOCX, MD, TXT) → chunked → embedded via `nomic-embed-text` → cosine retrieval
+- **Local LLM** via Ollama daemon on `127.0.0.1:11434` (with `:11435` fallback), models served from the USB drive
+- **Four personas** — Bartimaeus (live default, strategist), Sage (research), Bobby (plain-talk), Juniper (warm) — each with its own system prompt, eye color, and bound model
+- **Vault** — drag-drop or drop into `vault/dropbox/` (PDF / DOCX / MD / TXT) → chunked → embedded via `nomic-embed-text` → in-memory cosine retrieval; per-persona policy + 3-bucket confidence (HIGH / MED / LOW)
 - **Truth Mode** — toggle that injects citation enforcement into the persona prompt and renders citation pills in the chat surface
-- **Three personas** — each with its own system prompt, eye color, and recommended model
-- **Settings** — hardware detection, model swap, persona default, vault stats, build info — all server-rendered, all backed by `config/settings.json` on the drive
+- **Hash-chained audit log** — every session / vault / settings change is appended to `state/audit/chain.jsonl` with sha256 chaining; standalone verifier ships in `scripts/verify-audit-chain.mjs`
+- **JSON bundle export** — tamper-evident session bundles with `bundleHash` over canonical JSON
+- **Voice scaffold** — Whisper STT + Kokoro TTS API + UI; binaries operator-supplied per `docs/VOICE.md` (UI hides controls when missing)
+- **Tools dock** — health-checks external tools (Oculus / SuperAGI) declared in `tools/registry.json`
+- **Settings** — hardware detection, model swap, persona default, vault stats, build info — all server-rendered, all backed by `config/settings.json` on the drive (atomic write)
+- **Cross-platform launcher** — `.bat` / `.command` / `.sh` with port fallback, 10 MB log rotation, tool-boot block, voice presence probe
 
 ## Quick start
 
@@ -35,15 +40,26 @@ npm run check             # lint + typecheck + build + verify-argos (7 rules)
 npm run check:full        # check + dev-server smoke battery (h2/vault/retrieval/settings)
 ```
 
+## Operator quickstart
+
+If you just plugged in the drive and want the shortest path to "ARGOS is doing something useful", read [`OPERATOR_QUICKSTART.md`](OPERATOR_QUICKSTART.md). Single page. Boot → first chat → vault drop → optional voice install → stop. Everything else in this README is for developers.
+
 ## Doctrine
 
 The project is bound by a set of architectural hard rules. Read these in order:
 
 - [`docs/00-DOCTRINE.md`](docs/00-DOCTRINE.md) — what ARGOS is and isn't
 - [`docs/01-SEVEN-RULES.md`](docs/01-SEVEN-RULES.md) — Seven USB-Native Rules (zero host writes, zero registry writes, relative paths only, scoped env vars, etc.)
-- [`docs/02-SCOPE-LOCK.md`](docs/02-SCOPE-LOCK.md) — v1 scope envelope (chat, vault, hardware, settings)
+- [`docs/02-SCOPE-LOCK.md`](docs/02-SCOPE-LOCK.md) — v1.0 scope envelope (current + historical original)
 - [`docs/03-METHODOLOGY.md`](docs/03-METHODOLOGY.md) — thesis framing
 - [`docs/04-THREAT-MODEL.md`](docs/04-THREAT-MODEL.md) — security posture
+- [`docs/05-OPERATIONS.md`](docs/05-OPERATIONS.md) — daily operations runbook
+- [`docs/06-V1.0-LOCKDOWN.md`](docs/06-V1.0-LOCKDOWN.md) — what ships in v1.0, what's deferred, acceptance checklist
+
+Per-subsystem deep-dives:
+- [`docs/AUDIT.md`](docs/AUDIT.md) — hash-chained audit log + tamper-evident bundles
+- [`docs/RETRIEVAL.md`](docs/RETRIEVAL.md) — vault retrieval architecture + confidence buckets
+- [`docs/VOICE.md`](docs/VOICE.md) — Whisper STT + Kokoro TTS install + architecture
 
 ## Verification
 

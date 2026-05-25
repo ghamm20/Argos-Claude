@@ -6,6 +6,49 @@ The intent is that someone joining this codebase Thursday can read this in 10 mi
 
 ---
 
+## 2026-05-24 — Phase 6: Documentation & v1.0 lockdown
+
+**Decision:** Freeze the v1.0 surface. Write three new top-level docs (`OPERATOR_QUICKSTART.md` at repo root, `docs/06-V1.0-LOCKDOWN.md`, refreshed `docs/02-SCOPE-LOCK.md`), update `README.md` to reflect actual current state (4 personas, Phases 3–5 surfaces, new cross-references), add a v1.0.0 CHANGELOG section consolidating Phases 1 → 6 + 2-RB. Do NOT apply the `v1.0.0` git tag — defer to explicit owner approval per established pattern. Do NOT bump `package.json` version yet (also tag-adjacent).
+
+**Context:** Phase 6 of the v1.0 plan is the final phase before tagging. Goal isn't more code — it's documentation consolidation so an operator can use the deployed payload without reading the source. The codebase has been documented incrementally per phase (`docs/AUDIT.md`, `docs/RETRIEVAL.md`, `docs/VOICE.md`, `methodology/decisions.md`, the deployed `PHASE_*_REPORT.md` files) but the entry-point documents (`README.md`, scope-lock) had drifted stale: README still said "Three personas," scope-lock still referenced Cipher + ChromaDB + the wrong hardware target.
+
+**Alternatives considered:**
+
+- **Apply the `v1.0.0` git tag as part of Phase 6.** Rejected: owner has been explicit across the engagement that tags are owner-applied, not Claude-applied. The lockdown manifest (`docs/06-V1.0-LOCKDOWN.md`) documents the tag command + suggested commit to point at; owner runs it.
+- **Bump `package.json` version 0.1.0 → 1.0.0.** Held: that's effectively the tag-equivalent and probably should land in the same commit as the tag itself. Documented in the lockdown manifest's "Tag policy" section.
+- **Delete the original Friday-v1 scope-lock content.** Rejected: it's audit-trail. Replaced the top section with the CURRENT manifest + preserved the original verbatim at the bottom under "HISTORICAL." Same pattern used when archiving `PHASE_2_REPORT.original-2026-05-22.md` during Phase 2-RB.
+- **Put `OPERATOR_QUICKSTART.md` under `docs/` instead of repo root.** Rejected: it's the document an operator should see first when looking at the deployed payload tree. Repo-root sits it alongside `README.md` where any human will find it. `docs/` is for the longer-form architecture / scope / methodology trail.
+- **Consolidate Phases 1 → 5 reports into a single `v1.0_RELEASE.md`.** Rejected: the per-phase reports have their own audit value (what was promised, what shipped, gate evidence, self-corrections). The CHANGELOG section is the consolidated story; the reports stay as primary sources.
+- **Auto-generate the lockdown manifest from code (parse `lib/personas.ts` + `AVAILABLE_MODELS`).** Rejected for v1.0: lockdown is a contract, not a snapshot. It's allowed to drift from code intentionally during a phase, then catch up at lockdown moments. Auto-generation hides that intent.
+- **Add a v1.0 deployment smoke that exercises every API surface end-to-end.** Held for v1.0; the existing per-phase smokes (`smoke-audit-chain`, `smoke-voice`, `validate-e4b`, `verify-argos`) cover their surfaces individually. A single composite would be nice; not blocking.
+
+**Implementation:**
+
+- `docs/06-V1.0-LOCKDOWN.md` — NEW. Frozen-surface manifest: what ships, deferral table (Power Mode / v1.1 / v2 / Cut), acceptance checklist ("is this v1.0?"), tag policy (owner-applied, command documented but not run), open decisions that DO NOT block v1.0.
+- `OPERATOR_QUICKSTART.md` — NEW (repo root). Single-page boot → first chat → vault → voice (optional) → settings → stop → troubleshooting. Cross-references the longer-form docs.
+- `docs/02-SCOPE-LOCK.md` — Rewritten CURRENT section (4 personas, no Chroma, no Cipher, actual hardware target), preserved original Friday-v1 section as HISTORICAL.
+- `README.md` — Updated "What it is" (4 personas, Phases 3-5 surfaces named explicitly), added Operator Quickstart pointer, expanded Doctrine section with all 7 numbered docs + subsystem docs.
+- `CHANGELOG.md` — Added `## [1.0.0] — 2026-05-24` section grouping the work by phase, with verification status, known v1.0 limits, and a reminder that the tag is pending. Old `[Unreleased]` content preserved below.
+- `methodology/decisions.md` — This entry.
+- `PHASE_6_REPORT.md` — Deployed payload root; pass/fail per Phase 6 acceptance criteria + Phase 6 deliverable list.
+
+**Result:**
+
+- `npm run lint` clean · `npm run typecheck` clean · `npm run verify` 7/7 PASS · `npm run build` clean
+- All Phase 6 docs cross-link consistently (README → quickstart → lockdown → per-subsystem → methodology)
+- No code changes — documentation-only phase
+- `v1.0.0` tag command documented in lockdown manifest; not run
+- `package.json` version unchanged at `0.1.0`; tag-adjacent bump deferred to owner
+
+**Out of scope (filed for v1.1+):**
+
+- Auto-generating the lockdown manifest from code
+- Composite end-to-end deployment smoke
+- Translations of the operator quickstart
+- A separate "developer onboarding" guide (currently developers read README → docs/ → methodology/, which is dense but complete)
+
+---
+
 ## 2026-05-24 — Phase 2-RB: persona rebinding to current Ollama store (`e4b:latest`)
 
 **Decision:** Rebind Bartimaeus (the lone "live" persona at boot) to `e4b:latest` — the gemma4-family 7.5B Q4_K_M model currently in the local Ollama store. Bind Bobby to `gemma2-2b-local:latest` as a "selectable" (not live) fast/diagnostic persona. Mark Juniper + Sage as `not_configured` because their previously-bound models (`hf.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive` and `alfaxad/wild-gemma4:e4b`) are no longer in the local store. Add a `PersonaStatus = "live" | "selectable" | "not_configured"` type + an `isPersonaSelectable()` helper. Wire a visible-state model-swap UX: `Loading <persona>…` → `Model ready` (1500 ms autoclear) → `Failed` / `Model not configured`. Set `think: false` globally in `/api/chat` because e4b is gemma4-thinking-capable and defaults to emitting all output via `message.thinking` (zero `message.content`).

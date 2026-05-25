@@ -2,6 +2,101 @@
 
 Reverse-chronological. Phase letters reference the build session's audit trail (see `methodology/eyes-on-h*.md` and `methodology/thesis-evidence.md`).
 
+## [1.0.0] — 2026-05-24
+
+The v1.0 lockdown. Tag pending owner approval; this entry reflects the freeze state.
+
+Frozen at commit on `origin/main`. Acceptance checklist passes per `docs/06-V1.0-LOCKDOWN.md`. For the per-phase breakdown see the `PHASE_*_REPORT.md` files in the deployed payload root.
+
+### Added (since the original H-phase build sprint)
+
+**Phase 1 — Stabilization**
+- Port-fallback in launchers (Ollama 11434→11435, Next.js 7799→7800)
+- 10 MB log rotation with `.1`/`.2`/`.3` generations in `launcher.bat` / `.sh` / `.command`
+- 7 stability gates exercised under cold/warm/swap/yank/restart scenarios
+- `verify-argos` Rules 1–7 enforced at every commit + CI
+
+**Phase 1.5 — Hardware Reality Alignment**
+- Measurement harness producing operating-profile matrix per persona × model on actual RTX 3060 Ti / 8 GB VRAM
+- Documented 20 B+ models as Power Mode (deferred until ≥16 GB VRAM)
+- `scripts/check-model-integrity.mjs` for existence / size / sha256 verification of model blobs
+- Diagnosis discipline: 3-axis (model-store integrity / arch-compat / hardware-envelope / persona-logic)
+
+**Phase 2 — Persona Completion** (and **Phase 2-RB** rebinding)
+- Four personas wired: Bartimaeus (live), Sage, Bobby, Juniper (selectable)
+- Bartimaeus bound to `e4b:latest` (gemma4 7.5B Q4_K_M) per validation harness (`scripts/validate-e4b.mjs`)
+- Sage shares e4b:latest (different system prompt — zero-latency swap)
+- Bobby + Juniper bound to `gemma2-2b-local:latest` (stopgap for Juniper)
+- `PersonaStatus` type: `live` / `selectable` / `not_configured`
+- `Persona.intendedModel` field records the would-be mapping for re-pull restoration
+- Persona-switch UI with visible state: Loading → Ready → Failed / Not configured (color-coded)
+- `/api/model/warm` endpoint drives the loading state
+- `/api/chat` returns 503 + hint for `not_configured` personas (no fake bindings)
+- `think: false` set globally on Ollama chat payload (gemma4-thinking gate — without it, content comes back empty)
+- Last-used persona persists across restarts via `ChatPane` hydration from `/api/settings`
+
+**Phase 3 — Vault & Retrieval**
+- Per-persona retrieval policy (`defaultEnabled` / `topK` / `minConfidence`) in `lib/personas.ts`
+- 3-bucket confidence: HIGH ≥0.55 / MED ≥0.40 / LOW ≥0.25 cosine similarity
+- HUD confidence breakdown row: `Last: 4 hits · 2H 1M 1L`
+- Auto-ingest from `vault/dropbox/` (POST `/api/vault/auto-ingest`), archives to `.processed/` / `.errored/`
+- Launcher fires auto-ingest after Next.js readiness
+- Bart = medium floor + top-5; Sage = low floor + top-10; Bobby + Juniper = opt-in
+
+**Phase 4 — Audit & Export**
+- Append-only hash-chained JSONL audit log at `state/audit/chain.jsonl`
+- Per-entry sha256 chained via canonical-JSON serialization (matches `JSON.stringify` `undefined`-key behavior — self-correction caught + fixed)
+- Audit kinds: `session.created` / `session.updated` / `session.deleted` / `vault.ingested` / `vault.deleted` / `vault.auto-ingest` / `settings.changed` / `voice.transcribed` / `voice.spoken` / `persona.switched` (declared)
+- Reserved kinds for future phases: `research.fetched` / `memory.written` / `proposal.created` / `proposal.applied` / `proposal.rejected` / `workflow.executed`
+- `GET /api/receipts` chain query with `?sessionId=` / `?verify=1` / `?tail=N`
+- `GET /api/chat/sessions/:id/export` returns JSON bundle with `bundleHash`
+- Standalone verifier `scripts/verify-audit-chain.mjs` (no framework deps; third-party-runnable) — `npm run audit:verify`
+- Smoke `scripts/smoke-audit-chain.mjs` exercises 5 tamper scenarios (clean / payload tamper / prevHash tamper / deleted entry / empty); all PASS
+
+**Phase 5 — Voice (scaffold)**
+- `lib/voice.ts` server orchestration (whisper.cpp + kokoros spawn pipelines with timeouts + cleanup)
+- `lib/voice-client.ts` browser MediaRecorder → OfflineAudioContext decode + resample → 16 kHz mono PCM WAV (no ffmpeg dep)
+- `GET /api/voice/status` capability snapshot
+- `POST /api/voice/stt` audio/wav → text (503 capability-gated, 413 size-gated, audit-logged)
+- `POST /api/voice/tts` text → audio/wav (with `x-voice-*` metadata headers, audit-logged)
+- `MicButton` (composer) and `PlayButton` (per-message) — capability-gated; auto-hide when binaries absent
+- Module-level "currently playing" registry — new playback preempts previous
+- Launcher voice presence probe on all three launchers (read-only stat, never blocks boot)
+- `scripts/smoke-voice.mjs` 2-layer smoke (scaffold always + roundtrip when binaries installed)
+- `docs/VOICE.md` operator install + architecture + failure modes
+
+**Phase 6 — Documentation & v1.0 Lockdown**
+- `docs/06-V1.0-LOCKDOWN.md` — frozen manifest, deferral table, acceptance checklist
+- `OPERATOR_QUICKSTART.md` — single-page "what do I do first"
+- `docs/02-SCOPE-LOCK.md` — refreshed CURRENT section with v1.0 truth; original Friday-v1 preserved as historical
+- README reflects 4 personas + Phases 3-5 surfaces + new doc cross-references
+- `PHASE_6_REPORT.md` in deployed payload root
+
+### Other notable changes since [Unreleased]
+- Standalone `/api/model/warm` endpoint
+- `/api/vault/auto-ingest` endpoint + launcher fire
+- Tools dock (`components/panels/ToolsDock.tsx`) polls `/api/tools/status` every 15 s; reads `tools/registry.json`
+- `methodology/decisions.md` — 6 new phase entries (Phase 1 → Phase 6, 2-RB)
+
+### Verification status at v1.0 freeze
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm run verify` — Seven Rules **7/7 PASS**
+- `npm run build` clean — all routes (chat, sessions, vault, receipts, voice, tools, hardware, settings, model/warm) registered
+- `npm run audit:verify` PASS
+- `npm run voice:smoke-offline` 12/12 PASS (scaffold integrity)
+- `scripts/validate-e4b.mjs` PASS (5/5 prompts coherent, 3-cycle swap stress stable, no garbage)
+- Both deployed payloads (Desktop NTFS + H: FAT32) carry the same `.next` build
+
+### Known v1.0 limits (not bugs; documented in `docs/06-V1.0-LOCKDOWN.md`)
+- Voice binaries operator-supplied (not bundled)
+- H: drive FAT32 limits multi-GB models (Desktop NTFS is the full payload)
+- Juniper on stopgap gemma2-2b model (intended Qwen3.5-9B held pending Ollama upstream `qwen35` support)
+- Sage shares Bart's e4b model (different system prompt provides differentiation)
+- Audit append is O(n) — fine to ~100k entries; v1.1 caches tail hash
+
+---
+
 ## [Unreleased]
 
 ### Added
