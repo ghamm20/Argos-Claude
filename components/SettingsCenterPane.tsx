@@ -5,10 +5,11 @@ import { Settings as SettingsIcon } from "lucide-react";
 import { ModelSection } from "./settings/ModelSection";
 import { PersonaSection } from "./settings/PersonaSection";
 import { VaultSection } from "./settings/VaultSection";
+import { VoiceSection } from "./settings/VoiceSection";
 import { AboutSection } from "./settings/AboutSection";
 import type { RuntimeInfo } from "@/lib/runtime-info";
 
-type SectionId = "model" | "personas" | "vault" | "about";
+type SectionId = "model" | "personas" | "vault" | "voice" | "about";
 
 interface SectionProps {
   id: SectionId;
@@ -19,6 +20,7 @@ const SECTIONS: SectionProps[] = [
   { id: "model", label: "Model" },
   { id: "personas", label: "Personas" },
   { id: "vault", label: "Vault" },
+  { id: "voice", label: "Voice" },
   { id: "about", label: "About" },
 ];
 
@@ -66,6 +68,7 @@ export function SettingsCenterPane({
           {active === "model" && <ModelSection />}
           {active === "personas" && <PersonaSection />}
           {active === "vault" && <VaultSection />}
+          {active === "voice" && <VoiceSection />}
           {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>
       </div>

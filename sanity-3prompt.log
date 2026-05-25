@@ -1,0 +1,23 @@
+﻿skipping nomic-embed-text:latest (capabilities: embedding — no completion)
+=== Pre-flight ===
+installed: nomic-embed-text:latest, e4b:latest, gemma2-2b-local:latest
+chat-capable: e4b:latest, gemma2-2b-local:latest
+baseline VRAM: 2033 MB
+
+=== e4b:latest  (gemma4 7.5B Q4_K_M) ===
+  A: ttft=3861ms total=4045ms tps=70.3 load=3649ms vram=7442MB degen=false
+     "I'm feeling a bit under the weather today."
+  B: ttft=275ms total=2914ms tps=76.4 load=215ms vram=7511MB degen=false
+     "Epistemic humility is the recognition that one's knowledge is fallible, and that one's understanding of the world is imperfect. It is the willingness to admit one's ignorance and to question one's own assumptions and beliefs. It involves an…"
+  C: ttft=253ms total=2377ms tps=77.8 load=220ms vram=7503MB degen=false
+     "1. **Implement robust error handling:** Wrap all external API calls and model inferences in `try-except` blocks to gracefully handle network failures, API rate limits, and model inference errors. Log these errors with unique IDs and retry l…"
+
+=== gemma2-2b-local:latest  (gemma2 2.6B Q4_K_M) ===
+  A: ttft=2239ms total=2303ms tps=146.3 load=2209ms vram=4577MB degen=false
+     "The sky is blue."
+  B: ttft=119ms total=1271ms tps=142.7 load=90ms vram=4557MB degen=false
+     "Epistemic humility is the recognition that our knowledge claims are often incomplete, uncertain, and potentially flawed. It acknowledges the limits of human understanding and the possibility of being wrong. It's about being open to alternat…"
+  C: ttft=109ms total=848ms tps=141.4 load=91ms vram=4557MB degen=false
+     "1. Implement robust error handling: Log all errors and exceptions, define clear error responses, and implement mechanisms to gracefully recover from failures. 2. Conduct thorough performance testing: Identify bottlenecks and optimize resour…"
+
+Wrote sanity-3prompt.json

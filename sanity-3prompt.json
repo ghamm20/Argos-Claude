@@ -1,0 +1,167 @@
+{
+  "timestamp": "2026-05-25T01:34:20.903Z",
+  "ollamaHost": "http://127.0.0.1:11434",
+  "installedModels": [
+    {
+      "name": "nomic-embed-text:latest",
+      "sizeBytes": 274302450,
+      "sizeGB": 0.26,
+      "modified": "2026-05-24T17:08:17.8995505-07:00"
+    },
+    {
+      "name": "e4b:latest",
+      "sizeBytes": 5302272698,
+      "sizeGB": 4.94,
+      "modified": "2026-05-24T15:58:07.6-07:00"
+    },
+    {
+      "name": "gemma2-2b-local:latest",
+      "sizeBytes": 1708584105,
+      "sizeGB": 1.59,
+      "modified": "2026-05-22T17:50:00.3668014-07:00"
+    }
+  ],
+  "chatModels": [
+    {
+      "name": "e4b:latest",
+      "family": "gemma4",
+      "parameter_size": "7.5B",
+      "quant": "Q4_K_M",
+      "capabilities": [
+        "completion",
+        "tools",
+        "thinking"
+      ]
+    },
+    {
+      "name": "gemma2-2b-local:latest",
+      "family": "gemma2",
+      "parameter_size": "2.6B",
+      "quant": "Q4_K_M",
+      "capabilities": [
+        "completion"
+      ]
+    }
+  ],
+  "baselineVramMB": 2033,
+  "results": {
+    "e4b:latest": {
+      "meta": {
+        "name": "e4b:latest",
+        "family": "gemma4",
+        "parameter_size": "7.5B",
+        "quant": "Q4_K_M",
+        "capabilities": [
+          "completion",
+          "tools",
+          "thinking"
+        ]
+      },
+      "prompts": {
+        "A": {
+          "prompt": "Say one normal sentence.",
+          "text": "I'm feeling a bit under the weather today.",
+          "thinkingChars": 0,
+          "totalMs": 4045,
+          "ttftMs": 3861,
+          "tps": 70.33478183909044,
+          "evalCount": 12,
+          "loadDurationMs": 3648.6986,
+          "vramAfterMB": 7442,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        },
+        "B": {
+          "prompt": "Explain epistemic humility in two paragraphs.",
+          "text": "Epistemic humility is the recognition that one's knowledge is fallible, and that one's understanding of the world is imperfect. It is the willingness to admit one's ignorance and to question one's own assumptions and beliefs. It involves an openness to new information, a willingness to change one's mind when confronted with conflicting evidence, and an acknowledgement of the limits of one's own knowledge.\n\nPracticing epistemic humility involves adopting a mindset of constant learning and self-correction. It requires actively seeking out diverse perspectives, engaging with different viewpoints, and being willing to engage in respectful dialogue even when there are significant differences in opinion. It involves recognizing that no one person or group can have all the answers, and that knowledge is built through the accumulation of knowledge from many sources and perspectives. Ultimately, epistemic humility is a recognition of the complexity and interconnectedness of the world, and a commitment to the ongoing pursuit of understanding.",
+          "thinkingChars": 0,
+          "totalMs": 2914,
+          "ttftMs": 275,
+          "tps": 76.43656553312832,
+          "evalCount": 192,
+          "loadDurationMs": 215.4527,
+          "vramAfterMB": 7511,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        },
+        "C": {
+          "prompt": "Give me three concrete next steps for stabilizing a local AI app.",
+          "text": "1. **Implement robust error handling:** Wrap all external API calls and model inferences in `try-except` blocks to gracefully handle network failures, API rate limits, and model inference errors. Log these errors with unique IDs and retry logic to handle transient failures.\n\n2. **Implement caching:** Cache frequently accessed data, such as model embeddings and user profiles, to reduce latency and reduce the number of expensive database calls. Use an in-memory cache like Redis or Memcached.\n\n3. **Add rate limiting:** Implement rate limiting on the API endpoints to prevent abuse and ensure fair usage. Use a library like `rate-limit` or `free-bottle` to track request counts and return appropriate HTTP status codes (e.g., 429 Too Many Requests).",
+          "thinkingChars": 0,
+          "totalMs": 2377,
+          "ttftMs": 253,
+          "tps": 77.82316586805979,
+          "evalCount": 158,
+          "loadDurationMs": 219.5556,
+          "vramAfterMB": 7503,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        }
+      }
+    },
+    "gemma2-2b-local:latest": {
+      "meta": {
+        "name": "gemma2-2b-local:latest",
+        "family": "gemma2",
+        "parameter_size": "2.6B",
+        "quant": "Q4_K_M",
+        "capabilities": [
+          "completion"
+        ]
+      },
+      "prompts": {
+        "A": {
+          "prompt": "Say one normal sentence.",
+          "text": "The sky is blue. \n",
+          "thinkingChars": 0,
+          "totalMs": 2303,
+          "ttftMs": 2239,
+          "tps": 146.33869725633232,
+          "evalCount": 8,
+          "loadDurationMs": 2208.9134,
+          "vramAfterMB": 4577,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        },
+        "B": {
+          "prompt": "Explain epistemic humility in two paragraphs.",
+          "text": "Epistemic humility is the recognition that our knowledge claims are often incomplete, uncertain, and potentially flawed. It acknowledges the limits of human understanding and the possibility of being wrong.  It's about being open to alternative viewpoints, accepting evidence that contradicts our beliefs, and recognizing the limitations of our own cognitive abilities. \n\nInstead of clinging to absolute certainty, epistemic humility encourages a willingness to revise our views when presented with new information or perspectives. It involves engaging in critical thinking and questioning our assumptions, even those we hold most dear.  This mindset promotes intellectual growth and contributes to more informed decision-making by fostering open-mindedness and a desire for continuous learning. \n",
+          "thinkingChars": 0,
+          "totalMs": 1271,
+          "ttftMs": 119,
+          "tps": 142.73105135900795,
+          "evalCount": 137,
+          "loadDurationMs": 90.2113,
+          "vramAfterMB": 4557,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        },
+        "C": {
+          "prompt": "Give me three concrete next steps for stabilizing a local AI app.",
+          "text": "1. Implement robust error handling: Log all errors and exceptions, define clear error responses, and implement mechanisms to gracefully recover from failures. \n2. Conduct thorough performance testing: Identify bottlenecks and optimize resource allocation, data ingestion, and processing speeds. \n3. Establish a continuous integration/continuous deployment (CI/CD) pipeline: Automate the deployment process for frequent updates, bug fixes, and new feature releases.  \n",
+          "thinkingChars": 0,
+          "totalMs": 848,
+          "ttftMs": 109,
+          "tps": 141.38178102367235,
+          "evalCount": 87,
+          "loadDurationMs": 91.2689,
+          "vramAfterMB": 4557,
+          "degenerate": {
+            "degenerate": false,
+            "reason": null
+          }
+        }
+      }
+    }
+  }
+}
