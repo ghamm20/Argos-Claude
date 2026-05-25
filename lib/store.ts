@@ -176,6 +176,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   //      (auto-clear after 1500ms). On failure → "failed".
   switchPersona: async (id) => {
     const p = PERSONA_BY_ID[id];
+    const fromPersonaId = get().currentPersonaId;
     if (!isPersonaSelectable(p)) {
       set({
         modelStatus: "not_configured",
@@ -184,6 +185,20 @@ export const useArgos = create<ArgosState>((set, get) => ({
           ? `${p.name}: model "${p.intendedModel}" not in local Ollama store. Install + re-bind in lib/personas.ts.`
           : `${p.name} has no configured model.`,
       });
+      // v1.1: still log the *attempted* switch even when not_configured.
+      // Operator behavior tracking — useful for understanding which
+      // unconfigured personas operators actually want.
+      void fetch("/api/persona/switched", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          personaId: id,
+          fromPersonaId,
+          model: p.model || null,
+          reason: "user-attempt-not-configured",
+          sessionId: get().currentSessionId,
+        }),
+      }).catch(() => undefined);
       return;
     }
     set({
@@ -193,6 +208,20 @@ export const useArgos = create<ArgosState>((set, get) => ({
       modelStatusPersona: id,
       modelStatusMessage: `Loading ${p.name}…`,
     });
+    // v1.1: best-effort persona.switched audit append. Fire AFTER
+    // the UI flip + BEFORE the warm POST so the audit reflects intent
+    // even if warm fails. Failures are silent — never blocks UI.
+    void fetch("/api/persona/switched", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        personaId: id,
+        fromPersonaId,
+        model: p.model,
+        reason: "user-switch",
+        sessionId: get().currentSessionId,
+      }),
+    }).catch(() => undefined);
     // Background warm — never blocks the UI. /api/model/warm POSTs an
     // empty prompt to Ollama which forces a model load (or no-op if
     // already loaded) and replies when ready.
