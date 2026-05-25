@@ -333,7 +333,7 @@ $ git log --oneline -5
 [ to be filled by Commit SHA below ]
 ```
 
-**Commit hash:** `[FILLED-AT-COMMIT]`
+**Commit hash:** `fa8bf4f` (local on `main`, not pushed, not tagged)
 
 ---
 
@@ -400,4 +400,4 @@ Standing by per directive: "Stop and report after all tasks complete."
 
 ---
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `fa8bf4f` (local on `main`, not pushed, not tagged)
