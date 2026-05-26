@@ -263,7 +263,7 @@ Deployed payload sync:
 
 Pending — local commit at end of this report write. Will be filled in immediately after `git commit`.
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `cde2e60` (local on `main`, not pushed; not tagged)
 
 ---
 
@@ -319,4 +319,4 @@ Standing by per directive's "Stop and report after all tasks complete."
 
 ---
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `cde2e60` (local on `main`, not pushed; not tagged)
