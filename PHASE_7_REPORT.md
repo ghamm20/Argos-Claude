@@ -292,7 +292,7 @@ Deployed payload `.next` mirrored to BOTH locations (Desktop\ARGOS\.next + app\.
 
 To be filled after `git commit`.
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `cf599c0` (local on `main`, not pushed, not tagged)
 
 ---
 
@@ -315,4 +315,4 @@ Tell me which when you decide.
 
 ---
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `cf599c0` (local on `main`, not pushed, not tagged)
