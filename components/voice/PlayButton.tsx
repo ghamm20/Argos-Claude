@@ -30,11 +30,13 @@ interface PlayButtonProps {
   accent: string;
   /** Optional sessionId for audit-chain scoping. */
   sessionId?: string;
+  /** Phase 7: persona id so the TTS route can pick the right voice. */
+  personaId?: string;
 }
 
 type State = "idle" | "loading" | "playing" | "error";
 
-export function PlayButton({ text, accent, sessionId }: PlayButtonProps) {
+export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonProps) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [state, setState] = useState<State>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -102,6 +104,7 @@ export function PlayButton({ text, accent, sessionId }: PlayButtonProps) {
     try {
       const blob = await synthesizeToBlob(text, {
         sessionId,
+        personaId,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -130,7 +133,7 @@ export function PlayButton({ text, accent, sessionId }: PlayButtonProps) {
       setErrMsg(e instanceof Error ? e.message : String(e));
       window.setTimeout(() => setState("idle"), 3500);
     }
-  }, [text, sessionId, hardStop]);
+  }, [text, sessionId, personaId, hardStop]);
 
   if (available === null) return null;
   if (!available) return null;

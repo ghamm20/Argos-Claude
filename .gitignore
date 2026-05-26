@@ -5,6 +5,18 @@ dist/
 /vault/
 /config/
 models/*.gguf
+
+# Phase 7 — voice binaries + model weights (operator-supplied, too large for git)
+/tools/voice/whisper/*.exe
+/tools/voice/whisper/*.dll
+/tools/voice/whisper/models/*.bin
+/tools/voice/kokoro/*.exe
+/tools/voice/kokoro/*.onnx
+/tools/voice/kokoro/*.bin
+/tools/voice/kokoro/voices.json
+/tools/voice/kokoro/models/*.onnx
+/tools/voice/kokoro/models/*.bin
+/tools/voice/kokoro/models/voices*
 config/local.*
 logs/
 .DS_Store

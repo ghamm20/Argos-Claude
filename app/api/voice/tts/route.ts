@@ -21,6 +21,7 @@ import {
   DEFAULT_KOKORO_VOICE,
 } from "@/lib/voice";
 import { appendAudit } from "@/lib/audit";
+import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,8 @@ interface SynthRequest {
   voice?: string;
   speed?: number;
   sessionId?: string;
+  /** Phase 7: if set, pulls voiceId from the persona unless `voice` overrides */
+  personaId?: PersonaId;
 }
 
 export async function POST(req: NextRequest) {
@@ -62,9 +65,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
 
+  // Phase 7: resolve voice — explicit `voice` arg wins; else fall back
+  // to the persona's `voiceId` (if a `personaId` is included); else null
+  // → synthesizeText() uses DEFAULT_KOKORO_VOICE.
+  let resolvedVoice = body.voice;
+  if (!resolvedVoice && body.personaId) {
+    const persona = PERSONA_BY_ID[body.personaId];
+    if (persona?.voiceId) resolvedVoice = persona.voiceId;
+  }
+
   try {
     const result = await synthesizeText(text, {
-      voice: body.voice,
+      voice: resolvedVoice,
       speed: body.speed,
     });
 

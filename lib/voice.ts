@@ -117,30 +117,52 @@ export async function whisperModel(): Promise<string | null> {
   }
 }
 
-/** Pick the first `.onnx` file under tools/voice/kokoro/models/. */
+/**
+ * Pick the first `.onnx` file under tools/voice/kokoro/. Phase 7 (2026-05-25):
+ * searches BOTH the top-level `tools/voice/kokoro/` AND the `models/` subdir
+ * for back-compat. Operators following the directive's exact paths get
+ * top-level files; operators following the original Phase 5 docs get
+ * `models/` files. Both work.
+ *
+ * Preference order if multiple `.onnx` files exist:
+ *   1. `kokoro-v1.0.fp16.onnx` (smaller + faster on CPU)
+ *   2. `kokoro-v1.0.onnx` (full fp32)
+ *   3. first alphabetically
+ */
 export async function kokoroModel(): Promise<string | null> {
-  const dir = path.join(kokoroDir(), "models");
-  try {
-    const entries = await fsp.readdir(dir);
-    const onnxs = entries.filter((e) => e.endsWith(".onnx")).sort();
-    if (onnxs.length === 0) return null;
-    return path.join(dir, onnxs[0]);
-  } catch {
-    return null;
+  for (const dir of [kokoroDir(), path.join(kokoroDir(), "models")]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      const onnxs = entries.filter((e) => e.endsWith(".onnx")).sort();
+      if (onnxs.length === 0) continue;
+      const preferred =
+        onnxs.find((o) => o === "kokoro-v1.0.fp16.onnx") ??
+        onnxs.find((o) => o === "kokoro-v1.0.onnx") ??
+        onnxs[0];
+      return path.join(dir, preferred);
+    } catch {
+      /* not present; try next dir */
+    }
   }
+  return null;
 }
 
-/** Pick the voices bin/json (Kokoro ships voice embeddings separately). */
+/**
+ * Pick the voices bin/json file. Searches BOTH top-level and `models/`
+ * subdir (Phase 7 directive expected top-level; Phase 5 scaffold used
+ * `models/`). Accepts: voices*.bin, voices*.json, voices-v1.0.bin etc.
+ */
 export async function kokoroVoices(): Promise<string | null> {
-  const dir = path.join(kokoroDir(), "models");
-  try {
-    const entries = await fsp.readdir(dir);
-    // common names: voices.bin / voices.json / voices-v1.0.bin
-    const voices = entries.find((e) => /^voices.*\.(bin|json)$/i.test(e));
-    return voices ? path.join(dir, voices) : null;
-  } catch {
-    return null;
+  for (const dir of [kokoroDir(), path.join(kokoroDir(), "models")]) {
+    try {
+      const entries = await fsp.readdir(dir);
+      const voices = entries.find((e) => /^voices.*\.(bin|json)$/i.test(e));
+      if (voices) return path.join(dir, voices);
+    } catch {
+      /* not present; try next dir */
+    }
   }
+  return null;
 }
 
 // ----- capability snapshot --------------------------------------

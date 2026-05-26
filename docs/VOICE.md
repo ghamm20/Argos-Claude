@@ -87,6 +87,24 @@ cd ARGOS_ROOT/tools/voice/kokoro
 
 If your `kokoros` fork takes different CLI flags, `lib/voice.ts → synthesizeText()` is the single place to adapt.
 
+### 2.b — Phase 7 reality check (2026-05-25)
+
+**`kokoros.exe` does not exist as a public pre-built release.** The two candidate Rust implementations:
+
+| Repo | Status |
+|---|---|
+| `lucasjinreal/Kokoros` | Source only — no GitHub releases. Build from source via `cargo build --release` (requires Rust toolchain). |
+| `thewh1teagle/kokoro-onnx` | Python library — `pip install kokoro-onnx`. Ships ONNX models + voices.bin but NO Windows binary. |
+
+The Phase 7 directive's URL `https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/kokoros-windows-x64.zip` returns 404.
+
+**Two real paths to working TTS on Windows:**
+
+1. **Python route** (operator installs Python + `pip install kokoro-onnx`) — wrap with a thin Python CLI script that mimics `kokoros --model … --voices … --text … --output …`. Place that at `tools/voice/kokoro/kokoros.exe` (or a Windows `.cmd` shim).
+2. **Piper TTS instead** — `https://github.com/rhasspy/piper` has real Windows binaries + lightweight voices. Different voice quality (Piper is also ONNX-based). Would need `lib/voice.ts:synthesizeText()` arg-list updated.
+
+**Phase 7 status:** STT (Whisper) is fully working. TTS (Kokoro) is held — model + voices files downloaded and detected by the capability probe, but the binary is not available off-the-shelf. `/api/voice/tts` returns 503 with a clear hint until a binary lands.
+
 ### 3. Verify
 
 After installing both, restart ARGOS. The launcher now prints:

@@ -213,7 +213,7 @@ function writeStr(view: DataView, offset: number, s: string) {
  */
 export async function synthesizeToBlob(
   text: string,
-  opts: { voice?: string; speed?: number; sessionId?: string; signal?: AbortSignal } = {}
+  opts: { voice?: string; speed?: number; sessionId?: string; personaId?: string; signal?: AbortSignal } = {}
 ): Promise<Blob> {
   const res = await fetch("/api/voice/tts", {
     method: "POST",
@@ -223,6 +223,8 @@ export async function synthesizeToBlob(
       voice: opts.voice,
       speed: opts.speed,
       sessionId: opts.sessionId,
+      // Phase 7: send personaId so the route can pick the persona's voiceId
+      personaId: opts.personaId,
     }),
     signal: opts.signal,
   });

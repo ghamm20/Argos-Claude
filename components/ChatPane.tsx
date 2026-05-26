@@ -199,6 +199,7 @@ function MessageBubble({
                 text={msg.content}
                 accent={accent}
                 sessionId={sessionId}
+                personaId={msg.personaId}
               />
             )}
           </div>
