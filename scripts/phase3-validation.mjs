@@ -24,7 +24,12 @@ const repoRoot = resolve(__dir, "..");
 const portArgIdx = process.argv.indexOf("--port");
 const PORT = portArgIdx >= 0 ? parseInt(process.argv[portArgIdx + 1], 10) : 7795;
 const argosRootArgIdx = process.argv.indexOf("--argos-root");
-const ARGOS_ROOT = argosRootArgIdx >= 0 ? process.argv[argosRootArgIdx + 1] : "C:\\Users\\Gordy\\Desktop\\ARGOS";
+// Resolution order: --argos-root flag > $ARGOS_ROOT env > process.cwd().
+// No hardcoded absolute path — Rule 1 compliant.
+const ARGOS_ROOT =
+  argosRootArgIdx >= 0
+    ? process.argv[argosRootArgIdx + 1]
+    : process.env.ARGOS_ROOT || process.cwd();
 const BASE = `http://127.0.0.1:${PORT}`;
 const agent = new http.Agent({ keepAlive: false });
 
@@ -155,7 +160,9 @@ try {
     const r = await req(`/api/vault/search`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: q.q, topK: 5 }),
+      // v1.1 Task 5: topK matches Bart's persona config (5 → 8) so
+      // the validation reflects what the chat dispatcher would inject.
+      body: JSON.stringify({ query: q.q, topK: 8 }),
       timeoutMs: 60_000,
     });
     const out = { query: q.q, error: null, hits: [], confidenceBuckets: { high: 0, medium: 0, low: 0 } };

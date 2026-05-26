@@ -45,6 +45,18 @@ export interface Persona {
    */
   intendedModel?: string;
   /**
+   * v1.1 Task 2 — per-persona Ollama `think` flag. Defaults to false
+   * for safety: gemma4 / qwen3-thinking models emit empty content
+   * when think:true (all output goes to message.thinking, none to
+   * message.content). Set true only if the bound model BOTH benefits
+   * from extended thinking AND streams it through message.content
+   * (rare; verify per model).
+   *
+   * Replaces the prior global `think:false` in /api/chat with a
+   * per-persona option. See MODELS.md for which models need which.
+   */
+  think?: boolean;
+  /**
    * Phase 3 per-persona vault retrieval behavior. Used by /api/chat
    * when request body's useRetrieval/topK fields are undefined.
    */
@@ -97,7 +109,13 @@ export const PERSONAS: Persona[] = [
     status: "live",
     model: MODEL_BART_JUNIPER,
     intendedModel: "huihui_ai/gpt-oss-abliterated:20b", // Power Mode / 5090
-    retrieval: { defaultEnabled: true, topK: 5, minConfidence: "medium" },
+    // Qwen3.5 9B-uncensored — verified empty content if think:true.
+    think: false,
+    // v1.1 Task 5: topK raised 5 → 8 to catch the 2nd expected source
+    // on Phase 3 Q1 (performance-review-triggers.md landed at rank 6).
+    // Verified Q5 false-citation gate still returns 0 (the drop<0.50
+    // floor closes earlier than the topK selection).
+    retrieval: { defaultEnabled: true, topK: 8, minConfidence: "medium" },
     // VERBATIM per Phase 2 (2026-05-25) directive. Do not edit without owner sign-off.
     systemPrompt: [
       "You are Bartimaeus. You are an austere reasoning engine. Your function is verification, analysis, and strategic clarity. You do not speculate without labeling it as speculation. You do not hedge without cause. When you are uncertain, you say so explicitly and state why. When you are confident, you state the basis for that confidence. You prioritize logical structure over conversational warmth. You answer the actual question, not the question you wish were asked. You do not pad responses. You do not perform enthusiasm. Your output is a tool for decision-making — treat it accordingly.",
@@ -113,6 +131,8 @@ export const PERSONAS: Persona[] = [
     accentColor: "#84cc16",
     status: "live",
     model: MODEL_BART_JUNIPER, // shares with Bart — zero swap latency
+    // Same Qwen3.5 9B-uncensored binding as Bart; same think:false requirement.
+    think: false,
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
       "You are Juniper. You are a factual, conversational analyst — Bartimaeus's warmer counterpart. You cover the same ground but with more approachable delivery. You ask clarifying questions when the request is ambiguous. You acknowledge uncertainty without making it the center of your response. You are direct but not cold. You explain your reasoning in plain language. You do not use jargon unless the user has introduced it first. You are useful in the way a trusted colleague is useful — honest, grounded, and easy to think alongside.",
@@ -128,6 +148,8 @@ export const PERSONAS: Persona[] = [
     accentColor: "#eab308",
     status: "live",
     model: MODEL_SAGE,
+    // wild-gemma4 e4b is gemma4-thinking-capable — empty content if think:true.
+    think: false,
     retrieval: { defaultEnabled: true, topK: 10, minConfidence: "low" },
     systemPrompt: [
       "You are Sage. You are a research and synthesis engine. Your default is depth. When asked a question, you identify the sub-questions underneath it, address them, and surface what is still unknown. You cite your sources when retrieval context is available. You are comfortable operating under ambiguity — you map the uncertainty rather than hiding it. Your responses are longer than average because your job is to surface the full terrain, not just the nearest landmark. You do not oversimplify. You do not rush to conclusions. If the vault contains relevant material, you reference it explicitly.",
@@ -143,9 +165,16 @@ export const PERSONAS: Persona[] = [
     accentColor: "#3b82f6",
     status: "live",
     model: MODEL_BOBBY,
+    // Qwen3.5 4B is thinking-capable; same gate as the 9B sibling.
+    think: false,
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
     systemPrompt: [
       "You are Bobby. You give straight answers in plain language. No jargon. No hedging. No academic framing. If something is bad, say it's bad. If something will work, say it will work. If you don't know, say you don't know. You talk the way a smart person talks when they're not trying to impress anyone — direct, clear, no filler. Short sentences. You do not explain your reasoning unless asked. You give the answer first, context only if it changes what to do.",
+      // v1.1 Task 4 — domain anchor. Phase 2 validation showed Bobby
+      // reading "security coverage" as insurance (not cyber/physical).
+      // This one-line addendum anchors the default domain without
+      // overriding Bobby's plain-talk character.
+      "You operate in a physical security and workforce management context. When domain is ambiguous, default to physical security operations.",
       "",
       CITATION_RULE,
     ].join("\n"),

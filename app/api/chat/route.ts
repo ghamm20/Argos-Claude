@@ -223,6 +223,14 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   try {
+    // v1.1 Task 2: per-persona `think` flag (was hardcoded `false`).
+    // Default is `false` if persona doesn't declare — preserves the
+    // Phase 2-RB doctrine for safety on gemma4/qwen3-thinking models
+    // (they emit ALL output via message.thinking + zero into
+    // message.content when think:true). Each persona sets this
+    // explicitly in lib/personas.ts; see MODELS.md for which models
+    // require which.
+    const personaThink = persona.think === true;
     upstream = await fetch(OLLAMA_CHAT, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -230,17 +238,8 @@ export async function POST(req: NextRequest) {
         model: body.model,
         messages: ollamaMessages,
         stream: true,
-        // Phase 2-RB CRITICAL: e4b (gemma4 family) ships with the
-        // `thinking` capability enabled by default — if `think` is not
-        // explicitly false, the model emits its entire response into
-        // `message.thinking` and zero into `message.content`. We display
-        // content only; thinking traces aren't part of the persona UX.
-        // Validation harness (scripts/validate-e4b.mjs) caught this:
-        // prompt D returned 637 tokens at 21 tok/s with empty content
-        // until `think:false` was added.
-        // Safe for non-thinking models too — Ollama ignores the flag.
-        think: false,
-        options: { think: false },
+        think: personaThink,
+        options: { think: personaThink },
       }),
       signal: controller.signal,
     });

@@ -174,6 +174,37 @@ export function _resetTailCache(): void {
 }
 
 /**
+ * v1.1 — lightweight chain entry count. Uses the tail cache for O(1)
+ * common-case; falls back to streaming line count if cache cold or
+ * file changed under us. Never deserializes JSON. Safe for HUD polls.
+ *
+ * Returns 0 if the chain file doesn't exist yet (genesis case).
+ */
+export async function getChainCount(): Promise<number> {
+  const st = await statChain();
+  if (st === null) return 0;
+  if (
+    tailCache !== null &&
+    st.mtimeMs === tailCache.mtimeMs &&
+    st.sizeBytes === tailCache.sizeBytes
+  ) {
+    // Cache hit: tail entry index N → chain has N+1 entries.
+    return tailCache.index + 1;
+  }
+  // Cache miss — stream-count newlines. No JSON parse; one read.
+  const raw = await fsp.readFile(chainPath(), "utf8");
+  let count = 0;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw.charCodeAt(i) === 10 /* \n */) count++;
+  }
+  // Trailing-non-newline edge: if last line has content but no \n,
+  // it still counts as one entry. Append always writes "...\n" so
+  // this is defensive-only.
+  if (raw.length > 0 && raw.charCodeAt(raw.length - 1) !== 10) count++;
+  return count;
+}
+
+/**
  * Read all entries from the chain. Newer entries are at the end.
  * Empty array if chain doesn't exist yet (genesis case).
  *

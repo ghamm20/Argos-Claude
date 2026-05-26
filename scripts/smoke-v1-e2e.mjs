@@ -5,7 +5,7 @@
 //
 // What it exercises:
 //   A. Server boots cleanly + /api/voice/status responds
-//   B. /api/model/warm loads e4b:latest
+//   B. /api/model/warm loads Bart's currently-bound model
 //   C. /api/chat through Bartimaeus returns coherent non-empty content
 //      (proves think:false plumbed correctly + persona system prompt
 //      reaches the model)
@@ -18,7 +18,8 @@
 //
 // Requirements:
 //   - Ollama running on 127.0.0.1:11434
-//   - e4b:latest in the Ollama store
+//   - Bart's bound model in the Ollama store (read from /api/system/info OR
+//     hardcoded fallback — see BART_MODEL below)
 //   - nomic-embed-text in Ollama (for retrieval surface; not required
 //     for chat itself to pass)
 //   - A clean ARGOS_ROOT in tmpdir (so we don't poison the real state)
@@ -46,6 +47,12 @@ const portArgIdx = args.indexOf("--port");
 const PORT = portArgIdx >= 0 ? parseInt(args[portArgIdx + 1], 10) : 7791;
 const BASE = `http://127.0.0.1:${PORT}`;
 const agent = new http.Agent({ keepAlive: false });
+
+// v1.1: Bart's current model is the Qwen3.5 9B uncensored. If the
+// persona roster shifts again, this constant needs to match
+// lib/personas.ts Bartimaeus.model. Keeping it here (not auto-derived)
+// is intentional — the smoke is a contract check, not a tautology.
+const BART_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 
 let pass = 0;
 let fail = 0;
@@ -169,11 +176,11 @@ try {
   }
 
   // === B. model/warm e4b ===
-  console.log("\n=== B. /api/model/warm e4b:latest ===");
+  console.log(`\n=== B. /api/model/warm ${BART_MODEL} ===`);
   const warm = await req("/api/model/warm", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "e4b:latest" }),
+    body: JSON.stringify({ model: BART_MODEL }),
   });
   check("B1  model/warm 200", warm.ok && warm.res.status === 200);
   if (warm.ok && warm.res.status === 200) {
@@ -187,7 +194,7 @@ try {
   const chatBody = JSON.stringify({
     messages: [{ role: "user", content: "State your role in one sentence." }],
     personaId: "bartimaeus",
-    model: "e4b:latest",
+    model: BART_MODEL,
     useRetrieval: false,
   });
   const ch = await req("/api/chat", {
@@ -221,7 +228,7 @@ try {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       personaId: "bartimaeus",
-      model: "e4b:latest",
+      model: BART_MODEL,
       messages: [
         { id: "u1", role: "user", content: "State your role in one sentence.", timestamp: Date.now() - 1000, personaId: "bartimaeus" },
         { id: "a1", role: "assistant", content: chatContent || "(empty)", timestamp: Date.now(), personaId: "bartimaeus" },

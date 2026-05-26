@@ -104,14 +104,22 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // v1.1 Task 1: live audit chain event count.
+  const [eventCount, setEventCount] = useState<number | null>(null);
+  // v1.1 Task 6: runtime argosRoot from /api/system/info — overrides the
+  // server-prop value baked at build time (which is wrong on deployed
+  // payload). null means "still using the server-prop"; populated value
+  // means the runtime fetch succeeded and we should prefer it.
+  const [runtimeArgosRoot, setRuntimeArgosRoot] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       try {
-        const [hwRes, vaultRes] = await Promise.all([
+        const [hwRes, vaultRes, sysRes] = await Promise.all([
           fetch("/api/hardware", { cache: "no-store" }),
           fetch("/api/vault/list", { cache: "no-store" }),
+          fetch("/api/system/info", { cache: "no-store" }),
         ]);
         if (cancel) return;
         if (hwRes.ok) setHw((await hwRes.json()) as HardwareProfile);
@@ -122,14 +130,42 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
           };
           setVaultCounts(j.documents.length, j.totalChunks);
         }
+        if (sysRes.ok) {
+          const j = (await sysRes.json()) as {
+            argosRoot?: string;
+            isDev?: boolean;
+          };
+          if (j.argosRoot) {
+            // Mirror the server-prop's dev tag convention.
+            setRuntimeArgosRoot(j.isDev ? `${j.argosRoot} (dev)` : j.argosRoot);
+          }
+        }
       } catch {
         /* leave nulls; HUD shows — */
       }
     })();
+
+    // v1.1 Task 1: poll audit chain event count. Cheap endpoint
+    // (stat-based cache); 5s interval matches HUD's other refresh
+    // signals without DoS'ing the chain reader.
+    const fetchCount = async () => {
+      try {
+        const r = await fetch("/api/audit/count", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as { count?: number };
+        if (typeof j.count === "number") setEventCount(j.count);
+      } catch {
+        /* offline; keep prior count */
+      }
+    };
+    void fetchCount();
+    const countPoll = setInterval(() => void fetchCount(), 5000);
+
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancel = true;
       clearInterval(tick);
+      clearInterval(countPoll);
     };
   }, [setVaultCounts]);
 
@@ -290,6 +326,17 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         <Row label="Persona" value={personaName} accent={eyeColor} />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
+        {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}
+        <Row
+          label="Events"
+          value={eventCount === null ? "—" : fmtInt(eventCount)}
+          accent={eventCount && eventCount > 0 ? eyeColor : undefined}
+          title={
+            eventCount === null
+              ? "polling /api/audit/count…"
+              : `${eventCount} entr${eventCount === 1 ? "y" : "ies"} on the hash-chained audit log`
+          }
+        />
         <Row
           label="Citations"
           value={citationsUsed > 0 ? `${citationsUsed} used` : "—"}
@@ -318,7 +365,16 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
       </Section>
 
       <Section title="Host">
-        <Row label="USB path" value={argosRoot} />
+        {/* v1.1 Task 6: prefer the runtime value from /api/system/info
+            when available — the server-prop `argosRoot` was baked at
+            build time (page.tsx is statically rendered) and shows the
+            dev-source path on the deployed payload. The runtime fetch
+            corrects this once the HUD mounts. */}
+        <Row
+          label="USB path"
+          value={runtimeArgosRoot ?? argosRoot}
+          title={runtimeArgosRoot ?? argosRoot}
+        />
         <Row label="Network" value="Local only" accent="#10b981" />
         <Row label="Build" value={`v${version}`} />
         <Row label="Uptime" value={fmtUptime(uptimeMs)} />

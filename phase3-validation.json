@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-26T00:08:17.606Z",
+  "timestamp": "2026-05-26T15:13:04.714Z",
   "argosRoot": "C:\\Users\\Gordy\\Desktop\\ARGOS",
   "port": 7795,
   "queries": [
@@ -80,11 +80,32 @@
           "score": 0.6018001746834987,
           "confidence": "high",
           "textPreview": "# Standard Post Orders — Template Guards must sign in at the start of each shift using the site log. Unauthorized person"
+        },
+        {
+          "filename": "performance-review-triggers.md",
+          "chunkIndex": 0,
+          "score": 0.6011434600037765,
+          "confidence": "high",
+          "textPreview": "# Performance Review Triggers Automatic review triggers: 3 unexcused call-offs (90 days), use of force incident, client "
+        },
+        {
+          "filename": "overtime-controls.md",
+          "chunkIndex": 0,
+          "score": 0.5775327936564117,
+          "confidence": "medium",
+          "textPreview": "# Overtime Controls Target: overtime below 8% of total hours worked per week. NBOT (Non-Billable Overtime) must be kept "
+        },
+        {
+          "filename": "site-onboarding-checklist.md",
+          "chunkIndex": 0,
+          "score": 0.5580787578181893,
+          "confidence": "medium",
+          "textPreview": "# Site Onboarding Checklist New site activation requires: signed contract, site survey, post order creation, emergency c"
         }
       ],
       "confidenceBuckets": {
-        "high": 5,
-        "medium": 0,
+        "high": 6,
+        "medium": 2,
         "low": 0
       }
     },
@@ -126,11 +147,32 @@
           "score": 0.618341461079534,
           "confidence": "high",
           "textPreview": "# Scheduling Policy Minimum 8-hour rest period required between shifts. Overtime requires supervisor pre-approval. Unapp"
+        },
+        {
+          "filename": "site-onboarding-checklist.md",
+          "chunkIndex": 0,
+          "score": 0.5914775033971241,
+          "confidence": "medium",
+          "textPreview": "# Site Onboarding Checklist New site activation requires: signed contract, site survey, post order creation, emergency c"
+        },
+        {
+          "filename": "performance-review-triggers.md",
+          "chunkIndex": 0,
+          "score": 0.5434653965872032,
+          "confidence": "medium",
+          "textPreview": "# Performance Review Triggers Automatic review triggers: 3 unexcused call-offs (90 days), use of force incident, client "
+        },
+        {
+          "filename": "incident-response-sop.md",
+          "chunkIndex": 0,
+          "score": 0.5330956350450919,
+          "confidence": "medium",
+          "textPreview": "# Incident Response SOP Critical incidents (assault, theft, trespass) require immediate notification to the operations c"
         }
       ],
       "confidenceBuckets": {
         "high": 5,
-        "medium": 0,
+        "medium": 3,
         "low": 0
       }
     },
@@ -172,11 +214,32 @@
           "score": 0.5906935789935719,
           "confidence": "medium",
           "textPreview": "# Site Onboarding Checklist New site activation requires: signed contract, site survey, post order creation, emergency c"
+        },
+        {
+          "filename": "performance-review-triggers.md",
+          "chunkIndex": 0,
+          "score": 0.5857677917511376,
+          "confidence": "medium",
+          "textPreview": "# Performance Review Triggers Automatic review triggers: 3 unexcused call-offs (90 days), use of force incident, client "
+        },
+        {
+          "filename": "certification-requirements.md",
+          "chunkIndex": 0,
+          "score": 0.5714606601108924,
+          "confidence": "medium",
+          "textPreview": "# Certification Requirements All guards must maintain a valid state security license. License expiration triggers automa"
+        },
+        {
+          "filename": "client-contract-terms.md",
+          "chunkIndex": 0,
+          "score": 0.5655299636439037,
+          "confidence": "medium",
+          "textPreview": "# Standard Client Contract Terms Service hours are billed at the contracted rate. Overtime billed at 1.5x. Minimum 30-da"
         }
       ],
       "confidenceBuckets": {
         "high": 3,
-        "medium": 2,
+        "medium": 5,
         "low": 0
       }
     },
@@ -218,11 +281,32 @@
           "score": 0.5657306160809114,
           "confidence": "medium",
           "textPreview": "# Call-Off Management Protocol On receipt of a call-off, the supervisor has 90 minutes to fill the position. Fill sequen"
+        },
+        {
+          "filename": "use-of-force-policy.md",
+          "chunkIndex": 0,
+          "score": 0.5557548349065508,
+          "confidence": "medium",
+          "textPreview": "# Use of Force Policy Guards are authorized to use only the minimum force necessary to protect life. Physical interventi"
+        },
+        {
+          "filename": "argos-defined.md",
+          "chunkIndex": 9,
+          "score": 0.5357446392980194,
+          "confidence": "medium",
+          "textPreview": "smoke-launcher, smoke-launcher-e2e, smoke-all-models, smoke-input-validation, smoke-chat-export, smoke-sessions, smoke-v"
+        },
+        {
+          "filename": "client-contract-terms.md",
+          "chunkIndex": 0,
+          "score": 0.5274855310769611,
+          "confidence": "medium",
+          "textPreview": "# Standard Client Contract Terms Service hours are billed at the contracted rate. Overtime billed at 1.5x. Minimum 30-da"
         }
       ],
       "confidenceBuckets": {
         "high": 3,
-        "medium": 2,
+        "medium": 5,
         "low": 0
       }
     },

@@ -104,58 +104,108 @@ async function waitReady(maxSec = 30) {
   return false;
 }
 
+/**
+ * v1.1 Task 3 — true streaming chat with real TTFT measurement.
+ *
+ * Prior version called `req()` which buffered the entire response
+ * before returning, so `firstTokenAt` was always assigned after the
+ * stream had already closed (ttft ≈ total). Now we run the http
+ * request directly and watch chunks as they arrive over the wire —
+ * `firstTokenAt` is recorded the moment the FIRST data chunk
+ * containing a non-empty `message.content` parses out.
+ *
+ * Also assigns total based on stream-close time, so total >= ttft
+ * is enforced by construction.
+ */
 async function chat(personaId, model, prompt) {
-  const start = Date.now();
-  const body = JSON.stringify({
-    messages: [{ role: "user", content: prompt }],
-    personaId,
-    model,
-    useRetrieval: false,
-  });
-  const r = await req("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body,
-    timeoutMs: 300_000,
-  });
-  if (!r.ok) return { error: r.error, totalMs: Date.now() - start };
-  if (r.res.status !== 200) {
-    return {
-      error: `HTTP ${r.res.status}: ${(await r.res.text()).slice(0, 400)}`,
-      totalMs: Date.now() - start,
-    };
-  }
-  const text = await r.res.text();
-  let content = "";
-  let firstTokenAt = null;
-  let stats = null;
-  const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  for (const line of lines) {
-    try {
-      const j = JSON.parse(line);
-      if (j?.message?.content) {
-        if (firstTokenAt === null) firstTokenAt = Date.now();
-        content += j.message.content;
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const body = JSON.stringify({
+      messages: [{ role: "user", content: prompt }],
+      personaId,
+      model,
+      useRetrieval: false,
+    });
+    const url = new URL("/api/chat", BASE);
+    let buf = "";
+    let content = "";
+    let firstTokenAt = null;
+    let stats = null;
+    const r = http.request(
+      {
+        method: "POST",
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        },
+        agent,
+        timeout: 300_000,
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          const errChunks = [];
+          res.on("data", (c) => errChunks.push(c));
+          res.on("end", () => {
+            resolve({
+              error: `HTTP ${res.statusCode}: ${Buffer.concat(errChunks)
+                .toString("utf8")
+                .slice(0, 400)}`,
+              totalMs: Date.now() - start,
+            });
+          });
+          return;
+        }
+        // Stream chunks as they arrive — TTFT is the first chunk
+        // that carries non-empty message.content.
+        res.on("data", (chunk) => {
+          buf += chunk.toString("utf8");
+          let nl = buf.indexOf("\n");
+          while (nl !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (line) {
+              try {
+                const j = JSON.parse(line);
+                if (j?.message?.content) {
+                  if (firstTokenAt === null) firstTokenAt = Date.now();
+                  content += j.message.content;
+                }
+                if (j?.done) stats = j;
+              } catch {
+                /* tail retrieval event isn't a chat chunk */
+              }
+            }
+            nl = buf.indexOf("\n");
+          }
+        });
+        res.on("end", () => {
+          const total = Date.now() - start;
+          const ttft = firstTokenAt ? firstTokenAt - start : null;
+          const tps =
+            stats?.eval_duration && stats?.eval_count
+              ? stats.eval_count / (stats.eval_duration / 1e9)
+              : null;
+          resolve({
+            content,
+            totalMs: total,
+            ttftMs: ttft,
+            evalCount: stats?.eval_count ?? null,
+            tokensPerSec: tps,
+            loadDurationMs: stats?.load_duration ? stats.load_duration / 1e6 : null,
+          });
+        });
       }
-      if (j?.done) stats = j;
-    } catch {
-      /* tail retrieval event isn't a chat chunk */
-    }
-  }
-  const total = Date.now() - start;
-  const ttft = firstTokenAt ? firstTokenAt - start : null;
-  const tps =
-    stats?.eval_duration && stats?.eval_count
-      ? (stats.eval_count / (stats.eval_duration / 1e9))
-      : null;
-  return {
-    content,
-    totalMs: total,
-    ttftMs: ttft,
-    evalCount: stats?.eval_count ?? null,
-    tokensPerSec: tps,
-    loadDurationMs: stats?.load_duration ? stats.load_duration / 1e6 : null,
-  };
+    );
+    r.on("error", (e) =>
+      resolve({ error: e.message, totalMs: Date.now() - start })
+    );
+    r.on("timeout", () => r.destroy(new Error("timeout")));
+    r.write(body);
+    r.end();
+  });
 }
 
 const tmpRoot = mkdtempSync(join(tmpdir(), "argos-phase2-validation-"));
