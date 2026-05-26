@@ -37,3 +37,15 @@ export function storedDocPath(docId: string, filename: string): string {
 export function tmpUploadDir(): string {
   return path.join(docsDir(), ".tmp");
 }
+
+// Phase 3-B (2026-05-25): canonical operator drop-zone is now `vault/raw/`.
+// `vault/dropbox/` is supported as a legacy fallback for back-compat with
+// deployed payloads that already have a populated dropbox. Auto-ingest
+// scans both. New code should prefer rawDir().
+export function rawDir(): string {
+  return path.join(vaultRoot(), "raw");
+}
+
+export function legacyDropboxDir(): string {
+  return path.join(vaultRoot(), "dropbox");
+}

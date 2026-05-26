@@ -1,0 +1,255 @@
+{
+  "timestamp": "2026-05-26T00:08:17.606Z",
+  "argosRoot": "C:\\Users\\Gordy\\Desktop\\ARGOS",
+  "port": 7795,
+  "queries": [
+    {
+      "id": "Q1",
+      "q": "What happens when a guard calls off three times?",
+      "expectedSources": [
+        "calloff-management.md",
+        "performance-review-triggers.md"
+      ]
+    },
+    {
+      "id": "Q2",
+      "q": "How do I handle overtime billing for a client?",
+      "expectedSources": [
+        "client-contract-terms.md",
+        "overtime-controls.md"
+      ]
+    },
+    {
+      "id": "Q3",
+      "q": "Guard used force on a trespasser — what's the protocol?",
+      "expectedSources": [
+        "use-of-force-policy.md",
+        "incident-response-sop.md"
+      ]
+    },
+    {
+      "id": "Q4",
+      "q": "What certifications does a guard need for a firearm post?",
+      "expectedSources": [
+        "certification-requirements.md"
+      ]
+    },
+    {
+      "id": "Q5",
+      "q": "What is the boiling point of water?",
+      "expectedSources": [],
+      "falseCitationTest": true
+    }
+  ],
+  "results": {
+    "Q1": {
+      "query": "What happens when a guard calls off three times?",
+      "error": null,
+      "hits": [
+        {
+          "filename": "calloff-management.md",
+          "chunkIndex": 0,
+          "score": 0.7308520084233171,
+          "confidence": "high",
+          "textPreview": "# Call-Off Management Protocol On receipt of a call-off, the supervisor has 90 minutes to fill the position. Fill sequen"
+        },
+        {
+          "filename": "scheduling-policy.md",
+          "chunkIndex": 0,
+          "score": 0.6262092494110375,
+          "confidence": "high",
+          "textPreview": "# Scheduling Policy Minimum 8-hour rest period required between shifts. Overtime requires supervisor pre-approval. Unapp"
+        },
+        {
+          "filename": "incident-response-sop.md",
+          "chunkIndex": 0,
+          "score": 0.6117563023742147,
+          "confidence": "high",
+          "textPreview": "# Incident Response SOP Critical incidents (assault, theft, trespass) require immediate notification to the operations c"
+        },
+        {
+          "filename": "certification-requirements.md",
+          "chunkIndex": 0,
+          "score": 0.6102909256369711,
+          "confidence": "high",
+          "textPreview": "# Certification Requirements All guards must maintain a valid state security license. License expiration triggers automa"
+        },
+        {
+          "filename": "post-orders-template.md",
+          "chunkIndex": 0,
+          "score": 0.6018001746834987,
+          "confidence": "high",
+          "textPreview": "# Standard Post Orders — Template Guards must sign in at the start of each shift using the site log. Unauthorized person"
+        }
+      ],
+      "confidenceBuckets": {
+        "high": 5,
+        "medium": 0,
+        "low": 0
+      }
+    },
+    "Q2": {
+      "query": "How do I handle overtime billing for a client?",
+      "error": null,
+      "hits": [
+        {
+          "filename": "client-contract-terms.md",
+          "chunkIndex": 0,
+          "score": 0.6912661130448627,
+          "confidence": "high",
+          "textPreview": "# Standard Client Contract Terms Service hours are billed at the contracted rate. Overtime billed at 1.5x. Minimum 30-da"
+        },
+        {
+          "filename": "overtime-controls.md",
+          "chunkIndex": 0,
+          "score": 0.672382009990515,
+          "confidence": "high",
+          "textPreview": "# Overtime Controls Target: overtime below 8% of total hours worked per week. NBOT (Non-Billable Overtime) must be kept "
+        },
+        {
+          "filename": "post-orders-template.md",
+          "chunkIndex": 0,
+          "score": 0.62711634594778,
+          "confidence": "high",
+          "textPreview": "# Standard Post Orders — Template Guards must sign in at the start of each shift using the site log. Unauthorized person"
+        },
+        {
+          "filename": "calloff-management.md",
+          "chunkIndex": 0,
+          "score": 0.6209403495813837,
+          "confidence": "high",
+          "textPreview": "# Call-Off Management Protocol On receipt of a call-off, the supervisor has 90 minutes to fill the position. Fill sequen"
+        },
+        {
+          "filename": "scheduling-policy.md",
+          "chunkIndex": 0,
+          "score": 0.618341461079534,
+          "confidence": "high",
+          "textPreview": "# Scheduling Policy Minimum 8-hour rest period required between shifts. Overtime requires supervisor pre-approval. Unapp"
+        }
+      ],
+      "confidenceBuckets": {
+        "high": 5,
+        "medium": 0,
+        "low": 0
+      }
+    },
+    "Q3": {
+      "query": "Guard used force on a trespasser — what's the protocol?",
+      "error": null,
+      "hits": [
+        {
+          "filename": "use-of-force-policy.md",
+          "chunkIndex": 0,
+          "score": 0.7624924179639645,
+          "confidence": "high",
+          "textPreview": "# Use of Force Policy Guards are authorized to use only the minimum force necessary to protect life. Physical interventi"
+        },
+        {
+          "filename": "incident-response-sop.md",
+          "chunkIndex": 0,
+          "score": 0.6808435764454683,
+          "confidence": "high",
+          "textPreview": "# Incident Response SOP Critical incidents (assault, theft, trespass) require immediate notification to the operations c"
+        },
+        {
+          "filename": "post-orders-template.md",
+          "chunkIndex": 0,
+          "score": 0.6131677912032824,
+          "confidence": "high",
+          "textPreview": "# Standard Post Orders — Template Guards must sign in at the start of each shift using the site log. Unauthorized person"
+        },
+        {
+          "filename": "calloff-management.md",
+          "chunkIndex": 0,
+          "score": 0.5912137559599465,
+          "confidence": "medium",
+          "textPreview": "# Call-Off Management Protocol On receipt of a call-off, the supervisor has 90 minutes to fill the position. Fill sequen"
+        },
+        {
+          "filename": "site-onboarding-checklist.md",
+          "chunkIndex": 0,
+          "score": 0.5906935789935719,
+          "confidence": "medium",
+          "textPreview": "# Site Onboarding Checklist New site activation requires: signed contract, site survey, post order creation, emergency c"
+        }
+      ],
+      "confidenceBuckets": {
+        "high": 3,
+        "medium": 2,
+        "low": 0
+      }
+    },
+    "Q4": {
+      "query": "What certifications does a guard need for a firearm post?",
+      "error": null,
+      "hits": [
+        {
+          "filename": "certification-requirements.md",
+          "chunkIndex": 0,
+          "score": 0.814043744321916,
+          "confidence": "high",
+          "textPreview": "# Certification Requirements All guards must maintain a valid state security license. License expiration triggers automa"
+        },
+        {
+          "filename": "site-onboarding-checklist.md",
+          "chunkIndex": 0,
+          "score": 0.6732872683551923,
+          "confidence": "high",
+          "textPreview": "# Site Onboarding Checklist New site activation requires: signed contract, site survey, post order creation, emergency c"
+        },
+        {
+          "filename": "incident-response-sop.md",
+          "chunkIndex": 0,
+          "score": 0.6164669145215459,
+          "confidence": "high",
+          "textPreview": "# Incident Response SOP Critical incidents (assault, theft, trespass) require immediate notification to the operations c"
+        },
+        {
+          "filename": "post-orders-template.md",
+          "chunkIndex": 0,
+          "score": 0.598594835410189,
+          "confidence": "medium",
+          "textPreview": "# Standard Post Orders — Template Guards must sign in at the start of each shift using the site log. Unauthorized person"
+        },
+        {
+          "filename": "calloff-management.md",
+          "chunkIndex": 0,
+          "score": 0.5657306160809114,
+          "confidence": "medium",
+          "textPreview": "# Call-Off Management Protocol On receipt of a call-off, the supervisor has 90 minutes to fill the position. Fill sequen"
+        }
+      ],
+      "confidenceBuckets": {
+        "high": 3,
+        "medium": 2,
+        "low": 0
+      }
+    },
+    "Q5": {
+      "query": "What is the boiling point of water?",
+      "error": null,
+      "hits": [],
+      "confidenceBuckets": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      }
+    }
+  },
+  "autoIngest": {
+    "rawPath": "C:\\Users\\Gordy\\Desktop\\ARGOS\\vault\\raw",
+    "legacyDropboxPath": "C:\\Users\\Gordy\\Desktop\\ARGOS\\vault\\dropbox",
+    "totalFiles": 0,
+    "ingested": 0,
+    "errored": 0,
+    "skipped": 0,
+    "records": []
+  },
+  "vaultList": {
+    "docs": 15,
+    "totalChunks": 29
+  },
+  "passCount": 5,
+  "failCount": 0
+}

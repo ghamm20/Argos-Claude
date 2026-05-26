@@ -8,6 +8,7 @@ import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
 import { MicButton } from "./voice/MicButton";
 import { PlayButton } from "./voice/PlayButton";
+import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
 import {
   useArgos,
   type ChatMessage,
@@ -60,6 +61,96 @@ function renderWithCitations(
   }
   if (last < content.length) out.push(content.slice(last));
   return out;
+}
+
+/**
+ * Phase 3-B (2026-05-25) — collapsible "📎 Sources ▾" block.
+ *
+ * Renders below an assistant message when retrieval returned hits. Closed
+ * by default; one click expands. Shows confidence pill + filename + chunk
+ * index per hit. No full-text preview (the existing CitationPill +
+ * CitationDrawer combo already handles deep inspection on click).
+ *
+ * Hide rules:
+ *   - No hits → don't render (zero "no sources found" message; doctrine)
+ *   - Streaming → don't render (only show on finalized turns)
+ *   - Errored → don't render
+ */
+function SourcesBlock({
+  hits,
+  accent,
+  onHitClick,
+}: {
+  hits: CitedHit[];
+  accent: string;
+  onHitClick: (hit: CitedHit) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (hits.length === 0) return null;
+
+  // Bucket by confidence so the operator scans top-down
+  // (HIGH first, MED, LOW).
+  const ranked = [...hits].sort((a, b) => {
+    const cw = (c?: string) => (c === "high" ? 3 : c === "medium" ? 2 : c === "low" ? 1 : 0);
+    return cw(b.confidence) - cw(a.confidence) || b.score - a.score;
+  });
+
+  return (
+    <div className="mt-2 pt-2 border-t border-neutral-800/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500 hover:text-neutral-300 transition-colors"
+        aria-expanded={open}
+      >
+        <Paperclip className="h-3 w-3" />
+        Sources ({hits.length})
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-1 text-[11px]">
+          {ranked.map((h) => (
+            <li
+              key={`src-${h.index}`}
+              className="flex items-center gap-2 hover:bg-neutral-800/40 rounded px-1.5 py-0.5 cursor-pointer"
+              onClick={() => onHitClick(h)}
+              role="button"
+            >
+              <span
+                className="inline-block text-[9px] uppercase tracking-wider px-1 rounded-sm border"
+                style={{
+                  borderColor:
+                    h.confidence === "high"
+                      ? "rgba(16,185,129,0.4)"
+                      : h.confidence === "medium"
+                        ? "rgba(234,179,8,0.4)"
+                        : "rgba(115,115,115,0.4)",
+                  color:
+                    h.confidence === "high"
+                      ? "#10b981"
+                      : h.confidence === "medium"
+                        ? "#eab308"
+                        : "#a3a3a3",
+                }}
+              >
+                {h.confidence?.toUpperCase() ?? "—"}
+              </span>
+              <span className="font-mono text-neutral-300 truncate flex-1" title={h.filename}>
+                {h.filename}
+              </span>
+              <span className="text-neutral-600">chunk {h.chunkIndex}</span>
+              <span className="text-neutral-600 font-mono">{h.score.toFixed(2)}</span>
+              <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function MessageBubble({
@@ -149,6 +240,16 @@ function MessageBubble({
                     style={{ background: accent }}
                     animate={{ opacity: [0.3, 1, 0.3] }}
                     transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
+                {/* Phase 3-B: collapsible Sources block. Only renders on
+                    finalized assistant turns that actually used retrieval.
+                    Inline citation pills above still render the [N] marks. */}
+                {!msg.isStreaming && msg.retrievalHits && msg.retrievalHits.length > 0 && (
+                  <SourcesBlock
+                    hits={msg.retrievalHits}
+                    accent={accent}
+                    onHitClick={onPillClick}
                   />
                 )}
               </>

@@ -60,13 +60,27 @@ export interface IngestProgress {
  * Phase 3 confidence buckets for retrieval hits.
  * Thresholds calibrated to nomic-embed-text cosine score distribution.
  * See docs/RETRIEVAL.md for derivation + how to tune.
+ *
+ * Phase 3-B (2026-05-25) recalibration based on EKG seed corpus Q5
+ * false-citation evidence: raised the drop floor from 0.25 → 0.50
+ * because nomic-embed-text returns 0.45-0.50 cosine on ANY pair of
+ * English text regardless of topical relevance (it learns general
+ * English structure). Below 0.50 is background noise on this model.
+ *
+ * Observed thresholds on the EKG validation corpus:
+ *   - True topical matches:    0.566-0.814  → HIGH or upper-MEDIUM
+ *   - Background noise floor:  0.450-0.500  → drop (was MEDIUM/LOW pre-cal)
+ *   - Q5 ("boiling point of water") returned 5 hits at 0.459-0.475 —
+ *     all dropped at the new 0.50 floor → false-citation rate 0/5.
+ *
+ * See PHASE_3_REPORT.md §validation for the data.
  */
 export type Confidence = "high" | "medium" | "low";
 
 export const CONFIDENCE_THRESHOLDS = {
-  high: 0.55,
-  medium: 0.40,
-  low: 0.25,
+  high: 0.60,
+  medium: 0.50,
+  low: 0.50, // collapsed — no useful "weak" zone above the noise floor
   // hits scoring below `low` are filtered out before returning.
 } as const;
 
