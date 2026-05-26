@@ -413,6 +413,86 @@ export interface TranscribeResult {
 }
 
 /**
+ * Minimum audio duration (seconds) we feed to whisper-cli. Anything
+ * shorter gets zero-padded up to this floor.
+ *
+ * Why: whisper.cpp's small.en model reliably hallucinates on very
+ * short clips — a 400ms "hello" comes back as "you", a 600ms "stop"
+ * comes back as phantom sentences. The model needs enough context
+ * to anchor against real speech; below ~1.5s its prior takes over
+ * and it confabulates. Padding with PCM silence (zero bytes) gives
+ * the encoder dead air to chew on without changing the transcript.
+ */
+const MIN_STT_SECONDS = 1.5;
+
+/**
+ * Parse a RIFF/WAVE header, compute duration from byteRate + data
+ * chunk size, and zero-pad the audio if it's shorter than
+ * `minSeconds`. Returns the original buffer unchanged if it's already
+ * long enough OR if header parsing fails (we never break the pipeline
+ * — unpadded short clips just risk hallucination, which is the
+ * pre-fix baseline).
+ *
+ * Header layout we care about:
+ *   bytes 0-3   "RIFF"
+ *   bytes 4-7   RIFF chunk size (LE uint32, = file size - 8)
+ *   bytes 8-11  "WAVE"
+ *   bytes 28-31 byteRate (= sampleRate * channels * bitsPerSample/8)
+ *   bytes ?-?   "data" marker + LE uint32 data size, audio follows
+ *
+ * We scan for "data" instead of assuming offset 36 because some
+ * WAV producers (incl. some MediaRecorder builds) emit a LIST/INFO
+ * chunk between "fmt " and "data".
+ */
+export function padWavToMinDuration(wav: Buffer, minSeconds: number): Buffer {
+  try {
+    if (wav.length < 44) return wav;
+    if (wav.slice(0, 4).toString("ascii") !== "RIFF") return wav;
+    if (wav.slice(8, 12).toString("ascii") !== "WAVE") return wav;
+    const byteRate = wav.readUInt32LE(28);
+    if (!byteRate) return wav;
+
+    // Find the "data" subchunk marker (0x64 0x61 0x74 0x61).
+    let dataChunkOffset = -1;
+    for (let i = 12; i <= wav.length - 8; i++) {
+      if (
+        wav[i] === 0x64 &&
+        wav[i + 1] === 0x61 &&
+        wav[i + 2] === 0x74 &&
+        wav[i + 3] === 0x61
+      ) {
+        dataChunkOffset = i;
+        break;
+      }
+    }
+    if (dataChunkOffset < 0) return wav;
+
+    const dataSize = wav.readUInt32LE(dataChunkOffset + 4);
+    const durationSec = dataSize / byteRate;
+    if (durationSec >= minSeconds) return wav;
+
+    const targetBytes = Math.ceil(byteRate * minSeconds);
+    const padBytes = targetBytes - dataSize;
+    if (padBytes <= 0) return wav;
+
+    const silence = Buffer.alloc(padBytes); // zero-init = PCM silence
+    const padded = Buffer.concat([wav, silence]);
+
+    // Rewrite the two length fields so the file is still a valid WAV:
+    //   RIFF chunk size (bytes 4-7) += padBytes
+    //   data subchunk size (bytes dataChunkOffset+4..+7) += padBytes
+    padded.writeUInt32LE(padded.readUInt32LE(4) + padBytes, 4);
+    padded.writeUInt32LE(dataSize + padBytes, dataChunkOffset + 4);
+
+    return padded;
+  } catch {
+    // Any parse error → return original. Hallucination risk on a
+    // short clip beats a broken transcription pipeline.
+    return wav;
+  }
+}
+
+/**
  * Transcribe a WAV (16kHz mono PCM) buffer using whisper.cpp.
  *
  * Strategy:
@@ -438,13 +518,18 @@ export async function transcribeWav(
     );
   }
 
+  // Short-utterance defense — pad to MIN_STT_SECONDS of silence so
+  // whisper-cli has enough audio context to avoid hallucinating on
+  // sub-second clips. No-op for any clip already at/above the floor.
+  const wavForWhisper = padWavToMinDuration(wav, MIN_STT_SECONDS);
+
   await fsp.mkdir(voiceCacheDir(), { recursive: true });
   const id = randomUUID().replace(/-/g, "");
   const wavPath = path.join(voiceCacheDir(), `${id}.wav`);
   const outBase = path.join(voiceCacheDir(), `${id}-out`); // whisper appends .txt
   const txtPath = `${outBase}.txt`;
 
-  await fsp.writeFile(wavPath, wav);
+  await fsp.writeFile(wavPath, wavForWhisper);
 
   try {
     const args = [
