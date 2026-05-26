@@ -248,7 +248,7 @@ New routes verified present in deployed bundle:
 
 Will be filled after `git commit` at end of this report.
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `31332f0` (local on `main`, not pushed, not tagged)
 
 ---
 
