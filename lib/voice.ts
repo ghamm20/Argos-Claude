@@ -47,6 +47,26 @@ export function kokoroDir(): string {
   return path.join(voiceToolsDir(), "kokoro");
 }
 
+/**
+ * Phase 7-B (2026-05-26) — Piper subtree. Active TTS engine (Kokoros
+ * binary doesn't exist as a public release; Piper has real Windows
+ * binaries + a per-voice ONNX model file format).
+ *
+ * Layout:
+ *   tools/voice/piper/piper.exe         ← binary
+ *   tools/voice/piper/*.dll             ← runtime DLLs from the zip
+ *   tools/voice/piper/espeak-ng-data/   ← phonemizer language data
+ *   tools/voice/piper/voices/<id>.onnx  ← voice model
+ *   tools/voice/piper/voices/<id>.onnx.json  ← per-voice config
+ */
+export function piperDir(): string {
+  return path.join(voiceToolsDir(), "piper");
+}
+
+export function piperVoicesDir(): string {
+  return path.join(piperDir(), "voices");
+}
+
 /** Scratch dir for short-lived wav/text files during a single op. */
 export function voiceCacheDir(): string {
   return path.join(argosRoot(), "state", "voice", "cache");
@@ -91,6 +111,40 @@ export function whisperBinary(): string | null {
 /** Resolve the kokoro binary path. */
 export function kokoroBinary(): string | null {
   return probeBinary(kokoroDir(), KOKORO_CANDIDATES);
+}
+
+const PIPER_CANDIDATES = ["piper"];
+
+/** Resolve the Piper binary path. Phase 7-B preferred TTS engine. */
+export function piperBinary(): string | null {
+  return probeBinary(piperDir(), PIPER_CANDIDATES);
+}
+
+/**
+ * Resolve a Piper voice model path by voiceId. The persona's `voiceId`
+ * field (e.g. "en_US-ryan-high") becomes filename:
+ *   tools/voice/piper/voices/en_US-ryan-high.onnx
+ *
+ * Returns null if the file doesn't exist — caller short-circuits with
+ * a capability error.
+ */
+export function piperVoiceModel(voiceId: string): string | null {
+  const full = path.join(piperVoicesDir(), `${voiceId}.onnx`);
+  return existsSync(full) ? full : null;
+}
+
+/**
+ * Returns true if AT LEAST ONE `.onnx` voice exists in the Piper voices
+ * dir. Used by capability detection — having the binary but no voices
+ * means TTS isn't usable.
+ */
+export async function piperHasAnyVoice(): Promise<boolean> {
+  try {
+    const entries = await fsp.readdir(piperVoicesDir());
+    return entries.some((e) => e.endsWith(".onnx"));
+  } catch {
+    return false;
+  }
 }
 
 // ----- model resolution -----------------------------------------
@@ -175,11 +229,22 @@ export interface VoiceCapability {
     model: string | null;
     reason: string | null; // human-friendly explanation if !available
   };
-  /** TTS (Kokoro) status snapshot. */
+  /** TTS status snapshot. Phase 7-B: dual-engine (Piper preferred,
+   *  Kokoro retained as option if a binary ever lands). `engine`
+   *  reports which one will actually serve requests. */
   tts: {
     available: boolean;
+    engine: "piper" | "kokoro" | null;
     binary: string | null;
+    /** Engine-specific notes:
+     *  - Piper: this is the voices DIR (per-voice .onnx files inside)
+     *  - Kokoro: this is the single ONNX model path
+     */
     model: string | null;
+    /** Engine-specific notes:
+     *  - Piper: null (each voice IS the model file)
+     *  - Kokoro: voices-v1.0.bin path
+     */
     voices: string | null;
     reason: string | null;
   };
@@ -195,9 +260,16 @@ export interface VoiceCapability {
 export async function detectVoiceCapability(): Promise<VoiceCapability> {
   const sttBin = whisperBinary();
   const sttModel = await whisperModel();
-  const ttsBin = kokoroBinary();
-  const ttsModelFile = await kokoroModel();
-  const ttsVoices = await kokoroVoices();
+
+  // Phase 7-B: TTS prefers Piper. Fall back to Kokoro only if Piper
+  // isn't installed AND a Kokoro binary lives in the kokoro/ dir
+  // (which is unusual since kokoros.exe isn't a real release — but
+  // the optionality stays in case operator builds from source).
+  const piperBin = piperBinary();
+  const piperHasVoice = await piperHasAnyVoice();
+  const kokoroBin = kokoroBinary();
+  const kokoroModelFile = await kokoroModel();
+  const kokoroVoicesFile = await kokoroVoices();
 
   function sttReason(): string | null {
     if (sttBin && sttModel) return null;
@@ -207,15 +279,39 @@ export async function detectVoiceCapability(): Promise<VoiceCapability> {
       return `whisper binary missing in ${whisperDir()}. Drop whisper-cli(.exe) there.`;
     return `whisper model missing in ${path.join(whisperDir(), "models")}. Drop a ggml-*.bin there.`;
   }
-  function ttsReason(): string | null {
-    if (ttsBin && ttsModelFile && ttsVoices) return null;
-    if (!ttsBin && !ttsModelFile)
-      return `kokoro binary + model missing. See tools/voice/README.md.`;
-    if (!ttsBin)
-      return `kokoro binary missing in ${kokoroDir()}. Drop kokoros(.exe) there.`;
-    if (!ttsModelFile)
-      return `kokoro model missing in ${path.join(kokoroDir(), "models")}. Drop a kokoro-*.onnx there.`;
-    return `kokoro voices file missing (voices.bin / voices.json) in ${path.join(kokoroDir(), "models")}.`;
+
+  // Engine selection — Piper wins if both binary + at least one voice
+  // are present. Else Kokoro IFF its full triplet is present. Else
+  // null (unavailable, with a Piper-flavored reason since Piper is
+  // the recommended path).
+  let engine: "piper" | "kokoro" | null = null;
+  let ttsAvailable = false;
+  let ttsBinaryOut: string | null = null;
+  let ttsModelOut: string | null = null;
+  let ttsVoicesOut: string | null = null;
+  let ttsReasonOut: string | null = null;
+
+  if (piperBin && piperHasVoice) {
+    engine = "piper";
+    ttsAvailable = true;
+    ttsBinaryOut = piperBin;
+    ttsModelOut = piperVoicesDir(); // dir of per-voice .onnx
+    ttsVoicesOut = null;
+  } else if (kokoroBin && kokoroModelFile && kokoroVoicesFile) {
+    engine = "kokoro";
+    ttsAvailable = true;
+    ttsBinaryOut = kokoroBin;
+    ttsModelOut = kokoroModelFile;
+    ttsVoicesOut = kokoroVoicesFile;
+  } else {
+    // Unavailable — surface the Piper-side reason (recommended path).
+    // If operator wants Kokoro instead, the docs cover it; this just
+    // tells them the fastest fix.
+    if (!piperBin) {
+      ttsReasonOut = `piper binary missing in ${piperDir()}. Drop piper.exe + DLLs there (see docs/VOICE.md).`;
+    } else {
+      ttsReasonOut = `piper has no voices: drop a .onnx (+ .onnx.json) into ${piperVoicesDir()}.`;
+    }
   }
 
   return {
@@ -226,11 +322,12 @@ export async function detectVoiceCapability(): Promise<VoiceCapability> {
       reason: sttReason(),
     },
     tts: {
-      available: !!(ttsBin && ttsModelFile && ttsVoices),
-      binary: ttsBin,
-      model: ttsModelFile,
-      voices: ttsVoices,
-      reason: ttsReason(),
+      available: ttsAvailable,
+      engine,
+      binary: ttsBinaryOut,
+      model: ttsModelOut,
+      voices: ttsVoicesOut,
+      reason: ttsReasonOut,
     },
     argosRoot: argosRoot(),
     toolsDir: voiceToolsDir(),
@@ -401,37 +498,36 @@ export interface SynthesizeResult {
   charCount: number;
 }
 
+// Kokoro fallback voice (only used if engine === "kokoro" — which
+// requires a `kokoros.exe` that doesn't exist as a public release).
 export const DEFAULT_KOKORO_VOICE = "af_bella";
 
+// Phase 7-B default Piper voice — Bart's voice. Used when the
+// /api/voice/tts request omits BOTH voice and personaId.
+export const DEFAULT_PIPER_VOICE = "en_US-ryan-high";
+
 /**
- * Synthesize text → WAV using Kokoro.
+ * Synthesize text → WAV. Dispatches to whichever TTS engine is
+ * available (Piper preferred per Phase 7-B; Kokoro fallback for
+ * when/if its binary lands).
  *
- * The kokoros (Rust) binary supports both stdout streaming and
- * file-out. We use file-out for portability across forks. As with
- * whisper we route through state/voice/cache/<uuid>.wav.
+ * Voice resolution:
+ *   - If opts.voice is set, use it as-is (engine-specific naming —
+ *     Piper expects "en_US-ryan-high", Kokoro expects "af_bella")
+ *   - Else fall back to the engine's default
  *
- * Different forks accept slightly different CLI flags (`-t/--text`,
- * `-v/--voice`, `-m/--model`, `-o/--output`). We pass the long forms
- * — least likely to collide. Document the expected fork in
- * tools/voice/README.md.
+ * The persona's `voiceId` should match the active engine — the
+ * /api/voice/tts route resolves persona.voiceId before calling us.
  */
 export async function synthesizeText(
   text: string,
   opts: { voice?: string; speed?: number } = {}
 ): Promise<SynthesizeResult> {
-  const bin = kokoroBinary();
-  const model = await kokoroModel();
-  const voices = await kokoroVoices();
-  if (!bin || !model || !voices) {
-    throw new Error(
-      "voice TTS not configured: kokoro binary, model, or voices file missing. See tools/voice/README.md"
-    );
-  }
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     throw new Error("voice TTS: empty text");
   }
-  // Sanity cap. ~1500 chars ~ 90s of audio at typical Kokoro pace.
+  // Sanity cap. ~1500 chars ~ 90s of audio at typical pace.
   // Saves the operator from accidentally synthesizing a 50KB blob.
   const TEXT_CAP = 4000;
   if (trimmed.length > TEXT_CAP) {
@@ -440,27 +536,115 @@ export async function synthesizeText(
     );
   }
 
+  // Engine selection mirrors detectVoiceCapability().
+  const piperBin = piperBinary();
+  if (piperBin && (await piperHasAnyVoice())) {
+    return synthesizePiper(trimmed, opts, piperBin);
+  }
+
+  // Kokoro fallback (would only fire if a real kokoros binary exists).
+  const kokoroBin = kokoroBinary();
+  const kokoroModelFile = await kokoroModel();
+  const kokoroVoicesFile = await kokoroVoices();
+  if (kokoroBin && kokoroModelFile && kokoroVoicesFile) {
+    return synthesizeKokoro(trimmed, opts, kokoroBin, kokoroModelFile, kokoroVoicesFile);
+  }
+
+  throw new Error(
+    "voice TTS not configured: no TTS engine available. Install Piper per docs/VOICE.md."
+  );
+}
+
+/**
+ * Piper-specific synth path. Spawn shape:
+ *   piper.exe --model <voice.onnx> --output_file <out.wav>
+ * Text is fed via STDIN (not a CLI arg). Piper writes the WAV to
+ * --output_file and prints status to stderr.
+ */
+async function synthesizePiper(
+  text: string,
+  opts: { voice?: string; speed?: number },
+  bin: string
+): Promise<SynthesizeResult> {
+  const voiceId = opts.voice || DEFAULT_PIPER_VOICE;
+  const modelPath = piperVoiceModel(voiceId);
+  if (!modelPath) {
+    throw new Error(
+      `piper voice "${voiceId}" not installed at ${piperVoicesDir()}/${voiceId}.onnx`
+    );
+  }
+  await fsp.mkdir(voiceCacheDir(), { recursive: true });
+  const id = randomUUID().replace(/-/g, "");
+  const outPath = path.join(voiceCacheDir(), `${id}.wav`);
+
+  try {
+    const start = Date.now();
+    const result: SpawnResult = await new Promise((resolve, reject) => {
+      const child = spawn(bin, ["--model", modelPath, "--output_file", outPath], {
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      const stderrChunks: Buffer[] = [];
+      child.stderr.on("data", (c: Buffer) => stderrChunks.push(c));
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error(`piper timed out after 60s (voice: ${voiceId})`));
+      }, 60_000);
+      child.on("error", (err) => { clearTimeout(timer); reject(err); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({
+          exitCode: code,
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.concat(stderrChunks).toString("utf8").trim(),
+          durationMs: Date.now() - start,
+        });
+      });
+      // Piper expects text on stdin; close after writing.
+      child.stdin.write(text);
+      child.stdin.end();
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `piper exited ${result.exitCode}: ${result.stderr || "(no stderr)"}`
+      );
+    }
+    const wav = await fsp.readFile(outPath);
+    return {
+      wav,
+      durationMs: result.durationMs,
+      voice: voiceId,
+      charCount: text.length,
+    };
+  } finally {
+    await fsp.unlink(outPath).catch(() => {});
+  }
+}
+
+/**
+ * Kokoro fallback path. Only reachable if Piper is unavailable AND a
+ * Kokoro binary exists (which it doesn't as of 2026-05-26 in any public
+ * release — retained for the case operator builds from source).
+ */
+async function synthesizeKokoro(
+  text: string,
+  opts: { voice?: string; speed?: number },
+  bin: string,
+  model: string,
+  voices: string
+): Promise<SynthesizeResult> {
   await fsp.mkdir(voiceCacheDir(), { recursive: true });
   const id = randomUUID().replace(/-/g, "");
   const outPath = path.join(voiceCacheDir(), `${id}.wav`);
   const voice = opts.voice || DEFAULT_KOKORO_VOICE;
 
   try {
-    // Most kokoros forks accept the long flag set below. The exact
-    // shape is documented in tools/voice/README.md so the operator
-    // can swap a fork without code changes (or the README updates
-    // both at once).
     const args = [
-      "--model",
-      model,
-      "--voices",
-      voices,
-      "--text",
-      trimmed,
-      "--voice",
-      voice,
-      "--output",
-      outPath,
+      "--model", model,
+      "--voices", voices,
+      "--text", text,
+      "--voice", voice,
+      "--output", outPath,
     ];
     if (opts.speed && opts.speed > 0) args.push("--speed", String(opts.speed));
 
@@ -475,7 +659,7 @@ export async function synthesizeText(
       wav,
       durationMs: res.durationMs,
       voice,
-      charCount: trimmed.length,
+      charCount: text.length,
     };
   } finally {
     await fsp.unlink(outPath).catch(() => {});

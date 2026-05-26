@@ -215,14 +215,20 @@ REM  audit chain logs no voice events. Operator installs per
 REM  tools/voice/README.md.
 REM ============================================================
 set "VOICE_WHISPER=missing"
-set "VOICE_KOKORO=missing"
+REM Phase 7-B: TTS variable renamed from VOICE_KOKORO → VOICE_TTS
+REM since Piper replaced Kokoro as the canonical engine. Default
+REM "missing" set at the bottom after all probes.
 if exist "%ARGOS_ROOT%\tools\voice\whisper\whisper-cli.exe" set "VOICE_WHISPER=ready"
 if exist "%ARGOS_ROOT%\tools\voice\whisper\whisper.exe"     set "VOICE_WHISPER=ready"
 if exist "%ARGOS_ROOT%\tools\voice\whisper\main.exe"        set "VOICE_WHISPER=ready"
-if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoros.exe"      set "VOICE_KOKORO=ready"
-if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoro.exe"       set "VOICE_KOKORO=ready"
-echo [voice] whisper STT %VOICE_WHISPER%  ^|  kokoro TTS %VOICE_KOKORO%
-echo Voice scan: whisper=%VOICE_WHISPER% kokoro=%VOICE_KOKORO% >>"%LAUNCHER_LOG%"
+if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoros.exe"      set "VOICE_TTS=ready"
+if exist "%ARGOS_ROOT%\tools\voice\kokoro\kokoro.exe"       set "VOICE_TTS=ready"
+REM Phase 7-B: Piper is the canonical TTS engine (real Windows binaries).
+REM Kept Kokoro checks above for the case operator builds kokoros from source.
+if exist "%ARGOS_ROOT%\tools\voice\piper\piper.exe"         set "VOICE_TTS=ready"
+if not defined VOICE_TTS set "VOICE_TTS=missing"
+echo [voice] whisper STT %VOICE_WHISPER%  ^|  TTS %VOICE_TTS%
+echo Voice scan: whisper=%VOICE_WHISPER% tts=%VOICE_TTS% >>"%LAUNCHER_LOG%"
 
 REM ============================================================
 REM  Tool integration (post-Phase-1 patch)

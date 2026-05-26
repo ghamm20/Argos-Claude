@@ -17,6 +17,14 @@ models/*.gguf
 /tools/voice/kokoro/models/*.onnx
 /tools/voice/kokoro/models/*.bin
 /tools/voice/kokoro/models/voices*
+
+# Phase 7-B — Piper TTS binary + voice models
+/tools/voice/piper/*.exe
+/tools/voice/piper/*.dll
+/tools/voice/piper/*.ort
+/tools/voice/piper/espeak-ng-data/
+/tools/voice/piper/voices/*.onnx
+/tools/voice/piper/voices/*.onnx.json
 config/local.*
 logs/
 .DS_Store

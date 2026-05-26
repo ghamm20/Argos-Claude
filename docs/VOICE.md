@@ -87,7 +87,61 @@ cd ARGOS_ROOT/tools/voice/kokoro
 
 If your `kokoros` fork takes different CLI flags, `lib/voice.ts → synthesizeText()` is the single place to adapt.
 
-### 2.b — Phase 7 reality check (2026-05-25)
+### 2.b — Phase 7-B resolution: Piper TTS (active 2026-05-26)
+
+**TTS is now Piper, not Kokoro.** Kokoro's `kokoros.exe` did not exist as a public release; Piper has real Windows binaries + the right CLI shape for ARGOS's USB-native doctrine. Capability detection picks Piper automatically when both `piper.exe` and at least one voice are present.
+
+#### Install Piper
+
+```powershell
+# Download Windows zip (21 MB)
+Invoke-WebRequest -Uri "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip" `
+  -OutFile "$env:TEMP\piper.zip"
+Expand-Archive "$env:TEMP\piper.zip" "$env:TEMP\piper-extract" -Force
+Copy-Item "$env:TEMP\piper-extract\piper\*" `
+  "$env:ARGOS_ROOT\tools\voice\piper\" -Recurse -Force
+```
+
+Verify:
+```
+$ tools\voice\piper\piper.exe --help
+usage: piper.exe [options]
+options: --model FILE  --output_file FILE  --speaker NUM  ...
+```
+
+#### Install voice models
+
+Each persona maps to a Piper voice ID. Download the `.onnx` + matching `.onnx.json` per voice into `tools/voice/piper/voices/`:
+
+| Persona | voiceId | Voice family | URL path |
+|---|---|---|---|
+| Bartimaeus | `en_US-ryan-high` | deep measured male | `en/en_US/ryan/high/en_US-ryan-high.onnx` |
+| Juniper | `en_US-amy-medium` | warm female | `en/en_US/amy/medium/en_US-amy-medium.onnx` |
+| Sage | `en_US-lessac-high` | neutral analytical female | `en/en_US/lessac/high/en_US-lessac-high.onnx` |
+| Bobby | `en_US-joe-medium` | casual plain male | `en/en_US/joe/medium/en_US-joe-medium.onnx` |
+
+Base URL: `https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/`
+
+Sizes: 60-120 MB per voice. Total ~344 MB for all 4. Each voice needs both files (`.onnx` weight + `.onnx.json` config).
+
+#### Performance on RTX 3060 Ti
+
+Measured by `scripts/phase7b-tts-smoke.mjs` (CPU inference, no GPU offload):
+
+| Voice | Synth wall time | Sample size |
+|---|---|---|
+| en_US-ryan-high (Bart, "high" quality) | 1448 ms | 4-sentence input |
+| en_US-amy-medium (Juniper, "medium") | 640 ms | same |
+| en_US-lessac-high (Sage, "high") | 1532 ms | same |
+| en_US-joe-medium (Bobby, "medium") | 613 ms | same |
+
+"high" quality voices are slower (~2x); "medium" voices are faster with good quality. Operator can swap to medium variants of Ryan/Lessac if they want sub-1s synth for everything.
+
+#### Kokoro model files retained but unused
+
+The Kokoro ONNX models + voices file downloaded during Phase 7 remain in `tools/voice/kokoro/` for forward-compat. If a `kokoros.exe` binary ever lands publicly OR operator builds one from source, the code path is still there — `lib/voice.ts:detectVoiceCapability()` falls back to Kokoro when Piper is unavailable but Kokoro's full triplet is present.
+
+### 2.c — Phase 7 reality check (2026-05-25, historical)
 
 **`kokoros.exe` does not exist as a public pre-built release.** The two candidate Rust implementations:
 
