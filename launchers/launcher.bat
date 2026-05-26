@@ -43,7 +43,7 @@ REM --- Scoped env vars (child processes only) -----------------
 set "NEXT_TELEMETRY_DISABLED=1"
 REM Default OLLAMA_MODELS to the USB-payload location, but respect a
 REM caller-provided value (smoke tests, devs running against host models).
-if not defined OLLAMA_MODELS set "OLLAMA_MODELS=%ARGOS_ROOT%\models"
+if not defined OLLAMA_MODELS set "OLLAMA_MODELS=C:\\Users\\Gordy\\.ollama\\models"
 set "TMPDIR=%ARGOS_ROOT%\tmp"
 REM OLLAMA_HOST is resolved in the Port resolution block below — a
 REM caller-set value is honored, otherwise we pick 11434/11435 by
@@ -327,3 +327,4 @@ if exist "%LOG_FILE%.2" move /Y "%LOG_FILE%.2" "%LOG_FILE%.3" >NUL 2>&1
 if exist "%LOG_FILE%.1" move /Y "%LOG_FILE%.1" "%LOG_FILE%.2" >NUL 2>&1
 move /Y "%LOG_FILE%" "%LOG_FILE%.1" >NUL 2>&1
 exit /b 0
+
