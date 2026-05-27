@@ -18,6 +18,7 @@ import { Mic, Loader2, MicOff } from "lucide-react";
 import {
   startVoiceRecorder,
   transcribeBlob,
+  listAudioInputs,
   type RecorderHandle,
 } from "@/lib/voice-client";
 
@@ -42,6 +43,51 @@ type State =
 // walks away. 60s matches whisper.cpp's typical comfortable batch.
 const MAX_RECORDING_MS = 60_000;
 
+// localStorage key for the operator-selected audio input deviceId.
+// Browser-scope persistence — sibling to argos_active_persona. Lost
+// only on a manual storage wipe or different browser/profile.
+const MIC_DEVICE_LS_KEY = "argos_mic_device_id";
+
+// Heuristic match for "virtual" / loopback / hub-bus devices we want
+// to AVOID auto-selecting. Real input mics (webcams, USB mics,
+// onboard arrays) don't match any of these substrings. The operator
+// reported Chrome auto-defaulting to "DeskIn Virtual Audio Device";
+// "deskin" + "virtual" both anchor that match.
+const VIRTUAL_DEVICE_PATTERNS = [
+  "virtual",
+  "deskin",
+  "vb-audio",
+  "vb audio",
+  "voicemeeter",
+  "stereo mix",
+  "wave out",
+  "loopback",
+  "cable input",
+  "cable output",
+];
+
+function isVirtualDevice(label: string): boolean {
+  const l = label.toLowerCase();
+  return VIRTUAL_DEVICE_PATTERNS.some((p) => l.includes(p));
+}
+
+/**
+ * Pick a sensible default device when the operator hasn't chosen one
+ * yet. Preference order:
+ *   1. First non-virtual device (real mic, webcam, etc.)
+ *   2. First device of any kind (fallback when all we have are
+ *      virtual devices — better than no audio at all)
+ *   3. null (caller falls back to letting the browser pick)
+ *
+ * Returns the deviceId string or null.
+ */
+function pickDefaultDeviceId(devices: MediaDeviceInfo[]): string | null {
+  if (devices.length === 0) return null;
+  const real = devices.find((d) => d.label && !isVirtualDevice(d.label));
+  if (real) return real.deviceId;
+  return devices[0]?.deviceId ?? null;
+}
+
 export function MicButton({
   onTranscribed,
   sessionId,
@@ -51,6 +97,13 @@ export function MicButton({
   const [available, setAvailable] = useState<boolean | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
   const [elapsed, setElapsed] = useState(0);
+
+  // Voice UX (2026-05-27): operator-pickable audio input. Chrome was
+  // auto-selecting "DeskIn Virtual Audio Device" instead of the real
+  // C922 webcam mic. Enumeration runs on mount + after each record
+  // (labels only populate after the first getUserMedia grant).
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   // Recorder + abort handles need to survive re-renders.
   const recorderRef = useRef<RecorderHandle | null>(null);
@@ -79,6 +132,71 @@ export function MicButton({
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Device enumeration + selection hydration. Runs once on mount AND
+  // re-runs whenever the OS hot-plugs an audio device (Chrome fires
+  // `devicechange` on the mediaDevices target). Labels may be empty
+  // until the page has been granted mic permission; refresh() is also
+  // called after each successful record so the dropdown picks up real
+  // names once Chrome reveals them.
+  const refreshDevices = useCallback(async () => {
+    const inputs = await listAudioInputs();
+    setDevices(inputs);
+    if (typeof console !== "undefined") {
+      // Operator-facing diagnostic: lets them see what Chrome sees
+      // and compare against the directive's reported mismatch
+      // (C922 expected vs. DeskIn Virtual selected).
+      // eslint-disable-next-line no-console
+      console.info(
+        "[MicButton] audio inputs:",
+        inputs.map((d) => ({ id: d.deviceId, label: d.label || "(unnamed)" }))
+      );
+    }
+    // Resolve selectedDeviceId:
+    //   1. honor a previously-stored choice if it still exists
+    //   2. else pick a sensible default (first non-virtual)
+    let persistedId: string | null = null;
+    try {
+      persistedId = window.localStorage?.getItem(MIC_DEVICE_LS_KEY) ?? null;
+    } catch {
+      /* localStorage blocked — fall through to default */
+    }
+    const persistedStillPresent =
+      persistedId !== null && inputs.some((d) => d.deviceId === persistedId);
+    if (persistedStillPresent) {
+      setSelectedDeviceId(persistedId);
+    } else {
+      const fallback = pickDefaultDeviceId(inputs);
+      setSelectedDeviceId(fallback);
+      // Don't write the fallback to localStorage — leave the key
+      // empty so a later device hot-plug can still beat the default.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshDevices();
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.mediaDevices &&
+      "addEventListener" in navigator.mediaDevices
+    ) {
+      const onChange = () => void refreshDevices();
+      navigator.mediaDevices.addEventListener("devicechange", onChange);
+      return () => {
+        navigator.mediaDevices.removeEventListener("devicechange", onChange);
+      };
+    }
+    return undefined;
+  }, [refreshDevices]);
+
+  const onSelectDevice = useCallback((id: string) => {
+    setSelectedDeviceId(id);
+    try {
+      window.localStorage?.setItem(MIC_DEVICE_LS_KEY, id);
+    } catch {
+      /* localStorage blocked — selection still applies for this session */
+    }
   }, []);
 
   // Tick the elapsed counter while recording.
@@ -125,18 +243,40 @@ export function MicButton({
   const start = useCallback(async () => {
     if (disabled) return;
     try {
-      const handle = await startVoiceRecorder();
+      const handle = await startVoiceRecorder({
+        deviceId: selectedDeviceId ?? undefined,
+      });
       recorderRef.current = handle;
       setState({ kind: "recording", startedAt: Date.now() });
+      // First successful getUserMedia grants device-label visibility;
+      // refresh so the dropdown shows real names instead of (unnamed).
+      void refreshDevices();
     } catch (e) {
+      // If the persisted device is gone (unplugged webcam, etc.),
+      // Chrome throws OverconstrainedError. Clear the bad pin and
+      // re-enumerate so the next attempt picks a working default.
+      const msg = e instanceof Error ? e.message : String(e);
+      const isOverconstrained =
+        e instanceof Error &&
+        (e.name === "OverconstrainedError" ||
+          /overconstrained|deviceid/i.test(msg));
+      if (isOverconstrained && selectedDeviceId) {
+        try {
+          window.localStorage?.removeItem(MIC_DEVICE_LS_KEY);
+        } catch {
+          /* ignore */
+        }
+        setSelectedDeviceId(null);
+        void refreshDevices();
+      }
       setState({
         kind: "error",
-        message: e instanceof Error ? e.message : String(e),
+        message: msg,
       });
       // Reset to idle after a moment so the operator can retry.
       window.setTimeout(() => setState({ kind: "idle" }), 2500);
     }
-  }, [disabled]);
+  }, [disabled, selectedDeviceId, refreshDevices]);
 
   const stop = useCallback(async () => {
     const handle = recorderRef.current;
@@ -212,38 +352,71 @@ export function MicButton({
         ? "rgba(115, 115, 115, 0.55)" // neutral while processing
         : "rgba(38, 38, 38, 0.70)"; // calm idle
 
+  // Show the device selector only when there's a real choice to make.
+  // Single-device rigs (laptop with onboard mic only) get no dropdown.
+  const showSelector = devices.length > 1;
+
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (isRecording) void stop();
-        else if (!isTranscribing && !isError) void start();
-      }}
-      disabled={disabled || isTranscribing}
-      title={title}
-      aria-label={ariaLabel}
-      data-mic-state={state.kind}
-      className={`absolute right-[5.5rem] bottom-1.5 inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-neutral-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-        isRecording ? "animate-pulse" : ""
-      }`}
-      style={{
-        background: bgColor,
-        outline: isRecording
-          ? "1px solid rgba(239,68,68,0.9)"
-          : `1px solid ${accent}40`,
-      }}
-    >
-      {isTranscribing ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : isError ? (
-        <MicOff className="h-4 w-4" />
-      ) : (
-        // Same Mic icon in idle and recording — color/bg + label do
-        // the state-signaling. Pulse animation is on the whole button
-        // so the red square pulses, not just the icon (more visible).
-        <Mic className="h-4 w-4" />
+    <>
+      {showSelector && (
+        <select
+          aria-label="Microphone input device"
+          title="Microphone input device — persisted to localStorage"
+          value={selectedDeviceId ?? ""}
+          onChange={(e) => onSelectDevice(e.target.value)}
+          disabled={isRecording || isTranscribing}
+          // Sits immediately above the mic button at the same right
+          // offset. Overlaps the textarea's bottom-right corner —
+          // acceptable because the operator isn't typing while
+          // choosing a mic, and the dropdown is a setup-time control
+          // they'll pick once per browser then forget about.
+          className="absolute right-[5.5rem] bottom-11 max-w-[14rem] truncate rounded-md bg-neutral-900/90 px-2 py-1 text-[11px] text-neutral-200 border border-neutral-700/60 hover:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          style={{ minWidth: "9rem" }}
+        >
+          {devices.map((d) => {
+            // Labels are empty until the page has mic permission.
+            // Show a short hash of the deviceId as a stable fallback.
+            const display = d.label || `Mic (${d.deviceId.slice(0, 6)})`;
+            return (
+              <option key={d.deviceId} value={d.deviceId}>
+                {display}
+              </option>
+            );
+          })}
+        </select>
       )}
-      <span>{label}</span>
-    </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (isRecording) void stop();
+          else if (!isTranscribing && !isError) void start();
+        }}
+        disabled={disabled || isTranscribing}
+        title={title}
+        aria-label={ariaLabel}
+        data-mic-state={state.kind}
+        className={`absolute right-[5.5rem] bottom-1.5 inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-neutral-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+          isRecording ? "animate-pulse" : ""
+        }`}
+        style={{
+          background: bgColor,
+          outline: isRecording
+            ? "1px solid rgba(239,68,68,0.9)"
+            : `1px solid ${accent}40`,
+        }}
+      >
+        {isTranscribing ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : isError ? (
+          <MicOff className="h-4 w-4" />
+        ) : (
+          // Same Mic icon in idle and recording — color/bg + label do
+          // the state-signaling. Pulse animation is on the whole button
+          // so the red square pulses, not just the icon (more visible).
+          <Mic className="h-4 w-4" />
+        )}
+        <span>{label}</span>
+      </button>
+    </>
   );
 }

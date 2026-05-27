@@ -22,9 +22,55 @@ export interface RecorderHandle {
   cancel: () => void;
 }
 
-/** Start microphone capture. Returns a handle whose stop() resolves
- *  with a 16 kHz mono 16-bit PCM WAV (ready to POST to /api/voice/stt). */
-export async function startVoiceRecorder(): Promise<RecorderHandle> {
+export interface StartRecorderOptions {
+  /** When set, request capture from this exact deviceId. Chrome will
+   *  reject with `OverconstrainedError` if the id no longer exists
+   *  (e.g. unplugged webcam). Caller surfaces that as a UI error and
+   *  re-enumerates. */
+  deviceId?: string;
+}
+
+/**
+ * Enumerate audio input devices. Returns `[]` if the API is unavailable
+ * or permission has never been granted. Note: `label` is empty for any
+ * device the page hasn't yet been granted mic permission for — Chrome
+ * populates it after the first successful getUserMedia call.
+ *
+ * Common pattern: enumerate on mount (labels may be blank), then
+ * re-enumerate after each record (labels populated).
+ */
+export async function listAudioInputs(): Promise<MediaDeviceInfo[]> {
+  if (typeof window === "undefined") return [];
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all.filter((d) => d.kind === "audioinput");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Start microphone capture. Returns a handle whose `stop()` resolves
+ * with a 16 kHz mono 16-bit PCM WAV (ready to POST to /api/voice/stt).
+ *
+ * Voice UX (2026-05-27): switched constraints per operator directive:
+ *   - echoCancellation/noiseSuppression/autoGainControl now FALSE.
+ *     Browser-side AGC compresses dynamic range and can mask quiet
+ *     speech onsets that Whisper would otherwise catch; noise
+ *     suppression mangles fricatives. On a clean dedicated mic
+ *     (C922) raw audio outperforms the browser's processed pipeline.
+ *   - `channelCount: 1` and `sampleRate: 16000` requested directly
+ *     so the browser doesn't waste cycles delivering stereo 48 kHz
+ *     for our subsequent downmix-and-resample step. (Browsers honor
+ *     these as preferences; if hardware can't comply we still
+ *     re-encode client-side via convertToWav16k.)
+ *   - Optional `deviceId` constraint when the operator has picked
+ *     a specific input via the MicButton's device selector.
+ */
+export async function startVoiceRecorder(
+  opts: StartRecorderOptions = {}
+): Promise<RecorderHandle> {
   if (typeof window === "undefined") {
     throw new Error("startVoiceRecorder is browser-only");
   }
@@ -35,13 +81,22 @@ export async function startVoiceRecorder(): Promise<RecorderHandle> {
     throw new Error("MediaRecorder not available in this browser");
   }
 
+  const audioConstraints: MediaTrackConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: 1,
+    sampleRate: 16000,
+  };
+  if (opts.deviceId) {
+    // `exact` so Chrome rejects rather than silently falling back to
+    // a different mic when the chosen device is unplugged. Caller
+    // catches OverconstrainedError and re-prompts.
+    audioConstraints.deviceId = { exact: opts.deviceId };
+  }
+
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      // Browser-side enhancements help whisper a lot for noisy input.
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
+    audio: audioConstraints,
   });
 
   // Prefer mimeTypes whisper-side pipeline can decode reliably.
