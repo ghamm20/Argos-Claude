@@ -49,8 +49,12 @@ const PERSONAS = [
   { id: "sage", name: "Sage", model: "alfaxad/wild-gemma4:e4b" },
   {
     id: "bobby",
+    // Bobby v2 (2026-05-27): DeepSeek-Coder-v2:16b. The mirror table
+    // is informational only — /api/chat reads the actual model from
+    // PERSONA_BY_ID server-side — but keep it accurate so report
+    // output doesn't mislead future readers.
     name: "Bobby",
-    model: "nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b",
+    model: "second_constantine/deepseek-coder-v2:16b",
   },
 ];
 

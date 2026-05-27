@@ -63,9 +63,9 @@ const EMPTY_VAULT: VaultStatus = {
 // One model loaded at a time; persona switch = model swap (3-8s cold,
 // acceptable).
 //
-//   Bartimaeus / Juniper → fredrezones55/Qwen3.5-...:9b   (6.5 GB) — shared
-//   Sage                 → alfaxad/wild-gemma4:e4b        (6.3 GB)
-//   Bobby                → nexusriot/Qwen3.5-...:4b       (3.4 GB)
+//   Bartimaeus / Juniper → fredrezones55/Qwen3.5-...:9b           (6.5 GB) — shared
+//   Sage                 → alfaxad/wild-gemma4:e4b                (6.3 GB)
+//   Bobby                → second_constantine/deepseek-coder-v2:16b (8.6 GB) — Bobby v2 (2026-05-27)
 //
 // DEFAULT_MODEL = Bart's model (Bart is the boot default per lib/settings.ts).
 // AVAILABLE_MODELS lists exactly what /api/chat will accept; Power Mode
@@ -77,7 +77,11 @@ const DEFAULT_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 export const AVAILABLE_MODELS: readonly string[] = [
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b", // Bart + Juniper
   "alfaxad/wild-gemma4:e4b",                                  // Sage
-  "nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b",      // Bobby
+  // Bobby v2 (2026-05-27): swapped from
+  // nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b → DeepSeek-Coder-v2:16b.
+  // Old 4b dropped from the allowlist; if anyone needs to roll back,
+  // re-add it here and revert MODEL_BOBBY in lib/personas.ts.
+  "second_constantine/deepseek-coder-v2:16b",                 // Bobby
   // Kept for back-compat with the v1.1 work — small fallback / diagnostic.
   "gemma2-2b-local:latest",
 ] as const;

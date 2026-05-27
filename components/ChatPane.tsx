@@ -8,6 +8,7 @@ import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
 import { MicButton } from "./voice/MicButton";
 import { PlayButton } from "./voice/PlayButton";
+import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
 import {
   useArgos,
@@ -157,10 +158,15 @@ function MessageBubble({
   msg,
   onPillClick,
   sessionId,
+  onRejectProposal,
 }: {
   msg: ChatMessage;
   onPillClick: (hit: CitedHit) => void;
   sessionId?: string;
+  /** Bobby v2: invoked when the operator clicks Reject under a code
+   *  proposal. Receives the canonical REJECT_PROMPT_TEXT — parent
+   *  feeds it back through the chat as a user-side turn. */
+  onRejectProposal: (rejectionText: string) => void;
 }) {
   const isUser = msg.role === "user";
   const persona = msg.personaId ? PERSONA_BY_ID[msg.personaId] : undefined;
@@ -253,6 +259,22 @@ function MessageBubble({
                     onHitClick={onPillClick}
                   />
                 )}
+                {/* Bobby v2: in-chat approval gate. Only appears under
+                    Bobby's FINALIZED messages that contain a fenced code
+                    block. Approve copies to clipboard; Reject re-enters
+                    the chat with a canonical rejection signal. Other
+                    personas never get a gate — they're not approved to
+                    propose executable code. */}
+                {!msg.isStreaming &&
+                  !msg.errored &&
+                  msg.personaId === "bobby" &&
+                  extractCodeBlocks(msg.content) !== null && (
+                    <CodeProposalGate
+                      content={msg.content}
+                      accent={accent}
+                      onReject={onRejectProposal}
+                    />
+                  )}
               </>
             )}
           </>
@@ -454,8 +476,11 @@ export function ChatPane() {
     scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
   }, [messages]);
 
-  const send = useCallback(async () => {
-    const text = draft.trim();
+  // overrideText lets callers (e.g. Bobby v2's Reject button) inject a
+  // user-side turn without first stuffing it into the textarea. When
+  // omitted, send() uses the current draft (original behavior).
+  const send = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? draft).trim();
     if (!text || isStreaming) return;
 
     const snapshot = useArgos.getState().messages;
@@ -479,7 +504,10 @@ export function ChatPane() {
     };
     appendMessage(userMsg);
     appendMessage(assistantMsg);
-    setDraft("");
+    // Only clear the textarea draft when the send was driven from the
+    // textarea — programmatic sends (e.g. Reject) must not clobber a
+    // draft the operator may have been mid-typing.
+    if (overrideText === undefined) setDraft("");
     setStreaming(true);
 
     const wireHistory = [...snapshot, userMsg].map((m) => ({
@@ -673,6 +701,19 @@ export function ChatPane() {
     }
   };
 
+  // Bobby v2: when the operator clicks Reject under a code proposal,
+  // we re-enter the chat with a canonical rejection prompt. Reads like
+  // an operator-typed turn (because it is, from Bobby's perspective).
+  // Guarded against double-fire by isStreaming — if Bobby is mid-reply
+  // the reject signal is dropped (operator can resend after Stop).
+  const onRejectProposal = useCallback(
+    (rejectionText: string) => {
+      if (isStreaming) return;
+      void send(rejectionText);
+    },
+    [isStreaming, send]
+  );
+
   // Window-level shortcuts: Cmd/Ctrl+K to clear, Cmd/Ctrl+E to export,
   // Esc to stop streaming. Only fire when the user isn't typing in
   // another input (else they'd lose draft text or confirm by accident).
@@ -793,6 +834,7 @@ export function ChatPane() {
                 msg={m}
                 onPillClick={(hit) => setActiveCitation(hit)}
                 sessionId={currentSessionId ?? undefined}
+                onRejectProposal={onRejectProposal}
               />
             ))
           )}

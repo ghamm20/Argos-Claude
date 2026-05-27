@@ -13,7 +13,13 @@ Hardware target: **RTX 3060 Ti / 8 GB VRAM** (the active envelope). 5090 Power M
 | **Bartimaeus** (boot default) | `fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b` | Q4_K_M | 6.09 GB | `false` | `fa8bf4f` (Phase 2, 2026-05-25) |
 | **Juniper** | `fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b` (shared with Bart) | Q4_K_M | — | `false` | same |
 | **Sage** | `alfaxad/wild-gemma4:e4b` | Q4_K_M | 5.89 GB | `false` | same |
-| **Bobby** | `nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b` | Q4_K_M | 3.14 GB | `false` | same |
+| **Bobby** (agentic coder) | `second_constantine/deepseek-coder-v2:16b` | Q4_K_M | 8.6 GB | `false` | Bobby v2 (2026-05-27) |
+
+**Bobby v2 — agentic-coder upgrade** (2026-05-27):
+- Previous model `nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b` retired from ARGOS. Bobby was a plain-talk analyst; now expanded to code generation, debugging, patching, upgrade proposals — approval-gated only (operator runs, ARGOS never executes).
+- `second_constantine/deepseek-coder-v2:16b` (8.6 GB) **spills layers to system RAM** on the 3060 Ti / 8 GB VRAM rig. Measured ~7.1 GB resident on GPU during inference, ~1.5 GB in RAM. Performance acceptable: ~17-22 tok/s with cold load ≈ 4 s (Bart→Bobby) to 9 s (Sage→Bobby).
+- 5090 day: evaluate whether to upgrade Bobby to a larger coder model.
+- Approval gate UI lives in `components/chat/CodeProposalGate.tsx` — renders under any Bobby message containing a fenced code block. "Approve & Run" copies code to clipboard; "Reject" sends a canonical rejection back through the chat. ARGOS never executes.
 
 Embedding model (Phase 3 vault retrieval): `nomic-embed-text:latest` · 768-dim · 274 MB.
 
@@ -26,7 +32,8 @@ Single source of truth in code: `lib/personas.ts` (`PERSONAS` array). The `lib/s
 Per-persona `think` flag in `lib/personas.ts`. Default `false`. **All four current personas have `think:false`.** Reasoning:
 
 - **gemma4 family** (`alfaxad/wild-gemma4:e4b` etc.) — ships with the `thinking` capability enabled by default. If `think:true`, the model emits its entire response to `message.thinking` and **zero** to `message.content`. The chat surface displays `content` only → operator sees an empty bubble. First diagnosed in Phase 2-RB validation (`scripts/validate-e4b.mjs` prompt D: 637 tokens at 21 tok/s, zero visible content).
-- **qwen3-thinking family** (Qwen3.5 variants used by Bart, Juniper, Bobby) — same behavior. Verified empirically.
+- **qwen3-thinking family** (Qwen3.5 variants used by Bart + Juniper) — same behavior. Verified empirically.
+- **deepseek-coder-v2** (Bobby v2) — not a thinking model; `think:false` is a safe default. Note: emits its own function-calling tokens (`<｜tool▁calls▁begin｜>` etc.) on debugging prompts when it thinks a tool call would help. ARGOS has no tool-call interpreter, so those markers leak through as raw tokens in some replies. Known limitation; doesn't break the chat surface but is visible.
 
 If a future model genuinely benefits from exposed thinking traces (e.g. an o1-style explainer model), flip its `think` flag to `true` in `lib/personas.ts`. The chat route reads it at request time (`app/api/chat/route.ts`) and passes through to Ollama.
 
