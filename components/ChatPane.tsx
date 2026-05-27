@@ -198,16 +198,10 @@ function MessageBubble({
             style={{ color: accent }}
           >
             <span>{persona.name}</span>
-            {/* TTS only on finalized, non-errored assistant turns. The
-                PlayButton self-hides if the server reports TTS off. */}
-            {!msg.errored && !msg.isStreaming && msg.content.length > 0 && (
-              <PlayButton
-                text={msg.content}
-                accent={accent}
-                sessionId={sessionId}
-                personaId={msg.personaId}
-              />
-            )}
+            {/* PlayButton was here previously — moved BELOW the message
+                body for visibility. Operator confirmed the old icon-only
+                version (h-5 w-5 / h-3 w-3 glyph / neutral-500) was
+                effectively invisible against the dark bubble. */}
           </div>
         )}
         {msg.errored ? (
@@ -257,6 +251,19 @@ function MessageBubble({
                     hits={msg.retrievalHits}
                     accent={accent}
                     onHitClick={onPillClick}
+                  />
+                )}
+                {/* Voice UX (2026-05-27): PlayButton lives BELOW the
+                    message body now. Big teal "▶ Speak" button — see
+                    components/voice/PlayButton.tsx header for the
+                    why-it-was-invisible note. Self-hides if TTS isn't
+                    available or message is empty. */}
+                {!msg.errored && !msg.isStreaming && msg.content.length > 0 && (
+                  <PlayButton
+                    text={msg.content}
+                    accent={accent}
+                    sessionId={sessionId}
+                    personaId={msg.personaId}
                   />
                 )}
                 {/* Bobby v2: in-chat approval gate. Only appears under
@@ -856,7 +863,7 @@ export function ChatPane() {
                   ? "Streaming…"
                   : `Message ${personaName} (Cmd/Ctrl+Enter to send)`
               }
-              className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-32 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
+              className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-60 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
             />
             {/* Mic input — self-hides when STT unavailable. Appends
                 transcribed text to the current draft so the operator

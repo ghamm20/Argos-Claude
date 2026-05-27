@@ -414,16 +414,190 @@ export interface TranscribeResult {
 
 /**
  * Minimum audio duration (seconds) we feed to whisper-cli. Anything
- * shorter gets zero-padded up to this floor.
+ * shorter (after silence trim) gets zero-padded up to this floor.
  *
  * Why: whisper.cpp's small.en model reliably hallucinates on very
  * short clips — a 400ms "hello" comes back as "you", a 600ms "stop"
  * comes back as phantom sentences. The model needs enough context
- * to anchor against real speech; below ~1.5s its prior takes over
- * and it confabulates. Padding with PCM silence (zero bytes) gives
- * the encoder dead air to chew on without changing the transcript.
+ * to anchor against real speech; below the threshold its prior takes
+ * over and it confabulates. Padding with PCM silence (zero bytes)
+ * gives the encoder dead air to chew on without changing the transcript.
+ *
+ * Bumped from 1.5 → 2.5 (2026-05-27 Voice UX): operator still saw
+ * occasional "you" hallucinations on borderline 1.6-1.9s clips after
+ * the earlier fix. 2.5s puts the whole comfortable speech window
+ * inside the model's reliable zone with overhead to spare. Cost: ~1s
+ * of additional silent tail processed by whisper-cli, which on
+ * small.en is ~50 ms of extra compute. Worth it.
  */
-const MIN_STT_SECONDS = 1.5;
+const MIN_STT_SECONDS = 2.5;
+
+/**
+ * Default silence threshold for trimWavSilence. 500 out of 32768
+ * (full-scale for signed 16-bit PCM) ≈ 1.5% of max amplitude. Low
+ * enough to count breath/room-tone as silence but high enough that
+ * real speech crosses it on every onset.
+ */
+const SILENCE_THRESHOLD = 500;
+
+/**
+ * Guard duration kept on either side of detected speech. Without this
+ * the trim can clip off a consonant's leading edge (e.g. the air-burst
+ * of a /p/ or /t/). 100 ms is comfortably below the perceptual
+ * threshold for "missing sound" and well above MediaRecorder's typical
+ * chunk size.
+ */
+const SILENCE_GUARD_MS = 100;
+
+/**
+ * Internal: parse the RIFF/WAVE header into a small struct. Returns
+ * null if anything is off (we then bail out of trim/pad gracefully).
+ *
+ * Shared by trimWavSilence + padWavToMinDuration so the data-chunk
+ * scan only lives in one place.
+ */
+interface WavInfo {
+  sampleRate: number;
+  numChannels: number;
+  bitsPerSample: number;
+  byteRate: number;
+  blockAlign: number;
+  dataChunkOffset: number; // offset of the "data" marker
+  dataStart: number;       // offset of the first audio byte
+  dataSize: number;        // size of the audio payload in bytes
+}
+
+function parseWavHeader(wav: Buffer): WavInfo | null {
+  if (wav.length < 44) return null;
+  if (wav.slice(0, 4).toString("ascii") !== "RIFF") return null;
+  if (wav.slice(8, 12).toString("ascii") !== "WAVE") return null;
+  const audioFormat = wav.readUInt16LE(20);
+  if (audioFormat !== 1) return null; // PCM only
+  const numChannels = wav.readUInt16LE(22);
+  const sampleRate = wav.readUInt32LE(24);
+  const byteRate = wav.readUInt32LE(28);
+  const blockAlign = wav.readUInt16LE(32);
+  const bitsPerSample = wav.readUInt16LE(34);
+  if (!byteRate || !sampleRate || !numChannels || !bitsPerSample) return null;
+
+  // Find the "data" subchunk marker (0x64 0x61 0x74 0x61 = "data").
+  let dataChunkOffset = -1;
+  for (let i = 12; i <= wav.length - 8; i++) {
+    if (
+      wav[i] === 0x64 &&
+      wav[i + 1] === 0x61 &&
+      wav[i + 2] === 0x74 &&
+      wav[i + 3] === 0x61
+    ) {
+      dataChunkOffset = i;
+      break;
+    }
+  }
+  if (dataChunkOffset < 0) return null;
+  const dataSize = wav.readUInt32LE(dataChunkOffset + 4);
+  const dataStart = dataChunkOffset + 8;
+  if (dataStart + dataSize > wav.length) return null;
+  return {
+    sampleRate,
+    numChannels,
+    bitsPerSample,
+    byteRate,
+    blockAlign,
+    dataChunkOffset,
+    dataStart,
+    dataSize,
+  };
+}
+
+/**
+ * Trim leading + trailing silence from a 16-bit mono PCM WAV. Silence
+ * is defined as samples where |value| < SILENCE_THRESHOLD. We keep
+ * SILENCE_GUARD_MS of audio on each side of the detected speech so
+ * consonant onsets aren't clipped.
+ *
+ * Returns the original buffer unchanged in any of these cases:
+ *   - Header parse fails / format isn't 16-bit mono PCM
+ *   - Entire payload is silence (whisper still wants something to
+ *     consume; padding adds the rest)
+ *   - Trim would not actually shorten the file
+ *
+ * Why trim BEFORE padding: the operator records something like
+ *   [400 ms dead air][800 ms speech][600 ms dead air]
+ * On a 1.8 s clip we'd previously skip padding (>= 1.5 s). After
+ * trim that's 800 ms of speech + 200 ms guard = 1.0 s of real
+ * audio, and padding bumps it to 2.5 s with clean silence framing.
+ * Whisper anchors on the speech, not on the surrounding hum.
+ */
+export function trimWavSilence(
+  wav: Buffer,
+  threshold = SILENCE_THRESHOLD,
+  guardMs = SILENCE_GUARD_MS
+): Buffer {
+  try {
+    const info = parseWavHeader(wav);
+    if (!info) return wav;
+    if (info.bitsPerSample !== 16) return wav;     // only 16-bit PCM
+    if (info.numChannels !== 1) return wav;        // only mono
+    if (info.dataSize < info.blockAlign * 2) return wav; // too small
+
+    const sampleBytes = 2; // 16-bit mono
+    const totalSamples = Math.floor(info.dataSize / sampleBytes);
+    const view = new DataView(
+      wav.buffer,
+      wav.byteOffset + info.dataStart,
+      info.dataSize
+    );
+
+    // Find first non-silent sample.
+    let first = -1;
+    for (let i = 0; i < totalSamples; i++) {
+      const v = view.getInt16(i * sampleBytes, true);
+      if (Math.abs(v) >= threshold) {
+        first = i;
+        break;
+      }
+    }
+    if (first < 0) return wav; // entire payload is silence
+
+    // Find last non-silent sample.
+    let last = totalSamples - 1;
+    for (let i = totalSamples - 1; i >= 0; i--) {
+      const v = view.getInt16(i * sampleBytes, true);
+      if (Math.abs(v) >= threshold) {
+        last = i;
+        break;
+      }
+    }
+
+    const guardSamples = Math.floor((info.sampleRate * guardMs) / 1000);
+    const trimStart = Math.max(0, first - guardSamples);
+    const trimEnd = Math.min(totalSamples - 1, last + guardSamples);
+
+    // Bail if trim wouldn't actually reduce the data (or somehow grew).
+    const newSampleCount = trimEnd - trimStart + 1;
+    if (newSampleCount >= totalSamples) return wav;
+
+    const newDataSize = newSampleCount * sampleBytes;
+    // Rebuild buffer: copy header (up through dataChunkOffset + 8 bytes
+    // of "data" + length field), then the trimmed sample region.
+    const header = wav.slice(0, info.dataStart);
+    const trimmedData = wav.slice(
+      info.dataStart + trimStart * sampleBytes,
+      info.dataStart + (trimEnd + 1) * sampleBytes
+    );
+    const out = Buffer.concat([header, trimmedData]);
+
+    // Patch lengths:
+    //   RIFF chunk size = (file size) - 8 = out.length - 8
+    //   data subchunk size = newDataSize
+    out.writeUInt32LE(out.length - 8, 4);
+    out.writeUInt32LE(newDataSize, info.dataChunkOffset + 4);
+
+    return out;
+  } catch {
+    return wav;
+  }
+}
 
 /**
  * Parse a RIFF/WAVE header, compute duration from byteRate + data
@@ -518,10 +692,17 @@ export async function transcribeWav(
     );
   }
 
-  // Short-utterance defense — pad to MIN_STT_SECONDS of silence so
-  // whisper-cli has enough audio context to avoid hallucinating on
-  // sub-second clips. No-op for any clip already at/above the floor.
-  const wavForWhisper = padWavToMinDuration(wav, MIN_STT_SECONDS);
+  // Short-utterance defense — two-step:
+  //   1. Trim leading/trailing silence so whisper sees only the real
+  //      speech surrounded by a small guard. Stops the model from
+  //      anchoring on background hum.
+  //   2. Pad the result to MIN_STT_SECONDS of clean silence so the
+  //      encoder has a stable framing window. Without enough audio,
+  //      small.en hallucinates ("you", "I", phantom sentences).
+  // Both are no-ops if the input doesn't need them — e.g. a clip
+  // that's already 4 s of pure speech bypasses both.
+  const trimmed = trimWavSilence(wav);
+  const wavForWhisper = padWavToMinDuration(trimmed, MIN_STT_SECONDS);
 
   await fsp.mkdir(voiceCacheDir(), { recursive: true });
   const id = randomUUID().replace(/-/g, "");

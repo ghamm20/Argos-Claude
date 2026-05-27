@@ -175,6 +175,11 @@ export function MicButton({
   const isTranscribing = state.kind === "transcribing";
   const isError = state.kind === "error";
 
+  // Voice UX (2026-05-27): added visible text labels alongside the icon
+  // — operator couldn't tell from the icon alone whether recording was
+  // active or processing had hung. Old behavior: silent icon swap.
+  // New behavior: "● Recording…" / "Processing…" labels with elapsed
+  // timer; the button background also flips red while recording.
   const title = isError
     ? `voice error — ${state.message}`
     : isRecording
@@ -182,6 +187,30 @@ export function MicButton({
       : isTranscribing
         ? "transcribing…"
         : "voice input — click to record";
+
+  const ariaLabel = isError
+    ? title
+    : isRecording
+      ? "Recording — click to stop and send"
+      : isTranscribing
+        ? "Processing — transcribing audio"
+        : "Voice input — click to record";
+
+  const label = isError
+    ? "Error"
+    : isRecording
+      ? `● Recording ${(elapsed / 1000).toFixed(1)}s`
+      : isTranscribing
+        ? "Processing…"
+        : "Speak";
+
+  const bgColor = isError
+    ? "rgba(239, 68, 68, 0.85)"
+    : isRecording
+      ? "rgba(239, 68, 68, 0.85)" // red while recording
+      : isTranscribing
+        ? "rgba(115, 115, 115, 0.55)" // neutral while processing
+        : "rgba(38, 38, 38, 0.70)"; // calm idle
 
   return (
     <button
@@ -192,28 +221,29 @@ export function MicButton({
       }}
       disabled={disabled || isTranscribing}
       title={title}
-      aria-label={title}
-      className="absolute right-[5.5rem] bottom-1.5 rounded-md p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      aria-label={ariaLabel}
+      data-mic-state={state.kind}
+      className={`absolute right-[5.5rem] bottom-1.5 inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-neutral-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+        isRecording ? "animate-pulse" : ""
+      }`}
       style={{
-        color: isError
-          ? "#ef4444"
-          : isRecording
-            ? "#ef4444"
-            : isTranscribing
-              ? accent
-              : undefined,
+        background: bgColor,
+        outline: isRecording
+          ? "1px solid rgba(239,68,68,0.9)"
+          : `1px solid ${accent}40`,
       }}
     >
       {isTranscribing ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : isError ? (
         <MicOff className="h-4 w-4" />
-      ) : isRecording ? (
-        // Pulsing red mic during recording — clear "yes, I'm listening".
-        <Mic className="h-4 w-4 animate-pulse" />
       ) : (
+        // Same Mic icon in idle and recording — color/bg + label do
+        // the state-signaling. Pulse animation is on the whole button
+        // so the red square pulses, not just the icon (more visible).
         <Mic className="h-4 w-4" />
       )}
+      <span>{label}</span>
     </button>
   );
 }

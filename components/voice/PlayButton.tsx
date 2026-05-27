@@ -224,6 +224,11 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
   if (!available) return null;
   if (!text.trim()) return null;
 
+  // Visible-label states. The previous design was a 20×20-px icon with
+  // a 12-px speaker glyph in `text-neutral-500` — technically present
+  // but invisible against the dark bubble background. Operator
+  // confirmed they couldn't find it. New design: full-text button,
+  // ARGOS teal background, dark text, ≥32-px tall.
   const title =
     state === "error" && errMsg
       ? `voice error — ${errMsg}`
@@ -233,32 +238,58 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
           ? "synthesizing…"
           : "play this message";
 
+  const label =
+    state === "loading"
+      ? "Synthesizing…"
+      : state === "playing"
+        ? "Stop"
+        : state === "error"
+          ? "Audio error"
+          : "Speak";
+
+  // ARGOS theme teal. Hard-coded rather than tied to persona.accentColor
+  // so the button is consistently recognizable across personas (Bart
+  // green, Juniper lime, Sage yellow, Bobby blue all collapsed to a
+  // single "voice action" color). The `accent` prop is still honored
+  // for the loading state's spinner ring + the playing/error glyph
+  // tints — those track persona to keep some visual association.
+  const ARGOS_TEAL = "#00ff9d";
+  const isDisabled = state === "loading";
+  const bgColor =
+    state === "error"
+      ? "rgba(239, 68, 68, 0.85)"
+      : state === "playing"
+        ? "rgba(0, 255, 157, 0.75)"
+        : state === "loading"
+          ? "rgba(0, 255, 157, 0.45)"
+          : ARGOS_TEAL;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={state === "loading"}
+      disabled={isDisabled}
       title={title}
       aria-label={title}
-      className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-200 transition-colors disabled:opacity-50"
+      data-voice-state={state}
+      className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium text-neutral-950 shadow-sm transition-colors disabled:cursor-not-allowed"
       style={{
-        color:
-          state === "error"
-            ? "#ef4444"
-            : state === "playing"
-              ? accent
-              : undefined,
+        background: bgColor,
+        // Subtle outline keeps the button visible even if a future
+        // theme shift desaturates the bg color.
+        outline: `1px solid ${accent}40`,
       }}
     >
       {state === "loading" ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Loader2 className="h-4 w-4 animate-spin" />
       ) : state === "error" ? (
-        <AlertCircle className="h-3 w-3" />
+        <AlertCircle className="h-4 w-4" />
       ) : state === "playing" ? (
-        <Pause className="h-3 w-3" />
+        <Pause className="h-4 w-4" />
       ) : (
-        <Volume2 className="h-3 w-3" />
+        <Volume2 className="h-4 w-4" />
       )}
+      <span>{label}</span>
     </button>
   );
 }
