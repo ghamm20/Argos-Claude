@@ -19,11 +19,15 @@ interface SectionProps {
 
 const SECTIONS: SectionProps[] = [
   { id: "model", label: "Model" },
+  // Operator Auth (2026-05-28): promoted to nav position 2 so the
+  // PIN gate is the second thing the operator sees on opening Settings.
+  // Previously buried at position 5; operator reported missing it. The
+  // label is "Operator Auth" (not just "Auth") to make the purpose
+  // unambiguous at a glance.
+  { id: "auth", label: "Operator Auth" },
   { id: "personas", label: "Personas" },
   { id: "vault", label: "Vault" },
   { id: "voice", label: "Voice" },
-  // Operator Auth (2026-05-28): PIN gate config lives here.
-  { id: "auth", label: "Auth" },
   { id: "about", label: "About" },
 ];
 
