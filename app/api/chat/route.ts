@@ -110,6 +110,43 @@ function lastUserText(msgs: WireMessage[]): string | null {
   return null;
 }
 
+// Canon regression fix Option E (2026-05-28). When Bart is asked about
+// a canon character by name, suppress vault retrieval entirely for
+// that turn — the vault was actively misleading the model on these
+// queries (top-N chunks rarely surface character-specific content,
+// and the model confabulated identities by stitching unrelated
+// retrieval tokens together). Bart's system prompt already carries
+// the canon block; with retrieval off he leans on it directly.
+//
+// Operational queries (anything without a canon name) still use the
+// vault normally. All other personas always use the vault per their
+// own retrieval defaults.
+const BART_CANON_NAMES = [
+  "faquarl",
+  "jabor",
+  "nouda",
+  "queezle",
+  "nathaniel",
+  "mandrake",
+  "kitty",
+  "ptolemy",
+  "lovelace",
+  "harlequin",
+  "simpkin",
+  "honorius",
+];
+
+function isCanonQuery(personaId: string, message: string): boolean {
+  if (personaId !== "bartimaeus") return false;
+  const lower = message.toLowerCase();
+  // Word-boundary match keeps "kitty" from triggering on "kitty-corner"
+  // or similar. Anchors on \b which handles punctuation + spaces.
+  return BART_CANON_NAMES.some((name) => {
+    const re = new RegExp(`\\b${name}\\b`, "i");
+    return re.test(lower);
+  });
+}
+
 function buildRetrievalBlock(hits: RetrievalHit[]): string {
   const lines = hits.map((h, i) => {
     const idx = i + 1;
@@ -217,10 +254,30 @@ export async function POST(req: NextRequest) {
   // body doesn't override. Explicit body fields still win — operator can
   // force retrieval on a normally-no-retrieval persona (Bobby/Juniper),
   // or bump topK above persona default, or disable on Bart/Sage.
-  const wantsRetrieval =
+  //
+  // Canon regression fix Option E (2026-05-28): if Bart is asked about
+  // a canon character by name (Faquarl, Jabor, Nouda, etc.), force-
+  // suppress retrieval for this turn even if the operator had it on.
+  // The vault was actively misleading the model on these queries —
+  // see isCanonQuery + BART_CANON_NAMES above.
+  const requestedRetrieval =
     body.useRetrieval !== undefined
       ? body.useRetrieval !== false
       : persona.retrieval.defaultEnabled;
+  const canonHit = isCanonQuery(
+    body.personaId,
+    lastUserText(body.messages) ?? ""
+  );
+  const wantsRetrieval = requestedRetrieval && !canonHit;
+  if (canonHit && requestedRetrieval) {
+    // Operator-visible diagnostic — appears in server logs when the
+    // suppression fires. The audit chain doesn't record this
+    // currently; consider adding a "retrieval.suppressed" event kind
+    // if forensic visibility becomes important.
+    console.info(
+      `[chat] canon-name suppression: bartimaeus query matched a canon name → retrieval skipped this turn`
+    );
+  }
   const topK =
     typeof body.topK === "number" && body.topK > 0 && body.topK <= 50
       ? body.topK
