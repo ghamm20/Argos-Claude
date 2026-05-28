@@ -6,6 +6,31 @@ import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase } from "@/lib/ollama-config";
+// Phase 9 — persistent memory. Retrieval injects context into the
+// system prompt; extractor runs async after the stream completes.
+// All memory operations are wrapped in try/catch — memory failures
+// must NEVER break chat.
+import { retrieveMemoriesForPrompt } from "@/lib/memory/retriever";
+import { extractMemories } from "@/lib/memory/extractor";
+import {
+  writeMemory,
+  getOperatorProfile,
+  initMemoryStore,
+} from "@/lib/memory/store";
+import type { MemoryPersonaScope } from "@/lib/memory/schema";
+
+// Module-level init kicker — runs once per process lifetime when this
+// module first loads. Best-effort: failures here just mean the first
+// memory write will run init lazily anyway (initMemoryStore is
+// idempotent). Fire-and-forget.
+void initMemoryStore().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[chat] memory store init failed (will retry lazily): ${
+      (e as Error).message
+    }`
+  );
+});
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,8 +225,34 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ---- Memory retrieval (Phase 9, graceful: never breaks chat) ----
+  // Order: persona prompt → memory context → vault retrieval → truth.
+  // Memory injection sits between persona and vault per the Phase 9
+  // directive so a persona's character framing comes first, then the
+  // operator-specific memory, then the document-specific retrieval.
+  let memoryBlock = "";
+  const userText = lastUserText(body.messages) ?? "";
+  if (userText) {
+    try {
+      memoryBlock = await retrieveMemoriesForPrompt(
+        body.personaId as MemoryPersonaScope,
+        userText
+      );
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[chat] memory retrieval failed, continuing without context: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  }
+
   // ---- System prompt construction ----
   const systemParts: string[] = [persona.systemPrompt];
+  if (memoryBlock.length > 0) {
+    systemParts.push(memoryBlock);
+  }
   if (retrievedHits.length > 0) {
     systemParts.push(buildRetrievalBlock(retrievedHits));
   }
@@ -294,6 +345,38 @@ export async function POST(req: NextRequest) {
 
   const reader = upstream.body.getReader();
   const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  // Phase 9: accumulate assistant response in a side buffer so we can
+  // run memory extraction after the stream completes. We re-decode
+  // the same bytes the user receives (no extra round-trip) and parse
+  // each NDJSON line in-flight to extract `message.content`. Cost is
+  // a per-chunk JSON.parse — cheap relative to the stream's network
+  // path. Failures here are swallowed and never surface to the user.
+  let assistantBuf = "";
+  let pendingLine = "";
+  const accumulateContent = (chunkText: string) => {
+    pendingLine += chunkText;
+    let nl = pendingLine.indexOf("\n");
+    while (nl !== -1) {
+      const line = pendingLine.slice(0, nl).trim();
+      pendingLine = pendingLine.slice(nl + 1);
+      if (line) {
+        try {
+          const parsed = JSON.parse(line) as {
+            message?: { content?: string };
+          };
+          if (parsed?.message?.content) {
+            assistantBuf += parsed.message.content;
+          }
+        } catch {
+          // Ignore parse failures — Ollama occasionally splits NDJSON
+          // across reads; the next chunk will complete the line.
+        }
+      }
+      nl = pendingLine.indexOf("\n");
+    }
+  };
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controllerInner) {
       let receivedAny = false;
@@ -305,13 +388,60 @@ export async function POST(req: NextRequest) {
             receivedAny = true;
             clearTimeout(firstTokenTimer);
           }
-          if (value) controllerInner.enqueue(value);
+          if (value) {
+            controllerInner.enqueue(value);
+            // Accumulate AFTER enqueue so the client always gets the
+            // bytes first; extraction parsing is best-effort side work.
+            try {
+              accumulateContent(decoder.decode(value, { stream: true }));
+            } catch {
+              /* never let buffer parse errors interrupt the stream */
+            }
+          }
         }
         // Tail the stream with our retrieval set so the client can render pills.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(retrievalEvent)}\n`)
         );
         controllerInner.close();
+
+        // Phase 9 — fire-and-forget memory extraction. Resolves the
+        // operator profile, runs the extractor, persists each
+        // candidate. Failures logged + swallowed; chat response is
+        // already complete by the time this runs.
+        const finalAssistant = assistantBuf.trim();
+        if (finalAssistant.length > 0 && userText.length > 0) {
+          void (async () => {
+            try {
+              const profile = await getOperatorProfile();
+              const cands = await extractMemories(
+                userText,
+                finalAssistant,
+                body.personaId as MemoryPersonaScope,
+                profile
+              );
+              for (const c of cands) {
+                try {
+                  await writeMemory(c);
+                } catch (writeErr) {
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    `[chat] memory write failed (non-fatal): ${
+                      (writeErr as Error).message
+                    }`
+                  );
+                }
+              }
+            } catch (extractErr) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[chat] memory extraction failed (non-fatal): ${
+                  (extractErr as Error).message
+                }`
+              );
+            }
+          })();
+        }
       } catch (e) {
         clearTimeout(firstTokenTimer);
         if (isAbortError(e)) {
