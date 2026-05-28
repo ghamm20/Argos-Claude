@@ -14,7 +14,22 @@ import http from "node:http";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
-const PORT = 7787;
+
+// Optional --argos-root to point at the deployed payload (so the
+// spawned server sees the real vault). Default = tmp ARGOS_ROOT
+// (canon-only baseline). Pass `--argos-root "C:\Users\Gordy\Desktop\ARGOS"`
+// to exercise the retrieval-injected path that exposed the
+// 2026-05-28 canon regression.
+const args = process.argv.slice(2);
+function flag(name, fallback) {
+  const i = args.indexOf(name);
+  if (i >= 0 && args[i + 1] !== undefined) return args[i + 1];
+  return fallback;
+}
+const ARGOS_ROOT_OVERRIDE = flag("--argos-root", null);
+const USE_RETRIEVAL = flag("--no-retrieval", null) === null;
+
+const PORT = parseInt(flag("--port", "7787"), 10);
 const BASE = `http://127.0.0.1:${PORT}`;
 const agent = new http.Agent({ keepAlive: false });
 
@@ -78,7 +93,7 @@ async function bartChat(text, model) {
       messages: [{ role: "user", content: text }],
       personaId: "bartimaeus",
       model,
-      useRetrieval: false,
+      useRetrieval: USE_RETRIEVAL,
     });
     const r = http.request(
       {
@@ -134,8 +149,14 @@ async function bartChat(text, model) {
   };
 }
 
-const root = mkdtempSync(join(tmpdir(), "argos-bart-canon-"));
-console.log(`bart-canon-validate  ARGOS_ROOT=${root}  port=${PORT}`);
+const root = ARGOS_ROOT_OVERRIDE
+  ? ARGOS_ROOT_OVERRIDE
+  : mkdtempSync(join(tmpdir(), "argos-bart-canon-"));
+const isTmpRoot = !ARGOS_ROOT_OVERRIDE;
+console.log(`bart-canon-validate`);
+console.log(`  ARGOS_ROOT     = ${root}${isTmpRoot ? "  (tmp)" : "  (override)"}`);
+console.log(`  port           = ${PORT}`);
+console.log(`  useRetrieval   = ${USE_RETRIEVAL}`);
 
 let server = null;
 try {
@@ -181,5 +202,9 @@ try {
     } catch {}
   }
   agent.destroy();
-  try { rmSync(root, { recursive: true, force: true }); } catch {}
+  // Only delete the root if WE created it (tmp). Never delete an
+  // operator-supplied --argos-root.
+  if (isTmpRoot) {
+    try { rmSync(root, { recursive: true, force: true }); } catch {}
+  }
 }

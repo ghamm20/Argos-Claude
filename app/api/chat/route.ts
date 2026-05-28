@@ -116,11 +116,22 @@ function buildRetrievalBlock(hits: RetrievalHit[]): string {
     const cleaned = h.text.replace(/\s+/g, " ").trim();
     return `[${idx}] ${cleaned} (source: ${h.filename}, chunk ${h.chunkIndex})`;
   });
+  // Canon regression fix (2026-05-28). Original wrapper said "If no
+  // chunk is relevant, say so plainly and do not invent citations."
+  // The model read that as "vault is authoritative for what exists"
+  // and started refusing to discuss canon characters (Faquarl, Jabor,
+  // etc.) whenever the top-N retrieved chunks didn't contain their
+  // names. Broke Bart's canon identity directive in the deployed
+  // config (where retrieval defaults on for Bart).
+  //
+  // New wrapper: vault is advisory, not authoritative. Personas keep
+  // their own knowledge + memory; vault supplements. The no-fabricated-
+  // citations contract stays intact.
   return [
-    "RELEVANT CONTEXT (cite by [1], [2], etc. when you use this material):",
+    "RELEVANT CONTEXT (supplementary vault excerpts — cite as [1], [2] only when you actually use them):",
     ...lines,
     "",
-    "If no chunk is relevant to the user's question, say so plainly and do not invent citations.",
+    "This material supplements your own knowledge and memory. When the vault doesn't cover what the user asked, answer from your own knowledge — do NOT claim a topic or character doesn't exist just because it's absent from these excerpts. Cite [N] only when you use vault material; never invent citations.",
   ].join("\n");
 }
 
