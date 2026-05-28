@@ -12,7 +12,7 @@ import {
   vaultRoot,
 } from "./paths";
 import { extractText } from "./extract";
-import { chunkText } from "./chunk";
+import { chunkText, pickChunkOpts } from "./chunk";
 import { embedText } from "./embed";
 import { appendAudit } from "../audit";
 import type {
@@ -96,7 +96,12 @@ export async function ingest(
   const text = await extractText(filepath);
 
   opts.onProgress?.({ stage: "chunking" });
-  const rawChunks = chunkText(text);
+  // Vault long-form fix (2026-05-28): big PDFs (≥500KB) get the
+  // 1200/200 prose-tolerant preset so character-name retrieval
+  // doesn't drown in surrounding narrative. Smaller docs keep the
+  // default 512/51. See pickChunkOpts in chunk.ts for the heuristic.
+  const chunkOpts = pickChunkOpts(buf.length);
+  const rawChunks = chunkText(text, chunkOpts);
 
   if (rawChunks.length === 0) {
     throw new Error(
@@ -184,6 +189,55 @@ export async function ingest(
 export async function listDocuments(): Promise<DocumentMeta[]> {
   const manifest = await readManifest();
   return [...manifest.documents].sort((a, b) => b.ingestedAt - a.ingestedAt);
+}
+
+/**
+ * Re-chunk + re-embed an already-ingested document, without requiring
+ * the operator to re-upload the file. Reads the stored original from
+ * the vault's docs/ tree, re-runs the full ingest pipeline against
+ * it, and overwrites the chunks file + manifest entry in place.
+ *
+ * Why this exists: the long-form chunking heuristic (Vault fix
+ * 2026-05-28) only fires on FRESH ingests. Documents already in the
+ * vault from before the fix still carry their original (smaller)
+ * chunks and won't benefit until re-chunked. Rather than make the
+ * operator re-upload, this function lets them refresh in place.
+ *
+ * Identity preservation: because docId is derived from the file's
+ * sha256, re-ingesting the same bytes produces the same docId. The
+ * manifest entry is filtered-by-id-then-pushed in ingest(), so the
+ * net effect is "replace entry with same id". Old chunks file is
+ * overwritten via fs.writeFile.
+ *
+ * Returns the IngestResult exactly as ingest() does, so callers can
+ * report chunk-count deltas.
+ */
+export async function reingestDocument(
+  docId: string,
+  onProgress?: (p: IngestProgress) => void
+): Promise<IngestResult> {
+  const manifest = await readManifest();
+  const doc = manifest.documents.find((d) => d.id === docId);
+  if (!doc) {
+    throw new Error(`reingest: no document with docId=${docId}`);
+  }
+  const storedPath = storedDocPath(docId, doc.filename);
+  // Verify the stored original is still present — manifest can
+  // outlive disk in pathological cases (manual rm).
+  try {
+    await fsp.access(storedPath);
+  } catch {
+    throw new Error(
+      `reingest: stored file missing at ${storedPath} (manifest references it but disk does not)`
+    );
+  }
+  // Delegate to the normal ingest path. Same docId because same
+  // bytes → same sha256. ingest() also writes audit + manifest +
+  // emits progress events.
+  return ingest(storedPath, {
+    originalFilename: doc.filename,
+    onProgress,
+  });
 }
 
 export async function deleteDocument(docId: string): Promise<boolean> {

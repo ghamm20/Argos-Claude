@@ -24,6 +24,53 @@ export interface ChunkOpts {
 const DEFAULT_TARGET_TOKENS = 512;
 const DEFAULT_OVERLAP_TOKENS = 51;
 
+// Vault long-form prose fix (2026-05-28). Operator reported character
+// names from the Bartimaeus trilogy PDFs (Faquarl, Jabor, Queezle…)
+// scoring near-zero on cosine retrieval despite the docs being
+// ingested. Diagnosis: each character appears once per ~2KB chunk
+// surrounded by narrative prose. The character-name signal gets
+// diluted by the surrounding text vectors. Wider chunks pull in more
+// context per character mention AND give multiple character
+// appearances per chunk — both lift the cosine score.
+//
+// 1200/200 is the standard "long-form prose" preset used in
+// retrieval-augmented book QA work. ~5KB per chunk × ~25% overlap.
+// Compared to default 512/51: ~2.3x larger chunks, ~4x more overlap.
+// Trade: fewer chunks (cheaper to embed + search), but each chunk is
+// more retrieval-tolerant of indirect queries like "Tell me about X".
+const LONG_FORM_TARGET_TOKENS = 1200;
+const LONG_FORM_OVERLAP_TOKENS = 200;
+
+// Document-type detection threshold. PDFs (and any text source) above
+// this byte size are treated as long-form prose. 500 KB is comfortably
+// above the typical short-policy / spec doc (those run 5-50 KB) and
+// well below the smallest novel-length book we'd expect (~400 KB
+// extracted text → ~700 KB raw PDF). Sized after the operator's
+// observed trilogy ingest: the smallest of the 3 Stroud PDFs is 848 KB.
+export const LONG_FORM_BYTE_THRESHOLD = 500_000;
+
+/**
+ * Pick the chunker preset for a given source-file byte size. Above
+ * the long-form threshold → 1200/200 (prose-tolerant). Below → the
+ * default 512/51 (good for short policies / Markdown / API docs).
+ *
+ * Exported so the ingest pipeline can pass it through and the
+ * `/api/vault/reingest` route can show the operator which preset
+ * fired.
+ */
+export function pickChunkOpts(byteSize: number): Required<ChunkOpts> {
+  if (byteSize >= LONG_FORM_BYTE_THRESHOLD) {
+    return {
+      targetTokens: LONG_FORM_TARGET_TOKENS,
+      overlapTokens: LONG_FORM_OVERLAP_TOKENS,
+    };
+  }
+  return {
+    targetTokens: DEFAULT_TARGET_TOKENS,
+    overlapTokens: DEFAULT_OVERLAP_TOKENS,
+  };
+}
+
 export function chunkText(text: string, opts: ChunkOpts = {}): RawChunk[] {
   const targetChars = (opts.targetTokens ?? DEFAULT_TARGET_TOKENS) * 4;
   const overlapChars = (opts.overlapTokens ?? DEFAULT_OVERLAP_TOKENS) * 4;
