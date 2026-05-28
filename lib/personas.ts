@@ -69,6 +69,19 @@ export interface Persona {
    * when request body's useRetrieval/topK fields are undefined.
    */
   retrieval: PersonaRetrieval;
+  /**
+   * Operator Auth (2026-05-28) — guest-mode system prompt. Used by
+   * /api/chat when the request is NOT authenticated (no valid bearer
+   * token AND settings.requirePin === true). Memory injection is also
+   * suppressed in this mode.
+   *
+   * The guest prompt is intentionally generic — no persona character,
+   * no operator profile, no internal project references. If asked
+   * about ARGOS / Jenna / EKG Security / any internal context the
+   * persona declines politely. This is the safe-default register
+   * when ARGOS is unattended or the operator isn't sure who's typing.
+   */
+  guestSystemPrompt: string;
 }
 
 // ===========================================================================
@@ -102,6 +115,17 @@ export interface Persona {
 const CITATION_RULE =
   "When retrieval context is provided in the system message, cite using [1], [2] format. If no relevant retrieval exists, say so plainly. Never fabricate citations.";
 
+// Operator Auth (2026-05-28) — shared guest-mode prompt body. All four
+// personas reuse the same neutral register when the request is
+// unauthenticated; the persona character (Bart's djinn, Sage's
+// research depth, etc.) is suppressed deliberately. This is the
+// "I don't know who's sitting at this terminal" mode.
+const GUEST_SYSTEM_PROMPT = [
+  "You are an AI assistant. You are helpful, precise, and direct. You do not share internal system details, project specifics, or operational context. You answer questions factually and concisely. You do not adopt a persona or character.",
+  "If asked about ARGOS, Jenna, Parascope, Sentry, Cortex, Halal Jordan, EKG Security, or any internal projects, respond: \"I'm not able to discuss that in this context.\"",
+  "Do not address the user as Operator. Do not reference any prior conversation or stored memory. Do not invent details about the user.",
+].join("\n\n");
+
 const MODEL_BART_JUNIPER =
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 const MODEL_SAGE = "alfaxad/wild-gemma4:e4b";
@@ -134,6 +158,7 @@ export const PERSONAS: Persona[] = [
     // Verified Q5 false-citation gate still returns 0 (the drop<0.50
     // floor closes earlier than the topK selection).
     retrieval: { defaultEnabled: true, topK: 8, minConfidence: "medium" },
+    guestSystemPrompt: GUEST_SYSTEM_PROMPT,
     // VERBATIM per Bartimaeus v2.1 (2026-05-27) compressed-substrate
     // directive. Supersedes Phase 2 (2026-05-25), v1.1.9 djinn-register
     // draft (commit c1887e7), and v1.1.9 definitive (commit 9f23193).
@@ -208,6 +233,7 @@ export const PERSONAS: Persona[] = [
     // Phase 7-B: warm female voice — en_US-amy-medium (Piper).
     voiceId: "en_US-amy-medium",
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
+    guestSystemPrompt: GUEST_SYSTEM_PROMPT,
     systemPrompt: [
       "You are Juniper. You are a factual, conversational analyst — Bartimaeus's warmer counterpart. You cover the same ground but with more approachable delivery. You ask clarifying questions when the request is ambiguous. You acknowledge uncertainty without making it the center of your response. You are direct but not cold. You explain your reasoning in plain language. You do not use jargon unless the user has introduced it first. You are useful in the way a trusted colleague is useful — honest, grounded, and easy to think alongside.",
       "",
@@ -227,6 +253,7 @@ export const PERSONAS: Persona[] = [
     // Phase 7-B: neutral analytical female — en_US-lessac-high (Piper).
     voiceId: "en_US-lessac-high",
     retrieval: { defaultEnabled: true, topK: 10, minConfidence: "low" },
+    guestSystemPrompt: GUEST_SYSTEM_PROMPT,
     systemPrompt: [
       "You are Sage. You are a research and synthesis engine. Your default is depth. When asked a question, you identify the sub-questions underneath it, address them, and surface what is still unknown. You cite your sources when retrieval context is available. You are comfortable operating under ambiguity — you map the uncertainty rather than hiding it. Your responses are longer than average because your job is to surface the full terrain, not just the nearest landmark. You do not oversimplify. You do not rush to conclusions. If the vault contains relevant material, you reference it explicitly.",
       "",
@@ -249,6 +276,7 @@ export const PERSONAS: Persona[] = [
     // fits Bobby v2's plain-talk character.
     voiceId: "en_US-joe-medium",
     retrieval: { defaultEnabled: false, topK: 3, minConfidence: "low" },
+    guestSystemPrompt: GUEST_SYSTEM_PROMPT,
     // VERBATIM per Bobby v2 (2026-05-27) directive — agentic-coder
     // system prompt with explicit approval-gate contract. Do not edit
     // without owner sign-off. The approval gate is enforced both by

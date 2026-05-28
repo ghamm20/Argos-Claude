@@ -10,6 +10,11 @@ import { MicButton } from "./voice/MicButton";
 import { PlayButton } from "./voice/PlayButton";
 import { SpeakerSelect } from "./voice/SpeakerSelect";
 import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
+// Operator Auth (2026-05-28) — inject the bearer token on every
+// /api/chat send. When unset (guest), the header is omitted and the
+// server falls back to guest mode if requirePin is enabled, or to
+// operator mode otherwise.
+import { getSessionToken } from "@/lib/auth-client";
 import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
 import {
   useArgos,
@@ -533,9 +538,18 @@ export function ChatPane() {
     abortRef.current = controller;
 
     try {
+      // Operator Auth — attach the bearer token if present in
+      // sessionStorage. No-op when running with requirePin=false: the
+      // server treats every request as operator anyway.
+      const chatHeaders: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      const token = getSessionToken();
+      if (token) chatHeaders["authorization"] = `Bearer ${token}`;
+
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: chatHeaders,
         body: JSON.stringify({
           messages: wireHistory,
           personaId: personaIdAtSend,

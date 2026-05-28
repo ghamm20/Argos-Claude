@@ -7,9 +7,10 @@ import { PersonaSection } from "./settings/PersonaSection";
 import { VaultSection } from "./settings/VaultSection";
 import { VoiceSection } from "./settings/VoiceSection";
 import { AboutSection } from "./settings/AboutSection";
+import { AuthSection } from "./settings/AuthSection";
 import type { RuntimeInfo } from "@/lib/runtime-info";
 
-type SectionId = "model" | "personas" | "vault" | "voice" | "about";
+type SectionId = "model" | "personas" | "vault" | "voice" | "auth" | "about";
 
 interface SectionProps {
   id: SectionId;
@@ -21,6 +22,8 @@ const SECTIONS: SectionProps[] = [
   { id: "personas", label: "Personas" },
   { id: "vault", label: "Vault" },
   { id: "voice", label: "Voice" },
+  // Operator Auth (2026-05-28): PIN gate config lives here.
+  { id: "auth", label: "Auth" },
   { id: "about", label: "About" },
 ];
 
@@ -69,6 +72,7 @@ export function SettingsCenterPane({
           {active === "personas" && <PersonaSection />}
           {active === "vault" && <VaultSection />}
           {active === "voice" && <VoiceSection />}
+          {active === "auth" && <AuthSection />}
           {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>
       </div>

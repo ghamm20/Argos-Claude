@@ -5,6 +5,7 @@ import { useArgos } from "@/lib/store";
 import { TruthModeToggle } from "./TruthModeToggle";
 import { ToolsDock } from "@/components/panels/ToolsDock";
 import { ShieldCheck } from "lucide-react";
+import { AuthIndicator } from "./auth/AuthIndicator";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -324,6 +325,10 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
 
       <Section title="Context">
         <Row label="Persona" value={personaName} accent={eyeColor} />
+        {/* Operator Auth (2026-05-28) — current auth state. Self-hides
+            when settings.requirePin=false. Clickable: guest opens
+            gate; operator offers lock-session. */}
+        <AuthIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}

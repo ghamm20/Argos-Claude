@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+// Operator Auth (2026-05-28) — PinGate wraps every page. It self-
+// disables when settings.requirePin === false, so the pre-auth
+// behavior is preserved until the operator explicitly enables the gate.
+import { PinGate } from "@/components/auth/PinGate";
 
 export const metadata: Metadata = {
   title: "ARGOS",
@@ -17,7 +21,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        <PinGate>{children}</PinGate>
+      </body>
     </html>
   );
 }

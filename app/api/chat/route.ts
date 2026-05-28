@@ -18,6 +18,9 @@ import {
   initMemoryStore,
 } from "@/lib/memory/store";
 import type { MemoryPersonaScope } from "@/lib/memory/schema";
+// Operator Auth (2026-05-28) — auth-mode gate.
+import { readSettings } from "@/lib/settings";
+import { parseBearer, isTokenValid } from "@/lib/auth";
 
 // Module-level init kicker — runs once per process lifetime when this
 // module first loads. Best-effort: failures here just mean the first
@@ -225,14 +228,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ---- Operator Auth (2026-05-28): two-mode chat ----
+  // Server-side decision tree:
+  //   settings.requirePin === false → always operator (pre-auth behavior)
+  //   settings.requirePin === true  → look for Authorization: Bearer
+  //                                   - valid token in store → operator
+  //                                   - missing / invalid → guest
+  // Guest mode: persona.guestSystemPrompt (generic register, refuses
+  // internal project context), NO memory injection. Vault retrieval
+  // is left intact because vault content is operator-uploaded
+  // documents; the operator's own materials don't change between
+  // modes.
+  const authSettings = await readSettings().catch(() => null);
+  const requirePin = authSettings?.requirePin === true;
+  const bearer = parseBearer(req.headers.get("authorization"));
+  const isOperator = !requirePin || isTokenValid(bearer);
+
   // ---- Memory retrieval (Phase 9, graceful: never breaks chat) ----
   // Order: persona prompt → memory context → vault retrieval → truth.
   // Memory injection sits between persona and vault per the Phase 9
   // directive so a persona's character framing comes first, then the
   // operator-specific memory, then the document-specific retrieval.
+  // Operator Auth: only runs when isOperator === true.
   let memoryBlock = "";
   const userText = lastUserText(body.messages) ?? "";
-  if (userText) {
+  if (isOperator && userText) {
     try {
       memoryBlock = await retrieveMemoriesForPrompt(
         body.personaId as MemoryPersonaScope,
@@ -249,7 +269,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ---- System prompt construction ----
-  const systemParts: string[] = [persona.systemPrompt];
+  // Auth-gated: guest sees persona.guestSystemPrompt; operator sees
+  // persona.systemPrompt (the full character register).
+  const baseSystemPrompt = isOperator
+    ? persona.systemPrompt
+    : persona.guestSystemPrompt;
+  const systemParts: string[] = [baseSystemPrompt];
   if (memoryBlock.length > 0) {
     systemParts.push(memoryBlock);
   }
@@ -409,8 +434,14 @@ export async function POST(req: NextRequest) {
         // operator profile, runs the extractor, persists each
         // candidate. Failures logged + swallowed; chat response is
         // already complete by the time this runs.
+        //
+        // Operator Auth (2026-05-28): only run extraction for
+        // authenticated requests. Guest turns shouldn't poison the
+        // operator's memory store with strangers' "I am" / "I prefer"
+        // statements — those would surface back to the operator's
+        // next prompt and create cross-session contamination.
         const finalAssistant = assistantBuf.trim();
-        if (finalAssistant.length > 0 && userText.length > 0) {
+        if (isOperator && finalAssistant.length > 0 && userText.length > 0) {
           void (async () => {
             try {
               const profile = await getOperatorProfile();
