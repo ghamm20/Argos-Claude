@@ -30,6 +30,38 @@ export interface StartRecorderOptions {
   deviceId?: string;
 }
 
+// =================================================================
+// Canonical localStorage keys for operator-selected audio devices.
+// =================================================================
+//
+// Both keys live here (rather than inside MicButton/SpeakerSelect)
+// so any future component that needs to read or invalidate the
+// operator's audio routing choices has a single import target.
+// Browser-scope persistence — sibling to argos_active_persona.
+
+/** Selected audio INPUT (microphone) deviceId. Consumed by MicButton +
+ *  startVoiceRecorder() via the `deviceId` option. */
+export const MIC_DEVICE_LS_KEY = "argos_mic_device_id";
+
+/** Selected audio OUTPUT (speaker / headphone) deviceId. Consumed by
+ *  SpeakerSelect + PlayButton via AudioContext.setSinkId(). */
+export const SPEAKER_DEVICE_LS_KEY = "argos_speaker_device_id";
+
+/**
+ * Read the persisted speaker deviceId from localStorage. Returns null
+ * if the key is unset, the storage is unavailable (private mode), or
+ * the runtime is non-browser. Centralised so PlayButton + any future
+ * consumer don't each reimplement the try/catch dance.
+ */
+export function getPersistedSpeakerId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage?.getItem(SPEAKER_DEVICE_LS_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Enumerate audio input devices. Returns `[]` if the API is unavailable
  * or permission has never been granted. Note: `label` is empty for any
@@ -45,6 +77,27 @@ export async function listAudioInputs(): Promise<MediaDeviceInfo[]> {
   try {
     const all = await navigator.mediaDevices.enumerateDevices();
     return all.filter((d) => d.kind === "audioinput");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Enumerate audio OUTPUT devices (speakers / headphones / virtual
+ * sinks). Mirrors listAudioInputs() for the playback side. Same caveat
+ * about `label` visibility: most browsers populate output labels only
+ * after the page has been granted mic permission at least once, since
+ * device labels are tied to the same permission gate.
+ *
+ * Returns `[]` on any failure — caller is expected to render no
+ * dropdown in that case (single-device or unsupported environment).
+ */
+export async function listAudioOutputs(): Promise<MediaDeviceInfo[]> {
+  if (typeof window === "undefined") return [];
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all.filter((d) => d.kind === "audiooutput");
   } catch {
     return [];
   }

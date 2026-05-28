@@ -26,7 +26,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Volume2, Pause, Loader2, AlertCircle } from "lucide-react";
-import { synthesizeToBlob } from "@/lib/voice-client";
+import { synthesizeToBlob, getPersistedSpeakerId } from "@/lib/voice-client";
+
+// Module-scope flag to suppress repeated "setSinkId unsupported"
+// console warnings — log it once per page load, not once per click.
+let setSinkIdUnsupportedLogged = false;
+
+/**
+ * AudioContext with the (Chrome 110+) `setSinkId` method. The Web Audio
+ * spec adds setSinkId to BaseAudioContext but the lib.dom.d.ts TypeScript
+ * types haven't caught up everywhere, so we narrow with a structural
+ * type instead of relying on the runtime AudioContext type.
+ */
+type ContextWithSetSinkId = AudioContext & {
+  setSinkId: (deviceId: string) => Promise<void>;
+};
 
 // Cross-component "stop everyone else" coordination. Each PlayButton
 // registers itself when it starts and unregisters when it stops. A
@@ -165,6 +179,43 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
         // ownership in some implementations). slice(0) is a defensive
         // copy — cheap relative to the network fetch we just did.
         const audioBuf = await ctx.decodeAudioData(arrayBuf.slice(0));
+        if (controller.signal.aborted) return;
+
+        // Voice UX (2026-05-27): route to the operator-selected output
+        // device if one is persisted. setSinkId moves the context's
+        // destination to the chosen sink — fixes the case where the
+        // OS default output is a virtual sink (DeskIn, VB-Cable, etc.)
+        // and the WAV would otherwise vanish into the void.
+        //
+        // Failure modes (all non-fatal — fall through to default sink):
+        //   - setSinkId not on the prototype → older browser, log once
+        //   - persisted device id gone (unplugged headphones) → throws
+        //   - permission denied / device busy → throws
+        // In each case we still want playback to proceed on whatever
+        // sink Chrome would have used anyway.
+        const speakerId = getPersistedSpeakerId();
+        if (speakerId) {
+          const ctxAny = ctx as Partial<ContextWithSetSinkId>;
+          if (typeof ctxAny.setSinkId === "function") {
+            try {
+              await (ctxAny as ContextWithSetSinkId).setSinkId(speakerId);
+            } catch (err) {
+              // Surface a warning but keep playing on the default sink.
+              // Most common cause: persisted device was unplugged.
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[PlayButton] setSinkId failed (falling back to default sink):`,
+                err
+              );
+            }
+          } else if (!setSinkIdUnsupportedLogged) {
+            setSinkIdUnsupportedLogged = true;
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[PlayButton] AudioContext.setSinkId is not supported in this browser — output routing will use the OS default sink. Chrome 110+ is required."
+            );
+          }
+        }
         if (controller.signal.aborted) return;
 
         const source = ctx.createBufferSource();

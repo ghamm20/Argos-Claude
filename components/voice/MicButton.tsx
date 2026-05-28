@@ -19,6 +19,7 @@ import {
   startVoiceRecorder,
   transcribeBlob,
   listAudioInputs,
+  MIC_DEVICE_LS_KEY,
   type RecorderHandle,
 } from "@/lib/voice-client";
 
@@ -43,10 +44,9 @@ type State =
 // walks away. 60s matches whisper.cpp's typical comfortable batch.
 const MAX_RECORDING_MS = 60_000;
 
-// localStorage key for the operator-selected audio input deviceId.
-// Browser-scope persistence — sibling to argos_active_persona. Lost
-// only on a manual storage wipe or different browser/profile.
-const MIC_DEVICE_LS_KEY = "argos_mic_device_id";
+// MIC_DEVICE_LS_KEY is now imported from lib/voice-client.ts (canonical
+// location alongside SPEAKER_DEVICE_LS_KEY — single source of truth for
+// audio-routing persistence keys).
 
 // Heuristic match for "virtual" / loopback / hub-bus devices we want
 // to AVOID auto-selecting. Real input mics (webcams, USB mics,

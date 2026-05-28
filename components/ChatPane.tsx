@@ -8,6 +8,7 @@ import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
 import { MicButton } from "./voice/MicButton";
 import { PlayButton } from "./voice/PlayButton";
+import { SpeakerSelect } from "./voice/SpeakerSelect";
 import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
 import {
@@ -865,6 +866,11 @@ export function ChatPane() {
               }
               className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-60 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
             />
+            {/* Audio OUTPUT routing — self-hides when only one
+                output device exists. Persists choice to localStorage;
+                consumed by PlayButton via AudioContext.setSinkId().
+                Sits above the mic device selector in the same column. */}
+            <SpeakerSelect accent={accent} disabled={isStreaming} />
             {/* Mic input — self-hides when STT unavailable. Appends
                 transcribed text to the current draft so the operator
                 can dictate then type a tweak before sending. */}
