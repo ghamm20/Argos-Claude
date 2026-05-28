@@ -86,6 +86,7 @@ const CRAWL_KEYWORDS = [
   "search for",
   "what is",
   "what's the",
+  "what's a",
   "whats the",
   "who is",
   "who's",
@@ -93,6 +94,21 @@ const CRAWL_KEYWORDS = [
   "explain",
   "tell me about",
   "deep dive",
+];
+
+// Phase 11 — arXiv intent keywords. Checked AFTER ai_updates so that
+// "new AI papers" routes to ai_updates (broader) and "arxiv papers
+// this week" routes to arxiv (paper-specific).
+const ARXIV_KEYWORDS = [
+  "arxiv",
+  "ar xiv",
+  "paper",
+  "papers",
+  "preprint",
+  "preprints",
+  "academic paper",
+  "research paper",
+  "peer review",
 ];
 
 // ----- location detection -----
@@ -149,6 +165,10 @@ function containsAny(haystack: string, needles: string[]): boolean {
 export function classifyIntent(message: string): ResearchIntent {
   const lower = message.toLowerCase();
   if (containsAny(lower, WEATHER_KEYWORDS)) return "weather";
+  // arXiv before ai_updates — "arxiv paper" should NOT be classified
+  // as ai_updates even though it contains "ai" tokens. arXiv is a
+  // narrower bucket and operator-explicit; defer to it first.
+  if (containsAny(lower, ARXIV_KEYWORDS)) return "arxiv";
   if (containsAny(lower, AI_KEYWORDS)) return "ai_updates";
   if (containsAny(lower, NEWS_KEYWORDS)) return "news";
   if (containsAny(lower, CRAWL_KEYWORDS)) return "crawl";
@@ -168,6 +188,7 @@ export function needsResearch(message: string): boolean {
   const lower = message.toLowerCase();
   return (
     containsAny(lower, WEATHER_KEYWORDS) ||
+    containsAny(lower, ARXIV_KEYWORDS) ||
     containsAny(lower, AI_KEYWORDS) ||
     containsAny(lower, NEWS_KEYWORDS) ||
     containsAny(lower, CRAWL_KEYWORDS)
@@ -196,12 +217,18 @@ function locationDisplay(loc: ResearchLocation): string {
  *   - weather: 1 query per relevant location (1-2 total)
  *   - news: 2-3 queries (local + regional + national)
  *   - ai_updates: 3 queries (latest models, papers, industry)
+ *   - arxiv: 1 query per topic in `topics` (default 4); falls back
+ *     to a verbatim message query when topics is empty
  *   - crawl: 2-4 queries from the user's topic
  *   - general: 1 verbatim query
+ *
+ * `topics` is optional and only meaningful for the arxiv branch — the
+ * scheduler + the chat route pass settings.researchArxivTopics there.
  */
 export function planQueries(
   message: string,
-  intent: ResearchIntent
+  intent: ResearchIntent,
+  topics: string[] = []
 ): SearchQuery[] {
   const loc = detectLocation(message);
 
@@ -254,6 +281,29 @@ export function planQueries(
         },
         {
           query: "OpenAI Anthropic Google AI industry news",
+          intent,
+          location: null,
+          maxResults: 5,
+        },
+      ];
+    }
+
+    case "arxiv": {
+      // One query per configured topic. Empty topics → fall back to
+      // the user message (the verbatim path lets one-off operator
+      // questions like "arxiv papers about LLM finetuning" work).
+      if (topics.length > 0) {
+        return topics.map((t) => ({
+          query: t,
+          intent,
+          location: null,
+          maxResults: 5,
+        }));
+      }
+      const stripped = stripCrawlTriggers(message);
+      return [
+        {
+          query: stripped.length > 0 ? stripped : "machine learning",
           intent,
           location: null,
           maxResults: 5,

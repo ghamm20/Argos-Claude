@@ -14,7 +14,11 @@ export type ResearchIntent =
   | "news"
   | "ai_updates"
   | "general"
-  | "crawl";
+  | "crawl"
+  // Phase 11 — arXiv academic paper stream. Hits export.arxiv.org's
+  // Atom feed; cached 6h. Distinct from ai_updates because the source
+  // (peer-reviewed papers) and cadence (slower-moving) differ.
+  | "arxiv";
 
 /** Operator's two home markets + a few common variants. Used by the
  *  planner's location detector. */
@@ -121,6 +125,7 @@ export const TTL_MINUTES: Record<ResearchIntent, number> = {
   ai_updates: 120,
   general: 180,
   crawl: 180,
+  arxiv: 360, // 6h per Phase 11 directive — papers move slow
 };
 
 /** Feedback-loop config. Below this confidence the orchestrator runs

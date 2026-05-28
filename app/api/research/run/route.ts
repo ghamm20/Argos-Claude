@@ -23,6 +23,8 @@ const STREAM_QUERIES: Record<string, string> = {
   news_atl: "latest news Atlanta",
   news_orl: "latest news Orlando",
   ai_updates: "latest AI news and model releases",
+  // Phase 11
+  arxiv: "arxiv papers this week",
 };
 
 interface RunBody {

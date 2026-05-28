@@ -6,6 +6,16 @@ import { appendAudit } from "./audit";
 
 export const SETTINGS_VERSION = 1;
 
+/** Phase 11 — research scheduler config. All intervals in minutes;
+ *  set to 0 to disable that stream's scheduled runs. */
+export interface ResearchScheduleConfig {
+  enabled: boolean;
+  weatherMinutes: number;
+  newsMinutes: number;
+  aiUpdatesMinutes: number;
+  arxivMinutes: number;
+}
+
 export interface PersistedSettings {
   version: number;
   defaultPersona: PersonaId;
@@ -25,6 +35,24 @@ export interface PersistedSettings {
    *  header. Default false preserves pre-auth behavior; operator
    *  opt-in via Settings UI. */
   requirePin: boolean;
+  // Phase 11 — Pushover credentials. Both null means alerts are
+  // disabled (alerts.ts skips silently). Operator sets via Settings
+  // UI; never embedded in build.
+  operatorPushoverUserKey: string | null;
+  operatorPushoverApiToken: string | null;
+  /** Phase 11 — scheduler config. enabled:false keeps the background
+   *  timers off; enabled:true starts them on next chat-route boot. */
+  researchSchedule: ResearchScheduleConfig;
+  /** Phase 11 — keyword watchlist that, when matched in a research
+   *  summary or finding, forces an alert even below the confidence
+   *  threshold. Case-insensitive substring match. */
+  researchWatchlist: string[];
+  /** Phase 11 — minimum confidence to fire a Pushover alert when
+   *  no watchlist match is present. 0.8 default per directive. */
+  researchAlertConfidenceThreshold: number;
+  /** Phase 11 — arXiv topic queries (default 4). Each fires its own
+   *  query against export.arxiv.org. */
+  researchArxivTopics: string[];
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -42,6 +70,26 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   updatedAt: 0,
   operatorPinHash: null,
   requirePin: false,
+  // Phase 11 defaults: alerts disabled until operator supplies keys;
+  // scheduler disabled until operator opts in. Watchlist + thresholds
+  // pre-populated with sane values per the directive.
+  operatorPushoverUserKey: null,
+  operatorPushoverApiToken: null,
+  researchSchedule: {
+    enabled: false,
+    weatherMinutes: 30,
+    newsMinutes: 60,
+    aiUpdatesMinutes: 120,
+    arxivMinutes: 360, // 6h — matches arXiv cache TTL
+  },
+  researchWatchlist: [],
+  researchAlertConfidenceThreshold: 0.8,
+  researchArxivTopics: [
+    "local LLM",
+    "multi-agent systems",
+    "RAG",
+    "AI security",
+  ],
 };
 
 export function configDir(): string {
@@ -71,6 +119,32 @@ export async function readSettings(): Promise<PersistedSettings> {
         parsed.requirePin === undefined
           ? DEFAULT_SETTINGS.requirePin
           : parsed.requirePin,
+      // Phase 11 forward-compat: missing → default. Older
+      // settings.json files (Phase 10 and earlier) load cleanly.
+      operatorPushoverUserKey:
+        parsed.operatorPushoverUserKey === undefined
+          ? DEFAULT_SETTINGS.operatorPushoverUserKey
+          : parsed.operatorPushoverUserKey,
+      operatorPushoverApiToken:
+        parsed.operatorPushoverApiToken === undefined
+          ? DEFAULT_SETTINGS.operatorPushoverApiToken
+          : parsed.operatorPushoverApiToken,
+      researchSchedule: {
+        ...DEFAULT_SETTINGS.researchSchedule,
+        ...(parsed.researchSchedule ?? {}),
+      },
+      researchWatchlist:
+        Array.isArray(parsed.researchWatchlist)
+          ? parsed.researchWatchlist.filter((s): s is string => typeof s === "string")
+          : DEFAULT_SETTINGS.researchWatchlist,
+      researchAlertConfidenceThreshold:
+        typeof parsed.researchAlertConfidenceThreshold === "number"
+          ? parsed.researchAlertConfidenceThreshold
+          : DEFAULT_SETTINGS.researchAlertConfidenceThreshold,
+      researchArxivTopics:
+        Array.isArray(parsed.researchArxivTopics) && parsed.researchArxivTopics.length > 0
+          ? parsed.researchArxivTopics.filter((s): s is string => typeof s === "string")
+          : DEFAULT_SETTINGS.researchArxivTopics,
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {

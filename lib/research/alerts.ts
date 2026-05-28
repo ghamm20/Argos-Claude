@@ -1,0 +1,222 @@
+// lib/research/alerts.ts
+//
+// Phase 11 — Pushover alerts. Fire-and-forget POST to Pushover when
+// a research report meets the alert criteria:
+//
+//   - quality === "SUFFICIENT" AND confidence >= threshold (default
+//     0.8 per directive), OR
+//   - any watchlist token appears in the summary, a finding, or a
+//     citation (case-insensitive substring match)
+//
+// Pushover credentials live in settings (operatorPushoverUserKey +
+// operatorPushoverApiToken). When either is missing, shouldAlert()
+// still computes the criteria but sendAlert() short-circuits — keeps
+// the criteria reasoning testable without keys.
+
+import { readSettings } from "../settings";
+import type { ResearchReport } from "./types";
+
+const PUSHOVER_ENDPOINT = "https://api.pushover.net/1/messages.json";
+const PUSHOVER_TIMEOUT_MS = 8000;
+
+/** Criteria check — pure function over the report + settings. */
+export interface AlertDecision {
+  fire: boolean;
+  reason: string; // human-readable explanation; included in audit logs
+}
+
+export function decideAlert(
+  report: ResearchReport,
+  watchlist: string[],
+  confidenceThreshold: number
+): AlertDecision {
+  // Match watchlist first — operator-specified terms override the
+  // confidence gate (lets them get alerted on partial / low-conf
+  // results when a specific keyword fires).
+  if (watchlist.length > 0) {
+    const haystack = (
+      report.summary +
+      " " +
+      report.findings.join(" ") +
+      " " +
+      report.citations.join(" ")
+    ).toLowerCase();
+    for (const w of watchlist) {
+      const wl = w.toLowerCase().trim();
+      if (wl.length > 0 && haystack.includes(wl)) {
+        return {
+          fire: true,
+          reason: `watchlist match: "${w}"`,
+        };
+      }
+    }
+  }
+  if (
+    report.quality === "SUFFICIENT" &&
+    report.confidenceScore >= confidenceThreshold
+  ) {
+    return {
+      fire: true,
+      reason: `quality SUFFICIENT + confidence ${report.confidenceScore.toFixed(2)} ≥ ${confidenceThreshold}`,
+    };
+  }
+  return {
+    fire: false,
+    reason: `criteria not met (quality=${report.quality}, conf=${report.confidenceScore.toFixed(2)})`,
+  };
+}
+
+/** Build the message body Pushover renders. Title + 1023-char body
+ *  cap per Pushover API spec. */
+function buildMessage(report: ResearchReport): {
+  title: string;
+  message: string;
+  url?: string;
+  url_title?: string;
+} {
+  const title = `[${report.intent}] ${report.quality} · conf ${report.confidenceScore.toFixed(2)}`;
+  const lines: string[] = [];
+  lines.push(report.summary);
+  if (report.findings.length > 0) {
+    lines.push("");
+    lines.push("Findings:");
+    for (const f of report.findings.slice(0, 3)) {
+      lines.push(`• ${f}`);
+    }
+  }
+  if (report.conflicts.length > 0) {
+    lines.push("");
+    lines.push("Conflicts:");
+    for (const c of report.conflicts.slice(0, 2)) {
+      lines.push(`! ${c}`);
+    }
+  }
+  let message = lines.join("\n");
+  if (message.length > 1023) message = message.slice(0, 1020) + "…";
+  const topCitation = report.citations[0];
+  // Top citation URL — Pushover renders this as a clickable "Open"
+  // link. Extract the URL from the "[1] title — source — url" form.
+  let url: string | undefined;
+  if (topCitation) {
+    const m = topCitation.match(/(https?:\/\/\S+)$/);
+    if (m) url = m[1];
+  }
+  return {
+    title,
+    message,
+    url,
+    url_title: url ? "Top citation" : undefined,
+  };
+}
+
+/** Build the form-encoded body for the Pushover POST. */
+function formBody(params: Record<string, string | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+  }
+  return parts.join("&");
+}
+
+/**
+ * Send a Pushover alert for a research report. Fire-and-forget:
+ * never throws; logs on failure. Skips silently when keys are unset
+ * (caller can still log the decision).
+ *
+ * Optional `forceTest` flag is used by the test-alert endpoint to
+ * skip the criteria check.
+ */
+export async function sendAlert(
+  report: ResearchReport,
+  opts: { forceTest?: boolean; reasonOverride?: string } = {}
+): Promise<{ sent: boolean; reason: string }> {
+  const settings = await readSettings().catch(() => null);
+  if (!settings) {
+    return { sent: false, reason: "settings unreadable" };
+  }
+  const userKey = settings.operatorPushoverUserKey;
+  const token = settings.operatorPushoverApiToken;
+  if (!userKey || !token) {
+    return {
+      sent: false,
+      reason: "Pushover credentials not configured",
+    };
+  }
+
+  if (!opts.forceTest) {
+    const decision = decideAlert(
+      report,
+      settings.researchWatchlist,
+      settings.researchAlertConfidenceThreshold
+    );
+    if (!decision.fire) {
+      return { sent: false, reason: decision.reason };
+    }
+  }
+
+  const body = buildMessage(report);
+  const params = {
+    token,
+    user: userKey,
+    title: body.title,
+    message: body.message,
+    url: body.url,
+    url_title: body.url_title,
+    priority: "0", // Pushover normal priority
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PUSHOVER_TIMEOUT_MS);
+  try {
+    const res = await fetch(PUSHOVER_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: formBody(params),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[research/alerts] Pushover HTTP ${res.status}: ${errText.slice(0, 200)}`
+      );
+      return { sent: false, reason: `pushover ${res.status}` };
+    }
+    return {
+      sent: true,
+      reason: opts.reasonOverride ?? "alert delivered",
+    };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[research/alerts] Pushover fetch failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
+    return {
+      sent: false,
+      reason: `network: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Check whether Pushover is configured. Used by Tools UI to show
+ *  status without exposing the keys. */
+export async function isPushoverConfigured(): Promise<boolean> {
+  try {
+    const s = await readSettings();
+    return (
+      typeof s.operatorPushoverUserKey === "string" &&
+      s.operatorPushoverUserKey.length > 0 &&
+      typeof s.operatorPushoverApiToken === "string" &&
+      s.operatorPushoverApiToken.length > 0
+    );
+  } catch {
+    return false;
+  }
+}

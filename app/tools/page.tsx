@@ -47,7 +47,21 @@ const STREAM_BUTTONS: Array<{ key: string; label: string }> = [
   { key: "news_atl", label: "News · Atlanta" },
   { key: "news_orl", label: "News · Orlando" },
   { key: "ai_updates", label: "AI Updates" },
+  { key: "arxiv", label: "arXiv Papers" }, // Phase 11
 ];
+
+interface SchedulerStatus {
+  running: boolean;
+  startedAt: string | null;
+  activeStreams: Array<{ stream: string; intervalMinutes: number }>;
+  state: {
+    startedAt: string | null;
+    lastFiredAt: Record<string, string>;
+    runCount: Record<string, number>;
+    skippedInFlight: Record<string, number>;
+    failureCount: Record<string, number>;
+  };
+}
 
 function shortIso(s: string): string {
   return s ? s.replace("T", " ").slice(0, 16) : "";
@@ -81,6 +95,9 @@ export default function ToolsPage() {
   const [activeRun, setActiveRun] = useState<string | null>(null);
   const [lastReport, setLastReport] = useState<RunReport | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // Phase 11 — scheduler + alerts state.
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
+  const [pushoverConfigured, setPushoverConfigured] = useState<boolean | null>(null);
 
   const refreshCache = useCallback(async () => {
     try {
@@ -93,9 +110,89 @@ export default function ToolsPage() {
     }
   }, []);
 
+  const refreshScheduler = useCallback(async () => {
+    try {
+      const r = await fetch("/api/research/schedule", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as SchedulerStatus;
+      setScheduler(j);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const refreshPushover = useCallback(async () => {
+    try {
+      const r = await fetch("/api/settings", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as {
+        operatorPushoverUserKey?: string | null;
+        operatorPushoverApiToken?: string | null;
+      };
+      setPushoverConfigured(
+        typeof j.operatorPushoverUserKey === "string" &&
+          j.operatorPushoverUserKey.length > 0 &&
+          typeof j.operatorPushoverApiToken === "string" &&
+          j.operatorPushoverApiToken.length > 0
+      );
+    } catch {
+      setPushoverConfigured(false);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshCache();
-  }, [refreshCache]);
+    void refreshScheduler();
+    void refreshPushover();
+  }, [refreshCache, refreshScheduler, refreshPushover]);
+
+  const toggleScheduler = useCallback(
+    async (action: "start" | "stop") => {
+      setBusy(true);
+      try {
+        // First flip the persisted enabled flag so the start respects
+        // it. POST /api/settings researchSchedule.enabled.
+        await fetch("/api/settings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            researchSchedule: { enabled: action === "start" },
+          }),
+        });
+        const r = await fetch("/api/research/schedule", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        if (r.ok) {
+          setMsg(action === "start" ? "Scheduler started." : "Scheduler stopped.");
+        } else {
+          setMsg(`scheduler ${action} HTTP ${r.status}`);
+        }
+        await refreshScheduler();
+        window.setTimeout(() => setMsg(null), 2500);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshScheduler]
+  );
+
+  const sendTestAlert = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/research/alert/test", { method: "POST" });
+      const j = (await r.json()) as { ok?: boolean; sent?: boolean; reason?: string };
+      setMsg(
+        j.sent
+          ? "Test alert dispatched."
+          : `Alert not sent: ${j.reason ?? "unknown reason"}`
+      );
+      window.setTimeout(() => setMsg(null), 4000);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const clearCache = useCallback(async () => {
     if (!window.confirm("Clear all cached research reports?")) return;
@@ -301,8 +398,113 @@ export default function ToolsPage() {
           )}
         </section>
 
+        {/* Phase 11 — Scheduler */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">
+              Scheduler <span className="text-neutral-500 text-[11px]">(Phase 11)</span>
+            </h2>
+            <span className="text-[11px]" style={{ color: scheduler?.running ? "#00ff9d" : "#737373" }}>
+              {scheduler?.running ? "RUNNING" : "STOPPED"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => void toggleScheduler("start")}
+              disabled={busy || scheduler?.running === true}
+              className="px-3 py-1.5 rounded text-[12px] bg-emerald-900/40 border border-emerald-700/60 text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+            >
+              Start scheduler
+            </button>
+            <button
+              type="button"
+              onClick={() => void toggleScheduler("stop")}
+              disabled={busy || scheduler?.running === false}
+              className="px-3 py-1.5 rounded text-[12px] text-red-400 border border-red-700/60 hover:bg-red-900/20 disabled:opacity-50"
+            >
+              Stop scheduler
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshScheduler()}
+              className="px-3 py-1.5 rounded text-[12px] text-neutral-400 border border-neutral-700/60 hover:bg-neutral-800/60"
+            >
+              Refresh
+            </button>
+          </div>
+          {scheduler && scheduler.activeStreams.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500 mb-1">Active streams</div>
+              <ul className="space-y-1 text-[11px] font-mono">
+                {scheduler.activeStreams.map((s) => {
+                  const last = scheduler.state.lastFiredAt[s.stream];
+                  const runs = scheduler.state.runCount[s.stream] ?? 0;
+                  const skipped = scheduler.state.skippedInFlight[s.stream] ?? 0;
+                  const fails = scheduler.state.failureCount[s.stream] ?? 0;
+                  return (
+                    <li key={s.stream} className="flex flex-wrap gap-3 px-2 py-1 rounded border border-neutral-800/60">
+                      <span className="text-neutral-300">{s.stream}</span>
+                      <span className="text-neutral-500">every {s.intervalMinutes}m</span>
+                      <span className="text-neutral-500">runs {runs}</span>
+                      <span className="text-neutral-500">skipped {skipped}</span>
+                      <span className="text-neutral-500">fails {fails}</span>
+                      {last && <span className="text-neutral-500">last {shortIso(last)}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          <p className="text-[11px] text-neutral-600">
+            Scheduler fires background research at configured intervals
+            (set in <span className="font-mono">settings.researchSchedule</span>).
+            Skips ticks while a chat is in-flight.
+          </p>
+        </section>
+
+        {/* Phase 11 — Pushover alerts */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">
+              Pushover alerts <span className="text-neutral-500 text-[11px]">(Phase 11)</span>
+            </h2>
+            <span className="text-[11px]" style={{ color: pushoverConfigured ? "#00ff9d" : "#f59e0b" }}>
+              {pushoverConfigured === null
+                ? "checking…"
+                : pushoverConfigured
+                  ? "CONFIGURED"
+                  : "NOT CONFIGURED"}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => void sendTestAlert()}
+              disabled={busy || pushoverConfigured !== true}
+              className="px-3 py-1.5 rounded text-[12px] bg-emerald-900/40 border border-emerald-700/60 text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+            >
+              Send test alert
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshPushover()}
+              className="px-3 py-1.5 rounded text-[12px] text-neutral-400 border border-neutral-700/60 hover:bg-neutral-800/60"
+            >
+              Refresh
+            </button>
+          </div>
+          <p className="text-[11px] text-neutral-600">
+            Set <span className="font-mono">operatorPushoverUserKey</span> +
+            <span className="font-mono"> operatorPushoverApiToken</span> via
+            <span className="font-mono"> /api/settings</span> POST.
+            Alerts fire when a research report meets the criteria
+            (quality SUFFICIENT + confidence ≥ threshold, OR watchlist keyword match).
+          </p>
+        </section>
+
         <p className="text-[11px] text-neutral-600">
-          Cache TTLs: weather 30m · news 60m · AI updates 2h · general 3h.
+          Cache TTLs: weather 30m · news 60m · AI updates 2h · arXiv 6h · general 3h.
           Daily key rollover at UTC midnight.
         </p>
       </div>

@@ -40,6 +40,7 @@ import {
   getCachedReport,
   cacheReport,
 } from "./cache";
+import { readSettings } from "../settings";
 
 /** True if the wall budget has been exhausted. */
 function budgetExhausted(start: number): boolean {
@@ -162,7 +163,18 @@ export async function runResearch(
   if (cached) return cached;
 
   // ---- Iteration 1: plan + search + crawl + factcheck + report ----
-  const queries = planQueries(userMessage, intent);
+  // Phase 11: pull arXiv topics from settings so the planner can
+  // fan out per-topic queries. Other intents ignore the topics arg.
+  let arxivTopics: string[] = [];
+  if (intent === "arxiv") {
+    try {
+      const s = await readSettings();
+      arxivTopics = s.researchArxivTopics ?? [];
+    } catch {
+      /* settings unreachable → planner falls back to verbatim path */
+    }
+  }
+  const queries = planQueries(userMessage, intent, arxivTopics);
   const results = await runQueries(queries);
 
   if (budgetExhausted(start)) {

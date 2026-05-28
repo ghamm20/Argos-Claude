@@ -20,6 +20,21 @@ interface SettingsPostBody {
   // the toggle state.
   operatorPinHash?: string | null;
   requirePin?: boolean;
+  // Phase 11 — research scheduler + alerts. Each field independently
+  // patchable so the Tools UI can flip the scheduler without touching
+  // Pushover keys, etc.
+  operatorPushoverUserKey?: string | null;
+  operatorPushoverApiToken?: string | null;
+  researchSchedule?: Partial<{
+    enabled: boolean;
+    weatherMinutes: number;
+    newsMinutes: number;
+    aiUpdatesMinutes: number;
+    arxivMinutes: number;
+  }>;
+  researchWatchlist?: string[];
+  researchAlertConfidenceThreshold?: number;
+  researchArxivTopics?: string[];
 }
 
 export async function POST(req: NextRequest) {
@@ -93,6 +108,101 @@ export async function POST(req: NextRequest) {
       );
     }
     patch.requirePin = body.requirePin;
+  }
+
+  // Phase 11 fields
+  if (body.operatorPushoverUserKey !== undefined) {
+    if (
+      body.operatorPushoverUserKey !== null &&
+      typeof body.operatorPushoverUserKey !== "string"
+    ) {
+      return Response.json(
+        { error: "operatorPushoverUserKey must be a string or null" },
+        { status: 400 }
+      );
+    }
+    patch.operatorPushoverUserKey = body.operatorPushoverUserKey;
+  }
+  if (body.operatorPushoverApiToken !== undefined) {
+    if (
+      body.operatorPushoverApiToken !== null &&
+      typeof body.operatorPushoverApiToken !== "string"
+    ) {
+      return Response.json(
+        { error: "operatorPushoverApiToken must be a string or null" },
+        { status: 400 }
+      );
+    }
+    patch.operatorPushoverApiToken = body.operatorPushoverApiToken;
+  }
+  if (body.researchSchedule !== undefined) {
+    if (typeof body.researchSchedule !== "object" || body.researchSchedule === null) {
+      return Response.json(
+        { error: "researchSchedule must be an object" },
+        { status: 400 }
+      );
+    }
+    const current = (await readSettings()).researchSchedule;
+    const merged = { ...current, ...body.researchSchedule };
+    // Validate minutes are non-negative integers (0 = disabled).
+    for (const k of [
+      "weatherMinutes",
+      "newsMinutes",
+      "aiUpdatesMinutes",
+      "arxivMinutes",
+    ] as const) {
+      const v = merged[k];
+      if (typeof v !== "number" || v < 0 || !Number.isFinite(v)) {
+        return Response.json(
+          { error: `researchSchedule.${k} must be a non-negative number` },
+          { status: 400 }
+        );
+      }
+    }
+    if (typeof merged.enabled !== "boolean") {
+      return Response.json(
+        { error: "researchSchedule.enabled must be a boolean" },
+        { status: 400 }
+      );
+    }
+    patch.researchSchedule = merged;
+  }
+  if (body.researchWatchlist !== undefined) {
+    if (
+      !Array.isArray(body.researchWatchlist) ||
+      !body.researchWatchlist.every((s) => typeof s === "string")
+    ) {
+      return Response.json(
+        { error: "researchWatchlist must be an array of strings" },
+        { status: 400 }
+      );
+    }
+    patch.researchWatchlist = body.researchWatchlist;
+  }
+  if (body.researchAlertConfidenceThreshold !== undefined) {
+    if (
+      typeof body.researchAlertConfidenceThreshold !== "number" ||
+      body.researchAlertConfidenceThreshold < 0 ||
+      body.researchAlertConfidenceThreshold > 1
+    ) {
+      return Response.json(
+        { error: "researchAlertConfidenceThreshold must be a number in [0, 1]" },
+        { status: 400 }
+      );
+    }
+    patch.researchAlertConfidenceThreshold = body.researchAlertConfidenceThreshold;
+  }
+  if (body.researchArxivTopics !== undefined) {
+    if (
+      !Array.isArray(body.researchArxivTopics) ||
+      !body.researchArxivTopics.every((s) => typeof s === "string")
+    ) {
+      return Response.json(
+        { error: "researchArxivTopics must be an array of strings" },
+        { status: 400 }
+      );
+    }
+    patch.researchArxivTopics = body.researchArxivTopics;
   }
 
   if (Object.keys(patch).length === 0) {

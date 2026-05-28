@@ -26,6 +26,10 @@ import { parseBearer, isTokenValid } from "@/lib/auth";
 // network on non-research turns.
 import { runResearch } from "@/lib/research";
 import type { ResearchReport } from "@/lib/research/types";
+// Phase 11 — in-flight chat tracking + scheduler boot + post-hook.
+import { begin as beginInFlight, end as endInFlight } from "@/lib/chat/inflight";
+import { ensureSchedulerStarted } from "@/lib/research/scheduler";
+import { afterReport } from "@/lib/research/afterReport";
 
 // Module-level init kicker — runs once per process lifetime when this
 // module first loads. Best-effort: failures here just mean the first
@@ -37,6 +41,16 @@ void initMemoryStore().catch((e) => {
     `[chat] memory store init failed (will retry lazily): ${
       (e as Error).message
     }`
+  );
+});
+
+// Phase 11 — scheduler boot. Reads settings + starts the background
+// timers when settings.researchSchedule.enabled is true. No-op when
+// the operator hasn't enabled the scheduler. Idempotent.
+void ensureSchedulerStarted().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[chat] scheduler boot failed: ${(e as Error).message}`
   );
 });
 
@@ -206,41 +220,57 @@ function buildRetrievalBlock(hits: RetrievalHit[]): string {
 }
 
 export async function POST(req: NextRequest) {
+  // Phase 11 — bump the in-flight counter so the scheduler skips
+  // ticking while a chat is being processed. Decremented in the
+  // stream's close/cancel/error paths AND in every early-return
+  // below. Once streamingStarted=true the stream owns the decrement.
+  beginInFlight();
+  // Local wrapper: every `return jsonError(...)` becomes
+  // `return abort(...)` so the counter decrements on every error
+  // exit. Streaming success path skips this and lets the stream's
+  // close handler decrement.
+  const abort = (
+    ...args: Parameters<typeof jsonError>
+  ) => {
+    endInFlight();
+    return abort(...args);
+  };
+
   let body: ChatRequestBody;
   try {
     body = (await req.json()) as ChatRequestBody;
   } catch {
-    return jsonError(400, "invalid JSON body");
+    return abort(400, "invalid JSON body");
   }
 
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
-    return jsonError(400, "messages must be a non-empty array");
+    return abort(400, "messages must be a non-empty array");
   }
   if (body.messages.length > MAX_MESSAGES) {
-    return jsonError(400, `too many messages (max ${MAX_MESSAGES}, got ${body.messages.length})`);
+    return abort(400, `too many messages (max ${MAX_MESSAGES}, got ${body.messages.length})`);
   }
   // Per-message validation: role + content type + content length.
   // Catches malformed clients before they hit the daemon.
   for (let i = 0; i < body.messages.length; i++) {
     const m = body.messages[i];
     if (!m || typeof m !== "object") {
-      return jsonError(400, `messages[${i}] must be an object`);
+      return abort(400, `messages[${i}] must be an object`);
     }
     if (typeof m.role !== "string" || !VALID_ROLES.has(m.role as WireRole)) {
-      return jsonError(400, `messages[${i}].role must be one of user|assistant|system`);
+      return abort(400, `messages[${i}].role must be one of user|assistant|system`);
     }
     if (typeof m.content !== "string") {
-      return jsonError(400, `messages[${i}].content must be a string`);
+      return abort(400, `messages[${i}].content must be a string`);
     }
     if (m.content.length > MAX_CONTENT_LENGTH) {
-      return jsonError(
+      return abort(
         400,
         `messages[${i}].content exceeds ${MAX_CONTENT_LENGTH} chars (got ${m.content.length})`
       );
     }
   }
   if (typeof body.model !== "string" || !body.model.trim()) {
-    return jsonError(400, "model is required");
+    return abort(400, "model is required");
   }
   // v1.1: allowed list = static AVAILABLE_MODELS + Power Mode additions.
   // Operator can declare extra models via config/persona-overrides.json
@@ -248,7 +278,7 @@ export async function POST(req: NextRequest) {
   const overrideModels = await getAvailableModelsAdditions();
   const effectiveAllowed = [...AVAILABLE_MODELS, ...overrideModels];
   if (!isAvailableModel(body.model) && !overrideModels.includes(body.model)) {
-    return jsonError(400, `model not in allowed list: ${body.model}`, {
+    return abort(400, `model not in allowed list: ${body.model}`, {
       availableModels: effectiveAllowed,
     });
   }
@@ -260,10 +290,10 @@ export async function POST(req: NextRequest) {
   try {
     persona = await resolvePersona(body.personaId);
   } catch {
-    return jsonError(400, `unknown persona: ${String(body.personaId)}`);
+    return abort(400, `unknown persona: ${String(body.personaId)}`);
   }
   if (!persona) {
-    return jsonError(400, `unknown persona: ${String(body.personaId)}`);
+    return abort(400, `unknown persona: ${String(body.personaId)}`);
   }
   // Phase 2-RB: refuse to dispatch a chat for a persona whose model
   // isn't wired. Doctrine: never fake a model-backed persona; let the
@@ -271,7 +301,7 @@ export async function POST(req: NextRequest) {
   // 404 from Ollama. The store's switchPersona already blocks the UI
   // path; this is the API-level enforcement.
   if (!isPersonaSelectable(persona)) {
-    return jsonError(
+    return abort(
       503,
       `persona "${persona.name}" is not configured (no validated model wired)`,
       {
@@ -377,6 +407,22 @@ export async function POST(req: NextRequest) {
   if (isOperator && userText) {
     try {
       researchReport = await runResearch(userText, body.personaId);
+      if (researchReport) {
+        // Phase 11 — fire-and-forget post-hook (memory + alerts).
+        // Doesn't block the response; we don't await the resulting
+        // promise either, since chat shouldn't wait on Pushover.
+        void afterReport(
+          researchReport,
+          body.personaId as MemoryPersonaScope
+        ).catch((e) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[chat] afterReport hook failed (non-fatal): ${
+              e instanceof Error ? e.message : String(e)
+            }`
+          );
+        });
+      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -450,33 +496,33 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     clearTimeout(firstTokenTimer);
     if (isAbortError(e)) {
-      return jsonError(504, "Ollama did not respond within 60s (first-token timeout)");
+      return abort(504, "Ollama did not respond within 60s (first-token timeout)");
     }
     if (isConnRefused(e)) {
-      return jsonError(
+      return abort(
         503,
         `Ollama not reachable at ${OLLAMA_BASE}. Is \`ollama serve\` running?`
       );
     }
-    return jsonError(502, `upstream fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    return abort(502, `upstream fetch failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   if (!upstream.ok) {
     clearTimeout(firstTokenTimer);
     const errBody = await upstream.text();
     if (upstream.status === 404 || /not found|no such model/i.test(errBody)) {
-      return jsonError(404, `model not found: ${body.model}`, {
+      return abort(404, `model not found: ${body.model}`, {
         hint: `Run: ollama pull ${body.model}`,
         ollamaBody: errBody,
       });
     }
-    return jsonError(upstream.status, `ollama error ${upstream.status}`, {
+    return abort(upstream.status, `ollama error ${upstream.status}`, {
       ollamaBody: errBody,
     });
   }
   if (!upstream.body) {
     clearTimeout(firstTokenTimer);
-    return jsonError(502, "empty stream body from Ollama");
+    return abort(502, "empty stream body from Ollama");
   }
 
   // Build the retrieval event we'll emit after Ollama closes.
@@ -586,6 +632,9 @@ export async function POST(req: NextRequest) {
           encoder.encode(`${JSON.stringify(researchEvent)}\n`)
         );
         controllerInner.close();
+        // Phase 11 — release the in-flight slot on natural stream
+        // close (scheduler can now tick).
+        endInFlight();
 
         // Phase 9 — fire-and-forget memory extraction. Resolves the
         // operator profile, runs the extractor, persists each
@@ -637,12 +686,16 @@ export async function POST(req: NextRequest) {
         } else {
           controllerInner.error(e);
         }
+        // Phase 11 — release on error path too.
+        endInFlight();
       }
     },
     cancel(reason) {
       clearTimeout(firstTokenTimer);
       reader.cancel(reason).catch(() => undefined);
       controller.abort();
+      // Phase 11 — release on client-cancel.
+      endInFlight();
     },
   });
 

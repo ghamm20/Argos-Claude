@@ -288,6 +288,129 @@ async function searchNews(query: SearchQuery): Promise<SearchResult[]> {
   return all.slice(0, query.maxResults);
 }
 
+// ----- arXiv (Phase 11) -----
+//
+// export.arxiv.org's Atom feed:
+//   http://export.arxiv.org/api/query?search_query=all:<term>
+//     &start=0&max_results=N&sortBy=submittedDate&sortOrder=descending
+//
+// Returns Atom XML — parsed with the same regex approach used for
+// RSS. Tolerates malformed XML (returns [] on parse fail). Each
+// <entry> contains: title, summary, author/name, published, id (URL),
+// link (alternate). We map to one SearchResult per entry.
+
+interface ArxivEntry {
+  title: string;
+  summary: string;
+  authors: string[];
+  published?: string;
+  url: string;
+}
+
+function parseArxivXml(xml: string, max: number): ArxivEntry[] {
+  const entries: ArxivEntry[] = [];
+  const entryRe = /<entry\b[^>]*>([\s\S]*?)<\/entry>/g;
+  let m: RegExpExecArray | null;
+  while ((m = entryRe.exec(xml)) !== null && entries.length < max) {
+    const block = m[1];
+    const title = extractTagText(block, "title").replace(/\s+/g, " ").trim();
+    const summary = extractTagText(block, "summary")
+      .replace(/\s+/g, " ")
+      .trim();
+    const published = extractTagText(block, "published").trim();
+    // Authors — multiple <author><name>X</name></author>; iterate.
+    const authors: string[] = [];
+    const authorRe = /<author\b[^>]*>\s*<name>([\s\S]*?)<\/name>\s*<\/author>/g;
+    let am: RegExpExecArray | null;
+    while ((am = authorRe.exec(block)) !== null) {
+      const n = decodeXmlEntities(stripTags(am[1])).trim();
+      if (n) authors.push(n);
+    }
+    // URL: prefer <link rel="alternate" href="..."/>, fall back to <id>
+    let url = "";
+    const linkRe =
+      /<link\b[^>]*rel="alternate"[^>]*href="([^"]+)"[^>]*\/?>/i;
+    const lm = block.match(linkRe);
+    if (lm) url = decodeXmlEntities(lm[1]);
+    if (!url) {
+      url = extractTagText(block, "id").trim();
+    }
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    if (!title) continue;
+    entries.push({ title, summary, authors, published, url });
+  }
+  return entries;
+}
+
+async function searchArxiv(query: SearchQuery): Promise<SearchResult[]> {
+  // arXiv's all:<term> query accepts free text; for multi-word topics
+  // we URL-encode the whole string. sortBy=submittedDate gives the
+  // operator newest-first results which is what they want for a
+  // "what's new on arXiv" stream.
+  // arXiv issues a 301 from http://export.arxiv.org → https://; use
+  // https directly to skip the redirect round-trip.
+  const url =
+    `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query.query)}` +
+    `&start=0&max_results=${query.maxResults}` +
+    `&sortBy=submittedDate&sortOrder=descending`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "user-agent": USER_AGENT,
+        accept: "application/atom+xml,application/xml,*/*",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      // eslint-disable-next-line no-console
+      console.warn(`[research/arxiv] HTTP ${res.status} for ${query.query}`);
+      return [];
+    }
+    const xml = await res.text();
+    let entries: ArxivEntry[];
+    try {
+      entries = parseArxivXml(xml, query.maxResults);
+    } catch (parseErr) {
+      // Malformed XML — directive says handle gracefully.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[research/arxiv] parse failed: ${
+          (parseErr as Error).message
+        } — returning []`
+      );
+      return [];
+    }
+    return entries.map<SearchResult>((e) => {
+      const authorTrail =
+        e.authors.length > 0
+          ? ` — ${e.authors.slice(0, 4).join(", ")}${e.authors.length > 4 ? " et al." : ""}`
+          : "";
+      return {
+        title: e.title,
+        url: e.url,
+        snippet: (e.summary || "").slice(0, 280) + authorTrail,
+        source: "arxiv",
+        publishedAt: e.published,
+        // arXiv is peer-academic; high baseline credibility (above
+        // mainstream tech press, below wttr.in's tautological 0.95).
+        credibilityScore: 0.85,
+      };
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[research/arxiv] fetch failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ----- public dispatcher -----
 
 /**
@@ -295,7 +418,8 @@ async function searchNews(query: SearchQuery): Promise<SearchResult[]> {
  *
  * Web/general queries run through the provider chain (SearXNG →
  * Brave → DDG). News + ai_updates queries also pull Reddit as a
- * supplementary stream when applicable.
+ * supplementary stream when applicable. arXiv hits export.arxiv.org
+ * directly.
  *
  * Never throws.
  */
@@ -305,6 +429,9 @@ export async function executeSearch(
   switch (query.intent) {
     case "weather":
       return searchWeather(query);
+
+    case "arxiv":
+      return searchArxiv(query);
 
     case "news": {
       // RSS + Reddit (when location matches). Reddit's credibility
