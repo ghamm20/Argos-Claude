@@ -6,6 +6,7 @@ import { TruthModeToggle } from "./TruthModeToggle";
 import { ToolsDock } from "@/components/panels/ToolsDock";
 import { ShieldCheck } from "lucide-react";
 import { AuthIndicator } from "./auth/AuthIndicator";
+import { ResearchIndicator } from "./research/ResearchIndicator";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -329,6 +330,9 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
             when settings.requirePin=false. Clickable: guest opens
             gate; operator offers lock-session. */}
         <AuthIndicator />
+        {/* Phase 10 (2026-05-28) — research pipeline state for the
+            most recent assistant turn (OFF/LIVE/CACHED/FAILED). */}
+        <ResearchIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}

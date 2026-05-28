@@ -309,6 +309,13 @@ interface OllamaStreamLine {
   type?: string;
   hits?: CitedHit[] | null;
   enabled?: boolean;
+  // Phase 10 — research event tail. The chat route emits one of these
+  // after the retrieval event on every turn.
+  state?: "OFF" | "LIVE" | "CACHED" | "FAILED";
+  intent?: string | null;
+  quality?: string | null;
+  confidence?: number | null;
+  cachedAt?: string | null;
 }
 
 export function ChatPane() {
@@ -610,6 +617,19 @@ export function ChatPane() {
               patchLastMessage({
                 retrievalHits: data.hits ?? undefined,
                 retrievalError: data.hits ? null : "no retrieval hits",
+              });
+              continue;
+            }
+            if (data?.type === "research") {
+              // Phase 10 — update the HUD's research row from this
+              // turn's research event. Always fires — OFF when no
+              // research was attempted.
+              useArgos.getState().setResearchState({
+                state: data.state ?? "OFF",
+                intent: data.intent ?? null,
+                quality: data.quality ?? null,
+                confidence: data.confidence ?? null,
+                cachedAt: data.cachedAt ?? null,
               });
               continue;
             }

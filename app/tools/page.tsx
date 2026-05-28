@@ -1,55 +1,311 @@
-import { StubPage, StubSection, StubBullet, StubQuote } from "@/components/StubPage";
-import { getRuntimeInfo } from "@/lib/runtime-info";
+// app/tools/page.tsx
+//
+// Phase 10 — operator-facing Tools page. Replaces the v2 stub with a
+// functional Research section: cache status, per-stream Run-Now
+// buttons, last-run summary. Dark-theme functional UI; no new deps.
 
-export const metadata = { title: "Tools — ARGOS" };
+"use client";
 
-export default async function ToolsPage() {
-  const runtime = await getRuntimeInfo();
-  const display = runtime.isDev
-    ? `${runtime.argosRoot} (dev)`
-    : runtime.argosRoot;
+import { useCallback, useEffect, useState } from "react";
+
+type Quality = "SUFFICIENT" | "PARTIAL" | "FAILED" | "CONFLICTED";
+
+interface CacheStatusEntry {
+  cacheKey: string;
+  intent: string;
+  expiresAt: string;
+  generatedAt: string;
+  quality: Quality;
+  confidenceScore: number;
+  resultCount: number;
+  sizeBytes: number;
+}
+
+interface CacheStatus {
+  totalEntries: number;
+  totalSizeBytes: number;
+  entries: CacheStatusEntry[];
+}
+
+interface RunReport {
+  id: string;
+  intent: string;
+  quality: Quality;
+  confidenceScore: number;
+  generatedAt: string;
+  summary: string;
+  findings: string[];
+  citations: string[];
+  conflicts: string[];
+  cachedAt?: string;
+  iteration: number;
+}
+
+const STREAM_BUTTONS: Array<{ key: string; label: string }> = [
+  { key: "weather_atl", label: "Weather · Atlanta" },
+  { key: "weather_orl", label: "Weather · Orlando" },
+  { key: "news_atl", label: "News · Atlanta" },
+  { key: "news_orl", label: "News · Orlando" },
+  { key: "ai_updates", label: "AI Updates" },
+];
+
+function shortIso(s: string): string {
+  return s ? s.replace("T", " ").slice(0, 16) : "";
+}
+
+function ageMinutes(iso: string): number {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return -1;
+  return Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function qualityColor(q: Quality): string {
+  switch (q) {
+    case "SUFFICIENT": return "#10b981";
+    case "PARTIAL": return "#eab308";
+    case "FAILED": return "#ef4444";
+    case "CONFLICTED": return "#f59e0b";
+    default: return "#737373";
+  }
+}
+
+export default function ToolsPage() {
+  const [cache, setCache] = useState<CacheStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [activeRun, setActiveRun] = useState<string | null>(null);
+  const [lastReport, setLastReport] = useState<RunReport | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refreshCache = useCallback(async () => {
+    try {
+      const r = await fetch("/api/research/cache", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as CacheStatus;
+      setCache(j);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCache();
+  }, [refreshCache]);
+
+  const clearCache = useCallback(async () => {
+    if (!window.confirm("Clear all cached research reports?")) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/research/cache", { method: "DELETE" });
+      if (r.ok) {
+        const j = (await r.json()) as { removed: number };
+        setMsg(`Cleared ${j.removed} entr${j.removed === 1 ? "y" : "ies"}.`);
+        window.setTimeout(() => setMsg(null), 2500);
+        await refreshCache();
+      } else {
+        setMsg(`Clear failed: HTTP ${r.status}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [refreshCache]);
+
+  const runStream = useCallback(
+    async (streamKey: string, label: string) => {
+      setActiveRun(streamKey);
+      setBusy(true);
+      setMsg(null);
+      try {
+        const r = await fetch("/api/research/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ stream: streamKey }),
+        });
+        const j = (await r.json()) as { ok?: boolean; report?: RunReport; error?: string };
+        if (j.ok && j.report) {
+          setLastReport(j.report);
+          setMsg(`${label}: ${j.report.quality} (${j.report.confidenceScore.toFixed(2)})`);
+          await refreshCache();
+        } else {
+          setMsg(`${label} failed: ${j.error ?? "unknown error"}`);
+        }
+      } catch (e) {
+        setMsg(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setBusy(false);
+        setActiveRun(null);
+      }
+    },
+    [refreshCache]
+  );
+
   return (
-    <StubPage
-      argosRoot={display}
-      version={runtime.version}
-      startedAt={runtime.startedAt}
-      title="Tools"
-      status="v2+"
-      weekLabel="Post-launch · Path B"
-    >
-      <StubSection title="What this will do">
-        <StubBullet>Calculator — local arithmetic without round-tripping through the model.</StubBullet>
-        <StubBullet>OCR — extract text from images, separate from the Vision feature&rsquo;s analysis.</StubBullet>
-        <StubBullet>Summarization — single-pass over a doc or chunk, tunable length.</StubBullet>
-        <StubBullet>Document conversion — between supported formats (md ↔ docx ↔ txt).</StubBullet>
-        <StubBullet>Timeline builder — extract dated events from a vault doc into a chronology.</StubBullet>
-        <StubBullet>Image analysis — narrow tool surfacing the Vision pipeline as a callable utility.</StubBullet>
-        <StubBullet>Structured export — pull conversations or retrievals into JSON / CSV.</StubBullet>
-      </StubSection>
+    <div className="min-h-screen bg-neutral-950 text-neutral-200 px-8 py-6">
+      <div className="max-w-4xl mx-auto">
+        <header className="mb-6">
+          <h1 className="text-[20px] font-medium tracking-tight">Tools</h1>
+          <p className="text-[12px] text-neutral-500 mt-1">
+            Phase 10 — research pipeline. Network only fires when these
+            buttons run or when a chat turn triggers a research keyword.
+          </p>
+        </header>
 
-      <StubSection title="Why not v1">
-        <StubBullet>The tool system is post-launch entirely. v1 ships chat + retrieval. Tools are a post-v1 expansion that requires the Core Brain orchestrator (Weeks 10–11) plus a per-tool UI surface that does not currently exist.</StubBullet>
-        <StubBullet>Each tool also needs an honest spec for when the model should reach for it vs answer directly. That decision layer is the same Core Brain work — a tool framework on top of personas, not bolted onto the chat input.</StubBullet>
-        <StubBullet>Shipping fake tool tabs that secretly call the chat endpoint with a different system prompt would be a lie. The model can already &ldquo;summarize this&rdquo; in chat — that does not make summarization a tool.</StubBullet>
-      </StubSection>
+        {/* Research streams */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">Research streams</h2>
+            {msg && <span className="text-[11px] text-neutral-400">{msg}</span>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {STREAM_BUTTONS.map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                disabled={busy}
+                onClick={() => void runStream(b.key, b.label)}
+                className="px-3 py-1.5 rounded text-[12px] bg-emerald-900/40 border border-emerald-700/60 text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-50"
+              >
+                {activeRun === b.key ? "Running…" : `▶ ${b.label}`}
+              </button>
+            ))}
+          </div>
+        </section>
 
-      <StubSection title="Engineering discipline">
-        <div className="text-[14px] text-neutral-200 leading-relaxed">
-          v1 ships zero tools by design. Engineering discipline &gt; feature breadth.
-        </div>
-        <div className="mt-2">
-          The product Friday-demo metric is &ldquo;does the locked v1 scope work end-to-end on a USB drive with no host residue,&rdquo; not &ldquo;how many tabs are populated.&rdquo;
-        </div>
-      </StubSection>
+        {/* Last report */}
+        {lastReport && (
+          <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="text-[14px] font-medium text-neutral-100">Last run</h2>
+              <div className="flex items-center gap-3 text-[11px]">
+                <span style={{ color: qualityColor(lastReport.quality) }}>
+                  {lastReport.quality}
+                </span>
+                <span className="text-neutral-500">
+                  conf {lastReport.confidenceScore.toFixed(2)}
+                </span>
+                <span className="text-neutral-500">
+                  iter {lastReport.iteration}
+                </span>
+                <span className="text-neutral-500">
+                  {shortIso(lastReport.generatedAt)}
+                </span>
+              </div>
+            </div>
+            <div className="text-[12px] text-neutral-200 mb-2">
+              {lastReport.summary}
+            </div>
+            {lastReport.findings.length > 0 && (
+              <div className="mb-2">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500 mb-1">Findings</div>
+                <ul className="space-y-1 text-[12px] text-neutral-300">
+                  {lastReport.findings.map((f, i) => (
+                    <li key={i}>· {f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {lastReport.conflicts.length > 0 && (
+              <div className="mb-2">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-amber-400 mb-1">Conflicts</div>
+                <ul className="space-y-1 text-[12px] text-amber-300">
+                  {lastReport.conflicts.map((c, i) => (
+                    <li key={i}>· {c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {lastReport.citations.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500 mb-1">Citations</div>
+                <ul className="space-y-1 text-[11px] text-neutral-500 font-mono">
+                  {lastReport.citations.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
 
-      <StubSection title="Roadmap reference">
-        <StubQuote>
-          &ldquo;CUT (do not build) — Tool system, multi-workspace&rdquo;
-        </StubQuote>
-        <div className="text-[11px] text-neutral-500 mt-2">
-          See <span className="font-mono text-neutral-300">docs/02-SCOPE-LOCK.md</span>. The Tool system is explicitly under CUT for v1 — this page exists so that doctrine is visible in-product, not hidden in a markdown file.
-        </div>
-      </StubSection>
-    </StubPage>
+        {/* Cache status */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">Cache</h2>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void refreshCache()}
+                className="text-[11px] text-neutral-400 hover:text-neutral-200"
+              >
+                Reload
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearCache()}
+                disabled={busy || !cache || cache.totalEntries === 0}
+                className="text-[11px] text-red-400 hover:text-red-200 disabled:opacity-50"
+              >
+                Clear cache
+              </button>
+            </div>
+          </div>
+          {cache === null ? (
+            <div className="text-[12px] text-neutral-500">Loading…</div>
+          ) : cache.totalEntries === 0 ? (
+            <div className="text-[12px] text-neutral-500 italic">Empty.</div>
+          ) : (
+            <>
+              <div className="text-[11px] text-neutral-500 mb-2">
+                {cache.totalEntries} entr{cache.totalEntries === 1 ? "y" : "ies"} · {fmtBytes(cache.totalSizeBytes)} total
+              </div>
+              <ul className="space-y-1 text-[12px]">
+                {cache.entries.map((e) => {
+                  const expMin = ageMinutes(e.expiresAt);
+                  const expiresInMin = -ageMinutes(e.expiresAt);
+                  const remaining = -expiresInMin;
+                  return (
+                    <li
+                      key={e.cacheKey}
+                      className="flex items-center justify-between gap-3 px-2 py-1 rounded border border-neutral-800/60"
+                    >
+                      <span className="font-mono text-neutral-300 truncate flex-1" title={e.cacheKey}>
+                        {e.cacheKey}
+                      </span>
+                      <span style={{ color: qualityColor(e.quality) }} className="text-[10px]">
+                        {e.quality}
+                      </span>
+                      <span className="text-neutral-500 text-[10px]">
+                        conf {e.confidenceScore.toFixed(2)}
+                      </span>
+                      <span className="text-neutral-500 text-[10px]">
+                        {e.resultCount} hits
+                      </span>
+                      <span className="text-neutral-500 text-[10px]">
+                        {fmtBytes(e.sizeBytes)}
+                      </span>
+                      <span className="text-neutral-500 text-[10px]" title={`expires ${e.expiresAt}`}>
+                        {remaining > 0
+                          ? `${remaining}m left`
+                          : `expired ${expMin}m ago`}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
+
+        <p className="text-[11px] text-neutral-600">
+          Cache TTLs: weather 30m · news 60m · AI updates 2h · general 3h.
+          Daily key rollover at UTC midnight.
+        </p>
+      </div>
+    </div>
   );
 }

@@ -107,6 +107,24 @@ export type ModelStatus =
   | "ready"
   | "failed"
   | "not_configured";
+
+/** Phase 10 — Research HUD state. Mirrors the research event shape
+ *  emitted by /api/chat. The HUD reads this directly. */
+export interface ResearchHudState {
+  state: "OFF" | "LIVE" | "CACHED" | "FAILED";
+  intent: string | null;
+  quality: string | null;
+  confidence: number | null;
+  cachedAt: string | null;
+}
+export const EMPTY_RESEARCH_STATE: ResearchHudState = {
+  state: "OFF",
+  intent: null,
+  quality: null,
+  confidence: null,
+  cachedAt: null,
+};
+
 const LATENCY_WINDOW = 10;
 
 function p50(values: number[]): number {
@@ -135,6 +153,10 @@ interface ArgosState {
   modelStatus: ModelStatus;
   modelStatusPersona: PersonaId | null;
   modelStatusMessage: string | null;
+  /** Phase 10 — most-recent research event from the chat stream.
+   *  Drives the HUD Research row. Reset to "OFF" on persona switch
+   *  + clearChat so the indicator reflects the active turn only. */
+  researchState: ResearchHudState;
 
   switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
@@ -151,6 +173,7 @@ interface ArgosState {
   setVaultIngesting: (filename: string | null) => void;
   setActiveCitation: (hit: CitedHit | null) => void;
   setTruthMode: (b: boolean) => void;
+  setResearchState: (s: ResearchHudState) => void;
   setCurrentSessionId: (id: string | null) => void;
   /** Replace the entire in-memory chat with a loaded persisted session. */
   loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
@@ -176,6 +199,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   modelStatus: "idle",
   modelStatusPersona: null,
   modelStatusMessage: null,
+  researchState: EMPTY_RESEARCH_STATE,
 
   // Phase 2-RB: persona-bound model with visible swap state. Steps:
   //   1. If persona is not_configured, set modelStatus=not_configured
@@ -336,6 +360,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
     set((s) => ({ vaultStatus: { ...s.vaultStatus, ingesting: filename } })),
   setActiveCitation: (hit) => set({ activeCitation: hit }),
   setTruthMode: (b) => set({ truthMode: b }),
+  setResearchState: (s) => set({ researchState: s }),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   loadSession: (id, messages, personaId, model) =>

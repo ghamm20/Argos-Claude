@@ -21,6 +21,11 @@ import type { MemoryPersonaScope } from "@/lib/memory/schema";
 // Operator Auth (2026-05-28) — auth-mode gate.
 import { readSettings } from "@/lib/settings";
 import { parseBearer, isTokenValid } from "@/lib/auth";
+// Phase 10 (2026-05-28) — research orchestrator. needsResearch is
+// imported alongside so we can short-circuit without touching the
+// network on non-research turns.
+import { runResearch } from "@/lib/research";
+import type { ResearchReport } from "@/lib/research/types";
 
 // Module-level init kicker — runs once per process lifetime when this
 // module first loads. Best-effort: failures here just mean the first
@@ -145,6 +150,34 @@ function isCanonQuery(personaId: string, message: string): boolean {
     const re = new RegExp(`\\b${name}\\b`, "i");
     return re.test(lower);
   });
+}
+
+// Phase 10 — research context block. Sits between memory and vault
+// in the system prompt. Format mirrors buildRetrievalBlock so the
+// model parses it consistently.
+function buildResearchBlock(r: ResearchReport): string {
+  const lines: string[] = [];
+  const ageNote = r.cachedAt
+    ? ` (cached; generated ${r.cachedAt})`
+    : "";
+  lines.push(
+    `[RESEARCH CONTEXT — ${r.intent} — Quality: ${r.quality} — Confidence: ${r.confidenceScore.toFixed(2)}${ageNote}]`
+  );
+  lines.push(`Summary: ${r.summary}`);
+  if (r.findings.length > 0) {
+    lines.push("Key findings:");
+    for (const f of r.findings) lines.push(`- ${f}`);
+  }
+  if (r.conflicts.length > 0) {
+    lines.push("Conflicts flagged:");
+    for (const c of r.conflicts) lines.push(`- ${c}`);
+  }
+  if (r.citations.length > 0) {
+    lines.push("Sources:");
+    for (const c of r.citations) lines.push(c);
+  }
+  lines.push("[/RESEARCH CONTEXT]");
+  return lines.join("\n");
 }
 
 function buildRetrievalBlock(hits: RetrievalHit[]): string {
@@ -336,15 +369,42 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ---- Phase 10 research (graceful: never breaks chat) ----
+  // Only fires for operator turns. Guest turns get no research
+  // context — keeps the network-mode boundary clean (guest = local
+  // only). Failures degrade to "no research block" silently.
+  let researchReport: ResearchReport | null = null;
+  if (isOperator && userText) {
+    try {
+      researchReport = await runResearch(userText, body.personaId);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[chat] research pipeline failed (non-fatal): ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  }
+
   // ---- System prompt construction ----
   // Auth-gated: guest sees persona.guestSystemPrompt; operator sees
   // persona.systemPrompt (the full character register).
+  //
+  // Order (operator mode): persona → memory → research → vault → truth.
+  // Research goes BETWEEN memory and vault per the Phase 10 directive:
+  // memory is who-the-operator-is, research is what-the-world-says,
+  // vault is what-the-operator's-own-docs-say. Composition order
+  // matters for how the model weighs them.
   const baseSystemPrompt = isOperator
     ? persona.systemPrompt
     : persona.guestSystemPrompt;
   const systemParts: string[] = [baseSystemPrompt];
   if (memoryBlock.length > 0) {
     systemParts.push(memoryBlock);
+  }
+  if (researchReport) {
+    systemParts.push(buildResearchBlock(researchReport));
   }
   if (retrievedHits.length > 0) {
     systemParts.push(buildRetrievalBlock(retrievedHits));
@@ -436,6 +496,30 @@ export async function POST(req: NextRequest) {
     enabled: wantsRetrieval,
   };
 
+  // Phase 10 — research event. Mirrors retrievalEvent shape so the
+  // client can render the HUD Research row from a single ndjson tail
+  // frame. `state` drives the HUD label:
+  //   OFF      — research wasn't attempted (non-research turn / guest)
+  //   LIVE     — fresh research, served from network this turn
+  //   CACHED   — served from cache (cachedAt set)
+  //   FAILED   — pipeline ran but quality === FAILED
+  const researchEventState: "OFF" | "LIVE" | "CACHED" | "FAILED" = (() => {
+    if (!researchReport) return "OFF";
+    if (researchReport.quality === "FAILED") return "FAILED";
+    if (researchReport.cachedAt) return "CACHED";
+    return "LIVE";
+  })();
+  const researchEvent = {
+    type: "research" as const,
+    state: researchEventState,
+    intent: researchReport?.intent ?? null,
+    quality: researchReport?.quality ?? null,
+    confidence: researchReport?.confidenceScore ?? null,
+    generatedAt: researchReport?.generatedAt ?? null,
+    cachedAt: researchReport?.cachedAt ?? null,
+    citationCount: researchReport?.citations.length ?? 0,
+  };
+
   const reader = upstream.body.getReader();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -495,6 +579,11 @@ export async function POST(req: NextRequest) {
         // Tail the stream with our retrieval set so the client can render pills.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(retrievalEvent)}\n`)
+        );
+        // Phase 10 — research event tail. Emitted after retrieval so
+        // the client's NDJSON parser sees them in stable order.
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(researchEvent)}\n`)
         );
         controllerInner.close();
 
