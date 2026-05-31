@@ -66,7 +66,10 @@ export interface PersistedSettings {
 const DEFAULT_SETTINGS: PersistedSettings = {
   version: SETTINGS_VERSION,
   defaultPersona: "bartimaeus",
-  defaultModel: "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b",
+  // Phase 2 Persona Completion (2026-05-28): Bart now binds to
+  // royhodge812/Orchestrator:lates (note :lates, not :latest). The
+  // boot model loads this so the first chat doesn't pay a cold-swap.
+  defaultModel: "royhodge812/Orchestrator:lates",
   updatedAt: 0,
   operatorPinHash: null,
   requirePin: false,

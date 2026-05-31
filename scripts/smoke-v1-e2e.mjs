@@ -48,11 +48,11 @@ const PORT = portArgIdx >= 0 ? parseInt(args[portArgIdx + 1], 10) : 7791;
 const BASE = `http://127.0.0.1:${PORT}`;
 const agent = new http.Agent({ keepAlive: false });
 
-// v1.1: Bart's current model is the Qwen3.5 9B uncensored. If the
-// persona roster shifts again, this constant needs to match
-// lib/personas.ts Bartimaeus.model. Keeping it here (not auto-derived)
-// is intentional — the smoke is a contract check, not a tautology.
-const BART_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
+// Phase 2 Persona Completion (2026-05-28): Bart binds to
+// royhodge812/Orchestrator:lates. Exact upstream tag (note :lates,
+// not :latest). This constant must match lib/personas.ts
+// Bartimaeus.model — smoke is a contract check, not a tautology.
+const BART_MODEL = "royhodge812/Orchestrator:lates";
 
 let pass = 0;
 let fail = 0;

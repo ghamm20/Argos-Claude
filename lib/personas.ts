@@ -85,29 +85,38 @@ export interface Persona {
 }
 
 // ===========================================================================
-// Phase 2 — Full Model Assignment (2026-05-25)
+// Phase 2 — Full Persona Model Assignment (2026-05-28 update)
 // ===========================================================================
 //
-// MODEL MAP (per owner directive, locked):
+// MODEL MAP (per Phase 2 Persona Completion directive, locked):
 //
-//   Bartimaeus → fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b
+//   Bartimaeus → royhodge812/Orchestrator:lates              (9.6 GB)
 //   Juniper    → fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b
-//   Sage       → alfaxad/wild-gemma4:e4b
-//   Bobby      → nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b
+//                                                            (6.5 GB)
+//   Sage       → alfaxad/wild-gemma4:e4b                     (6.3 GB)
+//   Bobby      → CyberCrew/notmythos-8b:latest               (2.0 GB)
+//
+// NOTE on the Bart model tag: the upstream tag is :lates (no trailing 't').
+// `ollama list` confirms the exact id `royhodge812/Orchestrator:lates`.
+// Per directive: use the exact string. Do not "correct" to :latest.
 //
 // 8 GB VRAM rig (RTX 3060 Ti) — one model loaded at a time. Persona switch
-// triggers model swap; cold swap latency 3-8s, acceptable.
+// triggers model swap. Smaller models (notmythos-8b at 2 GB) cold-load in
+// 1-2s; mid (Bart's Orchestrator at 9.6 GB) cold-loads in 3-6s; gemma4-e4b
+// at 6.3 GB spills slightly to RAM on cold. All under the 10s gate.
 //
-// Bart + Juniper share the 9B Qwen3.5 model — zero swap latency between
-// them; differentiation lives at the persona-prompt level (Bart=austere
-// reasoning, Juniper=warm conversational counterpart).
+// Bart + Juniper NO LONGER share a model — Bart now has its own
+// (royhodge812/Orchestrator) so persona character + model character can
+// diverge. Bart↔Juniper switches now incur a real model swap (~3-6s).
 //
-// Power Mode / 5090 path: Bartimaeus swaps to huihui_ai/gpt-oss-abliterated:20b
-// via config/persona-overrides.json (lib/persona-server.ts). Everything else
-// stays as-is. See docs/06-V1.0-LOCKDOWN.md for the override mechanism.
+// Power Mode / 5090 path: persona-overrides.json (lib/persona-server.ts)
+// can swap any persona's model without touching this file. See
+// docs/06-V1.0-LOCKDOWN.md for the override mechanism.
 //
-// System prompts below are VERBATIM per the directive — do not summarize
-// or paraphrase. Any future revision requires explicit owner approval.
+// System prompts below are VERBATIM per directives — do not summarize.
+// Any revision requires explicit owner approval. Bart's prompt evolved
+// through v2.1 (compressed-substrate) + canon-identity append (2026-05-27);
+// matches the Simon Jones audiobook djinn voice the Phase 2 brief calls for.
 // ===========================================================================
 
 // Citation rule appended to every persona's prompt. Kept module-scope so
@@ -126,16 +135,21 @@ const GUEST_SYSTEM_PROMPT = [
   "Do not address the user as Operator. Do not reference any prior conversation or stored memory. Do not invent details about the user.",
 ].join("\n\n");
 
-const MODEL_BART_JUNIPER =
+// Phase 2 Persona Completion (2026-05-28): Bart + Juniper no longer
+// share. Bart gets royhodge812/Orchestrator (an orchestration-tuned
+// model that fits his strategic-clarity register); Juniper keeps the
+// Qwen 9b uncensored (warm conversational counterpart). Note the
+// upstream Bart tag is ":lates" not ":latest" — exact string locked.
+const MODEL_BART = "royhodge812/Orchestrator:lates";
+const MODEL_JUNIPER =
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 const MODEL_SAGE = "alfaxad/wild-gemma4:e4b";
-// Bobby v2 (2026-05-27) — swapped from
-// nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b (plain-talk analyst)
-// to DeepSeek-Coder-v2:16b. Bobby's role expands from plain-talk Q&A to
-// approval-gated agentic coder. 8.6 GB; on 3060 Ti / 8 GB VRAM expect
-// some spillover to system RAM and ~8-15 s cold swap. Acceptable.
-// Old 4b retired from ARGOS. See BOBBY_V2_REPORT.md.
-const MODEL_BOBBY = "second_constantine/deepseek-coder-v2:16b";
+// Bobby — Phase 2 Persona Completion (2026-05-28): swapped from
+// second_constantine/deepseek-coder-v2:16b (Bobby v2 agentic coder)
+// → CyberCrew/notmythos-8b:latest (2.0 GB; fits VRAM with margin,
+// fast swap). Bobby's plain-talk role persists; the approval-gate
+// UI stays wired in case the operator pivots him back to coding.
+const MODEL_BOBBY = "CyberCrew/notmythos-8b:latest";
 
 export const PERSONAS: Persona[] = [
   {
@@ -145,9 +159,10 @@ export const PERSONAS: Persona[] = [
     eyeColor: "#10b981",
     accentColor: "#10b981",
     status: "live",
-    model: MODEL_BART_JUNIPER,
+    model: MODEL_BART,
     intendedModel: "huihui_ai/gpt-oss-abliterated:20b", // Power Mode / 5090
-    // Qwen3.5 9B-uncensored — verified empty content if think:true.
+    // royhodge812/Orchestrator:lates — not a thinking model.
+    // think:false stays as the safe default for the registry.
     think: false,
     // Phase 7-B (2026-05-26): Piper TTS — `en_US-ryan-high` is the
     // deep measured male voice from rhasspy/piper-voices. Filename
@@ -265,8 +280,11 @@ export const PERSONAS: Persona[] = [
     eyeColor: "#84cc16",
     accentColor: "#84cc16",
     status: "live",
-    model: MODEL_BART_JUNIPER, // shares with Bart — zero swap latency
-    // Same Qwen3.5 9B-uncensored binding as Bart; same think:false requirement.
+    // Phase 2 Persona Completion (2026-05-28): Juniper keeps the Qwen
+    // 9b uncensored; Bart split off to its own model. Bart↔Juniper now
+    // incurs a real model swap (~3-6s) instead of zero-cost.
+    model: MODEL_JUNIPER,
+    // Qwen3.5 9b uncensored — verified empty content if think:true.
     think: false,
     // Phase 7-B: warm female voice — en_US-amy-medium (Piper).
     voiceId: "en_US-amy-medium",

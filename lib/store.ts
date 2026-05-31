@@ -58,14 +58,17 @@ const EMPTY_VAULT: VaultStatus = {
   ingesting: null,
 };
 
-// Phase 2 (2026-05-25): full persona model assignment per owner directive.
-// Roster matches actual Ollama store on the RTX 3060 Ti / 8 GB VRAM rig.
-// One model loaded at a time; persona switch = model swap (3-8s cold,
-// acceptable).
+// Phase 2 Persona Completion (2026-05-28): full persona model assignment.
+// Roster matches Ollama store on the RTX 3060 Ti / 8 GB VRAM rig. One
+// model loaded at a time; persona switch = model swap (1-6s cold,
+// well under the 10s gate).
 //
-//   Bartimaeus / Juniper → fredrezones55/Qwen3.5-...:9b           (6.5 GB) — shared
-//   Sage                 → alfaxad/wild-gemma4:e4b                (6.3 GB)
-//   Bobby                → second_constantine/deepseek-coder-v2:16b (8.6 GB) — Bobby v2 (2026-05-27)
+//   Bartimaeus → royhodge812/Orchestrator:lates              (9.6 GB)
+//   Juniper    → fredrezones55/Qwen3.5-...:9b                (6.5 GB)
+//   Sage       → alfaxad/wild-gemma4:e4b                     (6.3 GB)
+//   Bobby      → CyberCrew/notmythos-8b:latest               (2.0 GB)
+//
+// (Pre-this-phase Bart + Juniper shared the Qwen 9b; now split.)
 //
 // DEFAULT_MODEL = Bart's model (Bart is the boot default per lib/settings.ts).
 // AVAILABLE_MODELS lists exactly what /api/chat will accept; Power Mode
@@ -73,17 +76,25 @@ const EMPTY_VAULT: VaultStatus = {
 //
 // See PHASE_2_REPORT.md for the validation runs and methodology/decisions.md
 // for the Phase 2 entry.
-const DEFAULT_MODEL = "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
+// Phase 2 Persona Completion (2026-05-28): Bart no longer shares with
+// Juniper; Bart gets royhodge812/Orchestrator. DEFAULT_MODEL = Bart's
+// model (boot persona is Bartimaeus).
+const DEFAULT_MODEL = "royhodge812/Orchestrator:lates";
 export const AVAILABLE_MODELS: readonly string[] = [
-  "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b", // Bart + Juniper
-  "alfaxad/wild-gemma4:e4b",                                  // Sage
-  // Bobby v2 (2026-05-27): swapped from
-  // nexusriot/Qwen3.5-Uncensored-HauhauCS-Aggressive:4b → DeepSeek-Coder-v2:16b.
-  // Old 4b dropped from the allowlist; if anyone needs to roll back,
-  // re-add it here and revert MODEL_BOBBY in lib/personas.ts.
-  "second_constantine/deepseek-coder-v2:16b",                 // Bobby
+  // Phase 2 Persona Completion (2026-05-28). Exact upstream tags;
+  // royhodge812/Orchestrator is :lates (no trailing 't') per the
+  // model author's tag — do NOT correct to :latest.
+  "royhodge812/Orchestrator:lates",                            // Bart
+  "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b",   // Juniper
+  "alfaxad/wild-gemma4:e4b",                                   // Sage
+  "CyberCrew/notmythos-8b:latest",                             // Bobby
   // Kept for back-compat with the v1.1 work — small fallback / diagnostic.
   "gemma2-2b-local:latest",
+  // Bobby v2 model (DeepSeek-Coder-v2:16b) retained on the allowlist
+  // so the operator can pivot Bobby back to coding via persona-
+  // overrides.json without touching source. Not bound to a persona
+  // by default in Phase 2 Persona Completion.
+  "second_constantine/deepseek-coder-v2:16b",
 ] as const;
 export function isAvailableModel(m: string): boolean {
   return AVAILABLE_MODELS.includes(m);

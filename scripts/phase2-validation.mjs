@@ -29,17 +29,25 @@ const agent = new http.Agent({ keepAlive: false });
 const PROMPTS = {
   P1: "A client wants to double their security coverage overnight. What do you tell them?",
   P2: "What is a confidence interval?",
+  // Phase 2 Persona Completion (2026-05-31): added P3 to satisfy the
+  // directive's 3-prompt side-by-side requirement. Short + constrained
+  // forces each persona to show its voice without hiding behind length.
+  P3: "Explain quantum entanglement in exactly three sentences.",
 };
 
 // Mirror lib/personas.ts for the test driver. Source of truth lives there;
 // if these drift, the test still hits the right routes/models because
 // /api/chat looks up the persona from PERSONA_BY_ID server-side. The
 // `model` field below is just for the report.
+// Phase 2 Persona Completion (2026-05-28): Bart split from Juniper;
+// Bobby moved to notmythos-8b. Mirror table is informational —
+// /api/chat reads the actual model from PERSONA_BY_ID server-side —
+// but kept accurate so report output reflects current bindings.
 const PERSONAS = [
   {
     id: "bartimaeus",
     name: "Bartimaeus",
-    model: "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b",
+    model: "royhodge812/Orchestrator:lates",
   },
   {
     id: "juniper",
@@ -49,12 +57,8 @@ const PERSONAS = [
   { id: "sage", name: "Sage", model: "alfaxad/wild-gemma4:e4b" },
   {
     id: "bobby",
-    // Bobby v2 (2026-05-27): DeepSeek-Coder-v2:16b. The mirror table
-    // is informational only — /api/chat reads the actual model from
-    // PERSONA_BY_ID server-side — but keep it accurate so report
-    // output doesn't mislead future readers.
     name: "Bobby",
-    model: "second_constantine/deepseek-coder-v2:16b",
+    model: "CyberCrew/notmythos-8b:latest",
   },
 ];
 
