@@ -155,7 +155,15 @@ Reload button at the section header refreshes the list without a page reload.
 
 ## 9. Commit hash
 
-**`<inserted post-commit>`** — `feat(memory): Phase 9 — persistent 5-tier memory, extraction, retrieval, operator profile seed`
+**`b2f505d`** — `feat(memory): Phase 9 — persistent 5-tier memory, extraction, retrieval, operator profile seed`
+
+```
+b2f505d feat(memory): Phase 9 — persistent 5-tier memory, extraction, retrieval, operator profile seed
+5711aee fix(voice): add output device selector + AudioContext.setSinkId routing — fixes silent TTS when default sink is virtual
+ff33d64 feat: Bartimaeus v2.1 — compressed substrate, prose-continuous, emergence over description
+```
+
+14 files changed, 2,732 insertions(+), 49 deletions(-). Local-only, not pushed (per standing rule).
 
 ## 10. Honest findings & limitations
 

@@ -97,7 +97,9 @@ Both selectors are `right-[5.5rem]`, `max-w-[14rem]`, `truncate`, persona-accent
 
 ## 6. Commit hash
 
-**`<inserted post-commit>`** — `fix(voice): add output device selector + AudioContext.setSinkId routing — fixes silent TTS when default sink is virtual`
+**`5711aee`** — `fix(voice): add output device selector + AudioContext.setSinkId routing — fixes silent TTS when default sink is virtual`
+
+6 files changed, 416 insertions(+), 5 deletions(-). Local-only, not pushed (per standing rule).
 
 ## 7. Honest findings worth flagging
 

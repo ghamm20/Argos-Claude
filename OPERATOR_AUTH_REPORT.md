@@ -125,7 +125,15 @@ No server roundtrip, no recovery email, no second factor. The disk is the source
 
 ## 8. Commit hash
 
-**`<inserted post-commit>`** — `feat(auth): PIN gate + dual-mode operator/guest persona system`
+**`06d876a`** — `feat(auth): PIN gate + dual-mode operator/guest persona system`
+
+```
+06d876a feat(auth): PIN gate + dual-mode operator/guest persona system
+b2f505d feat(memory): Phase 9 — persistent 5-tier memory, extraction, retrieval, operator profile seed
+5711aee fix(voice): add output device selector + AudioContext.setSinkId routing
+```
+
+16 files changed, 1,652 insertions(+), 14 deletions(-). Local-only, not pushed.
 
 ## 9. Honest findings
 

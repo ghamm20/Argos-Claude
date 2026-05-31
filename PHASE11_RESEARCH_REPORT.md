@@ -109,7 +109,9 @@ Phase 11 smoke step breakdown:
 
 ## 8. Commit hash
 
-**`<inserted post-commit>`** — `feat(research): Phase 11 — scheduled streams, Pushover alerts, arXiv intent, research → memory writer`
+**`3f06a3e`** — `feat(research): Phase 11 — scheduled streams, Pushover alerts, arXiv intent, research → memory writer`
+
+18 files changed, 1,953 insertions(+), 24 deletions(-). Local-only, not pushed.
 
 ## 9. Honest findings
 

@@ -138,7 +138,9 @@ Phase 10 smoke breakdown:
 
 ## 7. Commit hash
 
-**`<inserted post-commit>`** — `feat(research): Phase 10 — 5-stage pipeline, provider chain, Reddit stream, feedback loop, cache + HUD/Tools UI`
+**`44807f3`** — `feat(research): Phase 10 — 5-stage pipeline, provider chain, Reddit stream, feedback loop, cache + HUD/Tools UI`
+
+24 files changed, 3,449 insertions(+), 50 deletions(-). Local-only, not pushed.
 
 ## 8. Honest findings
 

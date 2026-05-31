@@ -37,7 +37,15 @@
 
 ## Commit hash
 
-**`<inserted post-commit>`** — `feat: Bartimaeus v2.1 — compressed substrate, prose-continuous, emergence over description`
+**`ff33d64`** — `feat: Bartimaeus v2.1 — compressed substrate, prose-continuous, emergence over description`
+
+```
+ff33d64 feat: Bartimaeus v2.1 — compressed substrate, prose-continuous, emergence over description
+9f23193 feat: Bartimaeus v1.1.9 — definitive character persona
+c1887e7 feat: Bartimaeus v1.1.9 — djinn character register, sardonic wit, dry precision
+```
+
+3 files changed, 399 insertions(+), 250 deletions(-). Local-only, not pushed (per standing rule).
 
 ---
 

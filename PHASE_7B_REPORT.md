@@ -258,4 +258,4 @@ The voice loop is fully alive end-to-end with everything local. Mic + text-chat 
 
 ## 14. Commit hash
 
-**Commit SHA:** `[FILLED-AT-COMMIT]`
+**Commit SHA:** `8b96a6f` (local on `main`, not pushed, not tagged)

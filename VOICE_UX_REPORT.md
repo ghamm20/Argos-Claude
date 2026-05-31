@@ -137,7 +137,15 @@ The phase7-stt-smoke test uses a continuous 2-s tone, which is above-threshold f
 
 ## 7. Commit hash
 
-**`<inserted post-commit>`** — `fix(voice): make TTS play button visible + STT silence trim + recording indicator`
+**`7806d52`** — `fix(voice): make TTS play button visible + STT silence trim + recording indicator`
+
+```
+7806d52 fix(voice): make TTS play button visible + STT silence trim + recording indicator
+167d34e feat: Bobby v2 — swap to DeepSeek-Coder-v2:16b + agentic coder system prompt + approval gate
+cd6bb78 fix(ui): unlock AudioContext on click for TTS playback — Chrome autoplay policy blocked new Audio().play()
+```
+
+5 files changed, 470 insertions(+), 44 deletions(-). Local-only, not pushed (per standing rule).
 
 ---
 

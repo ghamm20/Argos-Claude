@@ -147,7 +147,15 @@ Metrics: TTFT 188 ms (warm), total 6584 ms, 555 chars, 18.6 tok/s.
 
 ## 9. Commit hash
 
-See `git log --oneline -3` at the end of this report (commit hash inserted post-commit).
+**`167d34e`** — `feat: Bobby v2 — swap to DeepSeek-Coder-v2:16b + agentic coder system prompt + approval gate`
+
+```
+167d34e feat: Bobby v2 — swap to DeepSeek-Coder-v2:16b + agentic coder system prompt + approval gate
+cd6bb78 fix(ui): unlock AudioContext on click for TTS playback — Chrome autoplay policy blocked new Audio().play()
+7c9c5fe fix: pad short WAV audio to 1.5s minimum before Whisper STT — prevents hallucination on short utterances
+```
+
+9 files changed, 778 insertions(+), 72 deletions(-). Local-only, not pushed (per standing rule).
 
 ---
 

@@ -1,0 +1,255 @@
+{
+  "weather:atlanta:2026-05-28": {
+    "report": {
+      "id": "weather-mppzauek-6kenfm",
+      "intent": "weather",
+      "queries": [
+        {
+          "query": "weather Atlanta GA",
+          "intent": "weather",
+          "location": "atlanta",
+          "maxResults": 1
+        }
+      ],
+      "results": [
+        {
+          "title": "Weather — Atlanta",
+          "url": "https://wttr.in/Atlanta,GA?format=j1",
+          "snippet": "Sunny, 88°F — humidity 52% — wind 6 mph — 3-day: 2026-05-28: 70–88°F · 2026-05-29: 68–75°F · 2026-05-30: 67–87°F",
+          "source": "wttr.in",
+          "publishedAt": "08:10 PM",
+          "credibilityScore": 0.95
+        }
+      ],
+      "crawledPages": [
+        {
+          "url": "https://wttr.in/Atlanta,GA?format=j1",
+          "title": "wttr.in/Atlanta,GA",
+          "extractedText": "{ \"current_condition\": [ { \"FeelsLikeC\": \"37\", \"FeelsLikeF\": \"98\", \"cloudcover\": \"25\", \"humidity\": \"52\", \"observation_time\": \"08:10 PM\", \"precipInches\": \"0.0\", \"precipMM\": \"0.0\", \"pressure\": \"1015\", \"pressureInches\": \"30\", \"temp_C\": \"31\", \"temp_F\": \"88\", \"uvIndex\": \"4\", \"visibility\": \"16\", \"visibilityMiles\": \"9\", \"weatherCode\": \"113\", \"weatherDesc\": [ { \"value\": \"Sunny\" } ], \"weatherIconUrl\": [ { \"value\": \"https://cdn.worldweatheronline.com/images/wsymbols01_png_64/wsymbol_0001_sunny.png\" } ], \"winddir16Point\": \"NW\", \"winddirDegree\": \"317\", \"windspeedKmph\": \"10\", \"windspeedMiles\": \"6\" } ], \"nearest_area\": [ { \"areaName\": [ { \"value\": \"Atlanta\" } ], \"country\": [ { \"value\": \"United States of America\" } ], \"latitude\": \"33.749\", \"longitude\": \"-84.388\", \"population\": \"422908\", \"region\": [ { \"value\": \"Georgia\" } ], \"weatherUrl\": [ { \"value\": \"https://www.worldweatheronline.com/v2/weather.aspx?q=33.749,-84.388\" } ] } ], \"request\": [ { \"query\": \"Lat 33.75 and Lon -84.39\", \"type\": \"LatLon\" } ], \"weather\": [ { \"astronomy\": [ { \"moon_illumination\": \"90\", \"moon_phase\": \"Waxing Gibbous\", \"moonrise\": \"06:35 PM\", \"moonset\": \"04:27 AM\", \"sunrise\": \"06:29 AM\", \"sunset\": \"08:41 PM\" } ], \"avgtempC\": \"26\", \"avgtempF\": \"78\", \"date\": \"2026-05-28\", \"hourly\": [ { \"DewPointC\": \"21\", \"DewPointF\": \"71\", \"FeelsLikeC\": \"25\", \"FeelsLikeF\": \"78\", \"HeatIndexC\": \"25\", \"HeatIndexF\": \"78\", \"WindChillC\": \"23\", \"WindChillF\": \"73\", \"WindGustKmph\": \"14\", \"WindGustMiles\": \"8\", \"chanceoffog\": \"0\", \"chanceoffrost\": \"0\", \"chanceofhightemp\": \"0\", \"chanceofovercast\": \"0\", \"chanceofrain\": \"0\", \"chanceofremdry\": \"87\", \"chanceofsnow\": \"0\", \"chanceofsunshine\": \"87\", \"chanceofthunder\": \"0\", \"chanceofwindy\": \"0\", \"cloudcover\": \"2\", \"diffRad\": \"1.9\", \"humidity\": \"93\", \"precipInches\": \"0.0\", \"precipMM\": \"0.0\", \"pressure\": \"1016\", \"pressureInches\": \"30\", \"shortRad\": \"3.9\", \"tempC\": \"23\", \"tempF\": \"73\", \"time\": \"0\", \"uvIndex\": \"0\", \"visibility\": \"10\", \"visibilityMiles\": \"6\", \"weatherCode\": \"113\", \"weatherDesc\": [ { \"val…",
+          "facts": [],
+          "fetchedAt": "2026-05-28T21:01:55.435Z"
+        }
+      ],
+      "summary": "Weather — Atlanta: Sunny, 88°F — humidity 52% — wind 6 mph — 3-day: 2026-05-28: 70–88°F · 2026-05-29: 68–75°F · 2026-05-30: 67–87°F",
+      "findings": [
+        "Weather — Atlanta: Sunny, 88°F — humidity 52% — wind 6 mph — 3-day: 2026-05-28: 70–88°F · 2026-05-29: 68–75°F · 2026-05-30: 67–87°F"
+      ],
+      "citations": [
+        "[1] Weather — Atlanta — wttr.in — https://wttr.in/Atlanta,GA?format=j1"
+      ],
+      "confidenceScore": 0.95,
+      "conflicts": [],
+      "generatedAt": "2026-05-28T21:01:55.436Z",
+      "ttlMinutes": 30,
+      "iteration": 1,
+      "quality": "SUFFICIENT"
+    },
+    "expiresAt": "2026-05-28T21:31:55.437Z"
+  },
+  "ai_updates:all:2026-05-28": {
+    "report": {
+      "id": "ai_updates-mppzavgl-7nusbo",
+      "intent": "ai_updates",
+      "queries": [
+        {
+          "query": "new AI model release this week",
+          "intent": "ai_updates",
+          "location": null,
+          "maxResults": 5
+        },
+        {
+          "query": "AI research paper announcement",
+          "intent": "ai_updates",
+          "location": null,
+          "maxResults": 5
+        },
+        {
+          "query": "OpenAI Anthropic Google AI industry news",
+          "intent": "ai_updates",
+          "location": null,
+          "maxResults": 5
+        }
+      ],
+      "results": [
+        {
+          "title": "New AI Model Releases - Latest AI Models Released Today",
+          "url": "https://aiflashreport.com/topics/new-ai-model-releases.html",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "AI Release Tracker — Every LLM Release Since ChatGPT",
+          "url": "https://aireleasetracker.com/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "AI News — Weekly AI Newsletter for Professionals | AI Weekly",
+          "url": "https://aiweekly.co/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "OpenAI Research | Release",
+          "url": "https://openai.com/research/index/release/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "AI Updates Today (May 2026) - Latest AI Model Releases",
+          "url": "https://llm-stats.com/llm-updates",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "The AI Scientist: Towards Fully Automated AI Research, Now Published in ...",
+          "url": "https://sakana.ai/ai-scientist-nature/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "OpenAI Research | Publication",
+          "url": "https://openai.com/research/index/publication/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "Artificial Intelligence May 2026 - arXiv.org",
+          "url": "https://arxiv.org/list/cs.AI/current",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "TurboQuant: Redefining AI efficiency with extreme compression",
+          "url": "https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "Sony AI Announces Breakthrough Research in Real-World Artificial ...",
+          "url": "https://ai.sony/news/sony-ai-announces-breakthrough-research-in-real-world-artificial-intelligence-and-robotics",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "AI Breakthroughs: OpenAI, Meta & Anthropic's Future for AI",
+          "url": "https://aimagazine.com/news/ai-breakthroughs-openai-meta-anthropics-future-for-ai",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "Latest AI Company News: Google, OpenAI, Anthropic, DeepSeek, Qwen, ZAI",
+          "url": "https://projectchat.ai/2026/04/10/latest-ai-company-news-google-openai-anthropic-deepseek-qwen-zai/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "Tech Titans Join Forces: OpenAI, Anthropic, and Google Co...",
+          "url": "https://opentools.ai/news/tech-titans-join-forces-openai-anthropic-and-google-combat-ai-model-copying-in-china",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "Anthropic Overtakes OpenAI: The 2026 AI Market Shift - Geeky Gadgets",
+          "url": "https://www.geeky-gadgets.com/openai-losing-ai-war/",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        },
+        {
+          "title": "The Enterprise AI Pivot: How OpenAI, Anthropic, and LangChain Are ... - MSN",
+          "url": "https://www.msn.com/en-us/news/other/the-enterprise-ai-pivot-how-openai-anthropic-and-langchain-are-redefining-production-in-may-2026/gm-GMD0E27A85",
+          "snippet": "",
+          "source": "duckduckgo",
+          "credibilityScore": 0.6
+        }
+      ],
+      "crawledPages": [
+        {
+          "url": "https://aiflashreport.com/topics/new-ai-model-releases.html",
+          "title": "New AI Model Releases - Latest AI Models Released Today",
+          "extractedText": "AI Flash Report Daily AI News Roundup - Updated: 2026-05-28 Topics ▼ OpenAI News Google AI News ChatGPT News ChatGPT Updates Machine Learning News Deep Learning News AI Research News AI Startup News AI Industry News AI News Today AI Breakthrough News New AI Model Releases Resources ▼ Model Release Tracker AI Timeline AI Glossary About Contact Archive Artificial Intelligence News at Machine Speed ⚡ AI Stock Market Top 10 AI Companies Live Prices Today's Model Releases Flash NEW AI MODEL RELEASES - May 28, 2026 There are no major frontier‑lab model releases in the last 24–48 hours from OpenAI, Anthropic, Google, Meta, Mistral, xAI, Cohere, Stability, Microsoft, or Hugging Face based on public trackers and news as of early UTC. In that case, here are the most recent notable model launches from roughly the past month , which shape the current landscape. --- • GPT‑5.5 Instant by OpenAI — A lightweight, lower‑latency variant of GPT‑5.5 aimed at cheaper, high‑throughput workloads, listed as a recent proprietary release on model‑tracking sites.[4] - Capabilities: General‑purpose chat and coding with GPT‑5.5‑class behavior, optimized for speed and cost (positioned similarly to prior “Turbo” lines, but at the 5.5 generation).[4] - Key specs: Exact parameter count and context window not yet publicly detailed; expected to share the large‑context regime of GPT‑5.5 while trading some peak capability for latency and price (inferred from prior OpenAI “Instant/Turbo” lines).[4] - Availability: API via OpenAI; proprietary, no open weights.[4] • Mistral Medium 3.5 by Mistral AI — An open‑source mid‑sized model that refreshes Mistral’s “Medium” tier, appearing as a new open‑weight release.[4] - Capabilities: Strong general‑purpose reasoning and coding; positioned between smaller “7B‑class” models and large frontier models, with a focus on efficiency and self‑hosting.[4] - Key specs: Exact parameter count not listed on the tracker; typical Mistral “Medium” configurations are in the tens…",
+          "facts": [],
+          "fetchedAt": "2026-05-28T21:01:56.744Z"
+        },
+        {
+          "url": "https://aireleasetracker.com/",
+          "title": "AI Release Tracker — Every LLM Release Since ChatGPT",
+          "extractedText": "About AI Release Tracker AI Release Tracker is a free, continuously updated timeline of every major AI model release from the world's leading AI labs. We cover 160 tracked frontier models from Anthropic, OpenAI, Google, Meta, xAI, DeepSeek, Mistral, Moonshot AI, Cursor , starting with the launch of ChatGPT on November 30 2022 . Every model page includes release date, parameter count, context window, model type, and benchmark scores (GPQA Diamond, SWE-Bench Verified, MMMU) when published. The analytics page shows cumulative release charts, monthly release frequency, year-over-year totals, benchmark frontier progression, and release cadence by company. Browse by company OpenAI AI models Anthropic AI models Google AI models Meta AI models xAI AI models DeepSeek AI models Mistral AI models Moonshot AI AI models Cursor AI models Frequently asked questions What is AI Release Tracker? AI Release Tracker is a free, continuously updated timeline of every major AI model release from the world's leading AI labs. It currently tracks 160 models from 9 companies — including OpenAI, Anthropic, Google DeepMind, Meta, xAI, DeepSeek, Mistral, Moonshot AI, and Cursor — from the launch of ChatGPT on November 30 2022 through today. What is the latest AI model release? The most recently tracked frontier model is Claude Opus 4.8 by Anthropic, released on May 28 2026. See the live homepage for the up-to-the-minute timeline. Which AI model has the highest benchmark scores? On GPQA Diamond (graduate-level science reasoning), the current leader is GPT-5.4-Pro by OpenAI with a score of 94.4%. On SWE-Bench Verified (real-world software engineering), the current leader is Claude Opus 4.7 by Anthropic with a score of 87.6%. Both benchmarks are tracked live on the Analytics page. Which companies are tracked on AI Release Tracker? AI Release Tracker covers releases from Anthropic, OpenAI, Google, Meta, xAI, DeepSeek, Mistral, Moonshot AI, Cursor.",
+          "facts": [
+            "About AI Release Tracker AI Release Tracker is a free, continuously updated timeline of every major AI model release from the world's leading AI labs.",
+            "We cover 160 tracked frontier models from Anthropic, OpenAI, Google, Meta, xAI, DeepSeek, Mistral, Moonshot AI, Cursor , starting with the launch of ChatGPT on November 30 2022 .",
+            "Every model page includes release date, parameter count, context window, model type, and benchmark scores (GPQA Diamond, SWE-Bench Verified, MMMU) when published.",
+            "Browse by company OpenAI AI models Anthropic AI models Google AI models Meta AI models xAI AI models DeepSeek AI models Mistral AI models Moonshot AI AI models Cursor AI models Frequently asked questions What is AI Release Tracker?",
+            "AI Release Tracker is a free, continuously updated timeline of every major AI model release from the world's leading AI labs.",
+            "It currently tracks 160 models from 9 companies — including OpenAI, Anthropic, Google DeepMind, Meta, xAI, DeepSeek, Mistral, Moonshot AI, and Cursor — from the launch of ChatGPT on November 30 2022 through today.",
+            "The most recently tracked frontier model is Claude Opus 4.8 by Anthropic, released on May 28 2026.",
+            "On GPQA Diamond (graduate-level science reasoning), the current leader is GPT-5.4-Pro by OpenAI with a score of 94.4%.",
+            "On SWE-Bench Verified (real-world software engineering), the current leader is Claude Opus 4.7 by Anthropic with a score of 87.6%.",
+            "Which companies are tracked on AI Release Tracker?",
+            "AI Release Tracker covers releases from Anthropic, OpenAI, Google, Meta, xAI, DeepSeek, Mistral, Moonshot AI, Cursor."
+          ],
+          "fetchedAt": "2026-05-28T21:01:56.727Z"
+        },
+        {
+          "url": "https://aiweekly.co/",
+          "title": "AI News — Weekly AI Newsletter for Professionals | AI Weekly",
+          "extractedText": "Latest Issue Archives Learning AI Newsletters AI Index AI News Today Search Advertise Login Subscribe to a weekly collection of AI News and resources on Artificial Intelligence and Machine Learning. For free. Email SUBSCRIBE No spam, ever. We'll never share your email address and you can opt out at any time. Already a subscriber? Log in Thursday, May 28, 2026 2163 stories tracked · Updated 55m ago 43,000+ subscribers since 2017 Latest Issue #496 Anthropic&#039;s Pentagon model is now everyone&#039;s model Anthropic released Mythos to the public, collapsing the wall between cleared-contractor frontier AI and developer-grade frontier AI in a single press release. DeepMind&#039;s Demis Hassabis moved his AGI timeline from \"five to ten years\" to \"a real possibility by 2029\" and tied it explicitly to AlphaProof Nexus solving nine open Erdős problems for the cost of a steak dinner. Critical zero-days hit Starlette (a million AI agents on the wire) and CrowdStrike led a coordinated takedown of the Glassworm ... 2026-05-27 All live stories → The AI briefing 43,000+ professionals read. Free, 3x/week. Curated since 2017. SUBSCRIBE FREE Latest Issue #496 Anthropic&#039;s Pentagon model is now everyone&#039;s model Anthropic released Mythos to the public, collapsing the wall between cleared-contractor frontier AI and developer-grade frontier AI in a single press release. DeepMind&#039;s Demis Hassabis moved his AGI timeline from \"five to ten years\" to \"a real possibility by 2029\" and tied it explicitly to AlphaProof Nexus solving nine open Erdős problems for the cost of a steak dinner. Critical zero-days hit Starlette (a million AI agents on the wire) and CrowdStrike led a coordinated takedown of the Glassworm ... 2026-05-27 #495 Musk, Zuckerberg killed Trump&#039;s AI safety order in three phone calls #494 SpaceX wants $80 billion. OpenAI wants a trillion.",
+          "facts": [
+            "Latest Issue Archives Learning AI Newsletters AI Index AI News Today Search Advertise Login Subscribe to a weekly collection of AI News and resources on Artificial Intelligence and Machine Learning.",
+            "Log in Thursday, May 28, 2026 2163 stories tracked · Updated 55m ago 43,000+ subscribers since 2017 Latest Issue #496 Anthropic&#039;s Pentagon model is now everyone&#039;s model Anthropic released Mythos to the public, collapsing the wall between cleared-contractor frontier AI and developer-grade frontier AI in a single press release.",
+            "DeepMind&#039;s Demis Hassabis moved his AGI timeline from \"five to ten years\" to \"a real possibility by 2029\" and tied it explicitly to AlphaProof Nexus solving nine open Erdős problems for the cost of a steak dinner.",
+            "2026-05-27 All live stories → The AI briefing 43,000+ professionals read.",
+            "Curated since 2017.",
+            "SUBSCRIBE FREE Latest Issue #496 Anthropic&#039;s Pentagon model is now everyone&#039;s model Anthropic released Mythos to the public, collapsing the wall between cleared-contractor frontier AI and developer-grade frontier AI in a single press release.",
+            "DeepMind&#039;s Demis Hassabis moved his AGI timeline from \"five to ten years\" to \"a real possibility by 2029\" and tied it explicitly to AlphaProof Nexus solving nine open Erdős problems for the cost of a steak dinner.",
+            "2026-05-27 #495 Musk, Zuckerberg killed Trump&#039;s AI safety order in three phone calls #494 SpaceX wants $80 billion."
+          ],
+          "fetchedAt": "2026-05-28T21:01:56.804Z"
+        }
+      ],
+      "summary": "15 sources returned for \"new AI model release this week\" via duckduckgo. 3 pages crawled.",
+      "findings": [
+        "About AI Release Tracker AI Release Tracker is a free, continuously updated timeline of every major AI model release from the world's leading AI labs.",
+        "We cover 160 tracked frontier models from Anthropic, OpenAI, Google, Meta, xAI, DeepSeek, Mistral, Moonshot AI, Cursor , starting with the launch of ChatGPT on November 30 2022 .",
+        "New AI Model Releases - Latest AI Models Released Today",
+        "AI Release Tracker — Every LLM Release Since ChatGPT",
+        "AI News — Weekly AI Newsletter for Professionals | AI Weekly",
+        "OpenAI Research | Release",
+        "AI Updates Today (May 2026) - Latest AI Model Releases"
+      ],
+      "citations": [
+        "[1] New AI Model Releases - Latest AI Models Released Today — duckduckgo — https://aiflashreport.com/topics/new-ai-model-releases.html",
+        "[2] AI Release Tracker — Every LLM Release Since ChatGPT — duckduckgo — https://aireleasetracker.com/",
+        "[3] AI News — Weekly AI Newsletter for Professionals | AI Weekly — duckduckgo — https://aiweekly.co/",
+        "[4] OpenAI Research | Release — duckduckgo — https://openai.com/research/index/release/",
+        "[5] AI Updates Today (May 2026) - Latest AI Model Releases — duckduckgo — https://llm-stats.com/llm-updates",
+        "[6] The AI Scientist: Towards Fully Automated AI Research, Now Published in ... — duckduckgo — https://sakana.ai/ai-scientist-nature/",
+        "[7] OpenAI Research | Publication — duckduckgo — https://openai.com/research/index/publication/",
+        "[8] Artificial Intelligence May 2026 - arXiv.org — duckduckgo — https://arxiv.org/list/cs.AI/current",
+        "[9] TurboQuant: Redefining AI efficiency with extreme compression — duckduckgo — https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/",
+        "[10] Sony AI Announces Breakthrough Research in Real-World Artificial ... — duckduckgo — https://ai.sony/news/sony-ai-announces-breakthrough-research-in-real-world-artificial-intelligence-and-robotics"
+      ],
+      "confidenceScore": 0.5999999999999999,
+      "conflicts": [],
+      "generatedAt": "2026-05-28T21:01:56.805Z",
+      "ttlMinutes": 120,
+      "iteration": 1,
+      "quality": "SUFFICIENT"
+    },
+    "expiresAt": "2026-05-28T23:01:56.807Z"
+  }
+}

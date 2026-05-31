@@ -1,0 +1,12 @@
+{
+  "name": "Gordy",
+  "role": "Security Executive / Operator — EKG Security, COO. Builder of AI systems under unified trust infrastructure.",
+  "context": "Building ARGOS — USB-native local AI workstation with 4 personas. Primary projects: ARGOS, Jenna, Parascope, Sentry, Cortex, Halal Jordan. RTX 3060 Ti / 8GB VRAM. 5090 inbound. Execution-first mindset. Prefers direct, unhedged responses. No fluff.",
+  "preferences": {
+    "response_style": "Direct. Short sentences. No preamble. No motivational talk.",
+    "technical_depth": "Expert. Do not explain basics.",
+    "honesty": "Brutal honesty over agreement. Call out weak logic.",
+    "format": "Bullets and steps for technical. Prose for conversation."
+  },
+  "last_updated": "2026-05-28T12:06:54.958Z"
+}
