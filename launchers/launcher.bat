@@ -43,7 +43,14 @@ REM --- Scoped env vars (child processes only) -----------------
 set "NEXT_TELEMETRY_DISABLED=1"
 REM Default OLLAMA_MODELS to the USB-payload location, but respect a
 REM caller-provided value (smoke tests, devs running against host models).
-if not defined OLLAMA_MODELS set "OLLAMA_MODELS=C:\\Users\\Gordy\\.ollama\\models"
+REM D: migration (2026-05-31): this previously hardcoded the host path
+REM C:\Users\Gordy\.ollama\models, which made any migrated payload read
+REM models from the host C: drive instead of its own models/ dir —
+REM defeating USB-native isolation (Seven Rules #1). Now derives from
+REM ARGOS_ROOT so the payload is self-contained wherever it lives.
+REM verify-argos does NOT scan .bat files, so this was never caught by
+REM Rule 1/Rule 3; see MIGRATION_REPORT.md.
+if not defined OLLAMA_MODELS set "OLLAMA_MODELS=%ARGOS_ROOT%\models"
 set "TMPDIR=%ARGOS_ROOT%\tmp"
 REM OLLAMA_HOST is resolved in the Port resolution block below — a
 REM caller-set value is honored, otherwise we pick 11434/11435 by
