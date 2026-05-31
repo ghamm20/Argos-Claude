@@ -127,9 +127,16 @@ if (!SKIP_LIVE) {
   process.stdout.write(`\nLIVE STAGE (dev server on ${BASE})\n`);
   process.stdout.write(`  spinning up next dev...\n`);
 
+  // shell: SHELL (true on Windows) is required to spawn npm.cmd — Node
+  // ≥18.20/20.12+ (and strictly on Node 24) refuse to spawn .cmd/.bat
+  // without it (EINVAL). The static stage's spawnSync already passes
+  // shell:SHELL; this live spawn was missing it. Latent until 2026-05-31
+  // because the static stage always failed first and skipped the live
+  // stage — once the static gates went green, this surfaced.
   devProc = spawn(NPM, ["run", "dev"], {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
+    shell: SHELL,
     env: { ...process.env, PORT: String(PORT) },
   });
   devProc.stdout.on("data", () => {});

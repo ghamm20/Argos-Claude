@@ -17,11 +17,20 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// Pages that are STILL stubs (deferred, never built). The audit asserts
+// they carry the honesty markers and no fake interactivity.
+//
+// 2026-05-31: Memory (app/memory/page.tsx) and Tools (app/tools/page.tsx)
+// were REMOVED from this list — they are now real, built-out features
+// (Memory: Phase 9 persistent memory UI; Tools: Phase 10/11 research +
+// scheduler/alerts UI), so they legitimately use useState/useEffect/
+// fetch and must NOT be held to stub-honesty rules. Vision and Voice
+// PAGES remain genuine stubs: Voice functionality ships via ChatPane
+// components (MicButton/PlayButton/SpeakerSelect), but app/voice/page.tsx
+// itself is still a deferred placeholder.
 const STUBS = [
   { name: "Vision", path: "app/vision/page.tsx", weekPattern: /Week\s*8/i },
   { name: "Voice", path: "app/voice/page.tsx", weekPattern: /Week\s*6/i },
-  { name: "Memory", path: "app/memory/page.tsx", weekPattern: /Week\s*10/i },
-  { name: "Tools", path: "app/tools/page.tsx", weekPattern: /Post-launch|v2\+/i },
 ];
 
 const REQUIRED_PHRASES = [

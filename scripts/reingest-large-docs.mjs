@@ -14,8 +14,8 @@
 // timeout, it just waits.
 //
 // Usage:
-//   node scripts/reingest-large-docs.mjs                 # defaults to Desktop\ARGOS
-//   node scripts/reingest-large-docs.mjs --argos-root "C:\path\to\root"
+//   node scripts/reingest-large-docs.mjs                 # defaults to $ARGOS_ROOT or cwd
+//   node scripts/reingest-large-docs.mjs --argos-root "<your ARGOS_ROOT>"
 //   node scripts/reingest-large-docs.mjs --port 7792
 //   node scripts/reingest-large-docs.mjs --min-bytes 1000000   # only ≥1MB
 
@@ -35,7 +35,11 @@ function flag(name, fallback) {
 }
 
 const PORT = parseInt(flag("--port", "7792"), 10);
-const ARGOS_ROOT = flag("--argos-root", "C:\\Users\\Gordy\\Desktop\\ARGOS");
+// Default to the env-provided ARGOS_ROOT (or cwd) instead of a
+// hardcoded host path — keeps the script portable across machines and
+// satisfies Rule 1. Operators target the deployed payload by passing
+// --argos-root explicitly (see Usage above).
+const ARGOS_ROOT = flag("--argos-root", process.env.ARGOS_ROOT || process.cwd());
 const MIN_BYTES = parseInt(flag("--min-bytes", "500000"), 10);
 
 const BASE = `http://127.0.0.1:${PORT}`;

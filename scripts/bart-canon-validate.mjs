@@ -17,9 +17,9 @@ const repoRoot = resolve(__dir, "..");
 
 // Optional --argos-root to point at the deployed payload (so the
 // spawned server sees the real vault). Default = tmp ARGOS_ROOT
-// (canon-only baseline). Pass `--argos-root "C:\Users\Gordy\Desktop\ARGOS"`
-// to exercise the retrieval-injected path that exposed the
-// 2026-05-28 canon regression.
+// (canon-only baseline). Pass `--argos-root "<your ARGOS_ROOT>"`
+// (e.g. the deployed payload dir) to exercise the retrieval-injected
+// path that exposed the 2026-05-28 canon regression.
 const args = process.argv.slice(2);
 function flag(name, fallback) {
   const i = args.indexOf(name);
