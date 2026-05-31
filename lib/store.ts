@@ -136,6 +136,26 @@ export const EMPTY_RESEARCH_STATE: ResearchHudState = {
   cachedAt: null,
 };
 
+/** Phase 9 (router) — persona-routing suggestion from the chat stream.
+ *  Mirrors the `routing` event /api/chat emits. Drives the HUD's
+ *  "Routing to X" hint. Suggestion-only: never auto-switches the
+ *  persona. `surface` is true only when the recommendation clears the
+ *  0.7 gate AND differs from the persona currently answering. */
+export interface RoutingHudState {
+  recommended: PersonaId | null;
+  confidence: number;
+  currentPersona: PersonaId | null;
+  complexity: "low" | "high";
+  surface: boolean;
+}
+export const EMPTY_ROUTING_STATE: RoutingHudState = {
+  recommended: null,
+  confidence: 0,
+  currentPersona: null,
+  complexity: "low",
+  surface: false,
+};
+
 const LATENCY_WINDOW = 10;
 
 function p50(values: number[]): number {
@@ -168,6 +188,9 @@ interface ArgosState {
    *  Drives the HUD Research row. Reset to "OFF" on persona switch
    *  + clearChat so the indicator reflects the active turn only. */
   researchState: ResearchHudState;
+  /** Phase 9 (router) — most-recent routing suggestion from the chat
+   *  stream. Reset on persona switch + clearChat. Suggestion-only. */
+  routingSuggestion: RoutingHudState;
 
   switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
@@ -185,6 +208,7 @@ interface ArgosState {
   setActiveCitation: (hit: CitedHit | null) => void;
   setTruthMode: (b: boolean) => void;
   setResearchState: (s: ResearchHudState) => void;
+  setRoutingSuggestion: (s: RoutingHudState) => void;
   setCurrentSessionId: (id: string | null) => void;
   /** Replace the entire in-memory chat with a loaded persisted session. */
   loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
@@ -211,6 +235,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   modelStatusPersona: null,
   modelStatusMessage: null,
   researchState: EMPTY_RESEARCH_STATE,
+  routingSuggestion: EMPTY_ROUTING_STATE,
 
   // Phase 2-RB: persona-bound model with visible swap state. Steps:
   //   1. If persona is not_configured, set modelStatus=not_configured
@@ -252,6 +277,9 @@ export const useArgos = create<ArgosState>((set, get) => ({
       modelStatus: "loading",
       modelStatusPersona: id,
       modelStatusMessage: `Loading ${p.name}…`,
+      // Phase 9 (router) — a manual switch resolves the suggestion;
+      // clear the hint so it doesn't linger against the new persona.
+      routingSuggestion: EMPTY_ROUTING_STATE,
     });
     // v1.1: best-effort persona.switched audit append. Fire AFTER
     // the UI flip + BEFORE the warm POST so the audit reflects intent
@@ -363,6 +391,8 @@ export const useArgos = create<ArgosState>((set, get) => ({
       // Clearing the chat ALSO drops the session linkage — next send
       // creates a fresh session rather than over-writing the cleared one.
       currentSessionId: null,
+      // Phase 9 (router) — drop any stale routing hint.
+      routingSuggestion: EMPTY_ROUTING_STATE,
     }),
 
   setVaultCounts: (docs, chunks) =>
@@ -372,6 +402,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   setActiveCitation: (hit) => set({ activeCitation: hit }),
   setTruthMode: (b) => set({ truthMode: b }),
   setResearchState: (s) => set({ researchState: s }),
+  setRoutingSuggestion: (s) => set({ routingSuggestion: s }),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   loadSession: (id, messages, personaId, model) =>

@@ -7,6 +7,7 @@ import { ToolsDock } from "@/components/panels/ToolsDock";
 import { ShieldCheck } from "lucide-react";
 import { AuthIndicator } from "./auth/AuthIndicator";
 import { ResearchIndicator } from "./research/ResearchIndicator";
+import { RoutingIndicator } from "./router/RoutingIndicator";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -333,6 +334,9 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         {/* Phase 10 (2026-05-28) — research pipeline state for the
             most recent assistant turn (OFF/LIVE/CACHED/FAILED). */}
         <ResearchIndicator />
+        {/* Phase 9 (router) — persona-routing suggestion for the most
+            recent query. Suggestion only; never auto-switches. */}
+        <RoutingIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}

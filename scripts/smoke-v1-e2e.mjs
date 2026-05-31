@@ -295,6 +295,38 @@ try {
     console.log("  [FAIL] F: chain file missing");
   }
 
+  // === G. abort() error-path regression (Phase 9 bugfix) ===
+  // The chat route's local abort() wrapper used to call ITSELF, infinitely
+  // recursing and stack-overflowing on every error-return path. A bad
+  // request must come back as a clean 400 JSON error — fast, not a hang
+  // and not a 500. We send a valid message but omit `model`, which trips
+  // `return abort(400, "model is required")` early in the handler.
+  console.log("\n=== G. /api/chat abort() error path (no recursion/hang) ===");
+  const gStart = Date.now();
+  const gRes = await req("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      messages: [{ role: "user", content: "hi" }],
+      personaId: "bartimaeus",
+      // model intentionally omitted → must hit abort(400)
+    }),
+    timeoutMs: 15_000,
+  });
+  const gMs = Date.now() - gStart;
+  check("G1  abort path responded (no hang)", gRes.ok, gRes.ok ? "" : `(${gRes.error})`);
+  if (gRes.ok) {
+    check("G1  status 400 (not 500/stack-overflow)", gRes.res.status === 400, `got ${gRes.res.status}`);
+    check("G1  responded fast (< 5s, not a recursion hang)", gMs < 5000, `${gMs}ms`);
+    let gBody = null;
+    try { gBody = await gRes.res.json(); } catch { /* not JSON → fail below */ }
+    check(
+      "G2  body is a JSON error mentioning the missing model",
+      !!gBody && typeof gBody.error === "string" && /model/i.test(gBody.error),
+      gBody?.error ? `"${gBody.error}"` : "(no error field)"
+    );
+  }
+
 } catch (e) {
   fail++;
   failures.push(`fatal: ${e instanceof Error ? e.message : String(e)}`);

@@ -21,7 +21,7 @@ import {
   type ChatMessage,
   type CitedHit,
 } from "@/lib/store";
-import { PERSONA_BY_ID } from "@/lib/personas";
+import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { chatToMarkdown, exportFilename } from "@/lib/chat-export";
 
 function makeId(): string {
@@ -316,6 +316,11 @@ interface OllamaStreamLine {
   quality?: string | null;
   confidence?: number | null;
   cachedAt?: string | null;
+  // Phase 9 (router) — routing event (leading frame). Suggestion only.
+  recommended?: string | null;
+  currentPersona?: string | null;
+  complexity?: "low" | "high";
+  surface?: boolean;
 }
 
 export function ChatPane() {
@@ -630,6 +635,23 @@ export function ChatPane() {
                 quality: data.quality ?? null,
                 confidence: data.confidence ?? null,
                 cachedAt: data.cachedAt ?? null,
+              });
+              continue;
+            }
+            if (data?.type === "routing") {
+              // Phase 9 (router) — suggestion only. The chat route
+              // emits this as the FIRST frame. We record it for the
+              // HUD; we NEVER auto-switch the persona (manual choice
+              // always wins). The HUD shows "Routing to X" only when
+              // surface===true (cleared the gate AND differs from the
+              // active persona).
+              useArgos.getState().setRoutingSuggestion({
+                recommended: (data.recommended as PersonaId | null) ?? null,
+                confidence: data.confidence ?? 0,
+                currentPersona:
+                  (data.currentPersona as PersonaId | null) ?? null,
+                complexity: data.complexity ?? "low",
+                surface: data.surface === true,
               });
               continue;
             }

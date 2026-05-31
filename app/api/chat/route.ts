@@ -6,6 +6,10 @@ import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase } from "@/lib/ollama-config";
+// Phase 9 (router) — persona auto-routing suggestion. The chat path
+// uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
+// adds zero latency and never calls a model. Suggestion-only.
+import { classifyByKeyword, ROUTE_CONFIDENCE_THRESHOLD } from "@/lib/persona-router";
 // Phase 9 — persistent memory. Retrieval injects context into the
 // system prompt; extractor runs async after the stream completes.
 // All memory operations are wrapped in try/catch — memory failures
@@ -233,7 +237,13 @@ export async function POST(req: NextRequest) {
     ...args: Parameters<typeof jsonError>
   ) => {
     endInFlight();
-    return abort(...args);
+    // BUGFIX (Phase 9, 2026-05-31): this previously called `abort(...args)`
+    // — itself — which infinitely recursed and stack-overflowed on EVERY
+    // error-return path (the happy path never hits abort, which is why
+    // smokes passed). Must delegate to jsonError, which builds the actual
+    // Response. The endInFlight() above keeps the Phase 11 in-flight
+    // counter balanced on error exits.
+    return jsonError(...args);
   };
 
   let body: ChatRequestBody;
@@ -566,6 +576,44 @@ export async function POST(req: NextRequest) {
     citationCount: researchReport?.citations.length ?? 0,
   };
 
+  // Phase 9 (router) — persona-routing suggestion. KEYWORD-ONLY here:
+  // pure CPU string scoring, sub-millisecond, NO model call → zero
+  // added latency on the chat happy path. Suggestion-only: the persona
+  // the user picked still answers THIS turn; we only surface a "Routing
+  // to X" hint when confidence clears the gate AND it differs from the
+  // current persona. Fully wrapped so a router bug can never break chat.
+  let routingEvent: {
+    type: "routing";
+    recommended: string | null;
+    confidence: number;
+    currentPersona: string;
+    complexity: "low" | "high";
+    surface: boolean;
+  };
+  try {
+    const r = classifyByKeyword(userText);
+    routingEvent = {
+      type: "routing",
+      recommended: r.recommended,
+      confidence: r.confidence,
+      currentPersona: body.personaId,
+      complexity: r.complexity,
+      surface:
+        r.recommended !== null &&
+        r.recommended !== body.personaId &&
+        r.confidence >= ROUTE_CONFIDENCE_THRESHOLD,
+    };
+  } catch {
+    routingEvent = {
+      type: "routing",
+      recommended: null,
+      confidence: 0,
+      currentPersona: body.personaId,
+      complexity: "low",
+      surface: false,
+    };
+  }
+
   const reader = upstream.body.getReader();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -602,6 +650,17 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controllerInner) {
+      // Phase 9 (router) — emit the routing suggestion as the FIRST
+      // frame so the HUD can show "Routing to X" promptly (it's a hint
+      // about THIS turn's query). Leading, not tail. Guarded so the
+      // hint frame can never interrupt the model stream that follows.
+      try {
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(routingEvent)}\n`)
+        );
+      } catch {
+        /* hint frame is best-effort; ignore */
+      }
       let receivedAny = false;
       try {
         while (true) {
