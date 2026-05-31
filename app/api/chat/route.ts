@@ -33,6 +33,10 @@ import type { ResearchReport } from "@/lib/research/types";
 // Phase 11 — in-flight chat tracking + scheduler boot + post-hook.
 import { begin as beginInFlight, end as endInFlight } from "@/lib/chat/inflight";
 import { ensureSchedulerStarted } from "@/lib/research/scheduler";
+// Phase 10 Heartbeat — ambient autonomous dispatcher. Booted here too
+// (in addition to the launcher curl + status route) so it starts on
+// first chat in dev even without the launcher.
+import { ensureHeartbeatStarted } from "@/lib/heartbeat";
 import { afterReport } from "@/lib/research/afterReport";
 
 // Module-level init kicker — runs once per process lifetime when this
@@ -56,6 +60,13 @@ void ensureSchedulerStarted().catch((e) => {
   console.warn(
     `[chat] scheduler boot failed: ${(e as Error).message}`
   );
+});
+
+// Phase 10 Heartbeat — boot the ambient dispatcher. No-op when
+// settings.heartbeat.enabled is false. Idempotent.
+void ensureHeartbeatStarted().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(`[chat] heartbeat boot failed: ${(e as Error).message}`);
 });
 
 export const runtime = "nodejs";

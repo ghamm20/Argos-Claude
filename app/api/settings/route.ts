@@ -35,6 +35,8 @@ interface SettingsPostBody {
   researchWatchlist?: string[];
   researchAlertConfidenceThreshold?: number;
   researchArxivTopics?: string[];
+  // Phase 10 Heartbeat — ambient dispatcher toggle + cadence.
+  heartbeat?: Partial<{ enabled: boolean; intervalMinutes: number }>;
 }
 
 export async function POST(req: NextRequest) {
@@ -166,6 +168,35 @@ export async function POST(req: NextRequest) {
       );
     }
     patch.researchSchedule = merged;
+  }
+
+  // Phase 10 Heartbeat — merge + validate.
+  if (body.heartbeat !== undefined) {
+    if (typeof body.heartbeat !== "object" || body.heartbeat === null) {
+      return Response.json(
+        { error: "heartbeat must be an object" },
+        { status: 400 }
+      );
+    }
+    const current = (await readSettings()).heartbeat;
+    const merged = { ...current, ...body.heartbeat };
+    if (typeof merged.enabled !== "boolean") {
+      return Response.json(
+        { error: "heartbeat.enabled must be a boolean" },
+        { status: 400 }
+      );
+    }
+    if (
+      typeof merged.intervalMinutes !== "number" ||
+      merged.intervalMinutes < 1 ||
+      !Number.isFinite(merged.intervalMinutes)
+    ) {
+      return Response.json(
+        { error: "heartbeat.intervalMinutes must be a number ≥ 1" },
+        { status: 400 }
+      );
+    }
+    patch.heartbeat = merged;
   }
   if (body.researchWatchlist !== undefined) {
     if (

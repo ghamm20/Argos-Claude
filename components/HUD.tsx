@@ -8,6 +8,7 @@ import { ShieldCheck } from "lucide-react";
 import { AuthIndicator } from "./auth/AuthIndicator";
 import { ResearchIndicator } from "./research/ResearchIndicator";
 import { RoutingIndicator } from "./router/RoutingIndicator";
+import { HeartbeatIndicator } from "./heartbeat/HeartbeatIndicator";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -337,6 +338,8 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         {/* Phase 9 (router) — persona-routing suggestion for the most
             recent query. Suggestion only; never auto-switches. */}
         <RoutingIndicator />
+        {/* Phase 10 (heartbeat) — ambient autonomous tick status. */}
+        <HeartbeatIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}

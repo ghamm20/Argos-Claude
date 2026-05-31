@@ -8,9 +8,17 @@ import { VaultSection } from "./settings/VaultSection";
 import { VoiceSection } from "./settings/VoiceSection";
 import { AboutSection } from "./settings/AboutSection";
 import { AuthSection } from "./settings/AuthSection";
+import { HeartbeatSection } from "./settings/HeartbeatSection";
 import type { RuntimeInfo } from "@/lib/runtime-info";
 
-type SectionId = "model" | "personas" | "vault" | "voice" | "auth" | "about";
+type SectionId =
+  | "model"
+  | "personas"
+  | "vault"
+  | "voice"
+  | "heartbeat"
+  | "auth"
+  | "about";
 
 interface SectionProps {
   id: SectionId;
@@ -28,6 +36,7 @@ const SECTIONS: SectionProps[] = [
   { id: "personas", label: "Personas" },
   { id: "vault", label: "Vault" },
   { id: "voice", label: "Voice" },
+  { id: "heartbeat", label: "Heartbeat" },
   { id: "about", label: "About" },
 ];
 
@@ -76,6 +85,7 @@ export function SettingsCenterPane({
           {active === "personas" && <PersonaSection />}
           {active === "vault" && <VaultSection />}
           {active === "voice" && <VoiceSection />}
+          {active === "heartbeat" && <HeartbeatSection />}
           {active === "auth" && <AuthSection />}
           {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>

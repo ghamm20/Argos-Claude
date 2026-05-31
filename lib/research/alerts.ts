@@ -120,6 +120,81 @@ function formBody(params: Record<string, string | undefined>): string {
 }
 
 /**
+ * Low-level Pushover send primitive. Reads credentials from settings,
+ * short-circuits cleanly when they're unset, and POSTs the message.
+ * Fire-and-forget: never throws; logs on failure.
+ *
+ * Phase 10 Heartbeat (2026-05-31): extracted from sendAlert() so other
+ * subsystems (the heartbeat dispatcher) reuse the EXACT same send path
+ * — credential check, form encoding, timeout, error handling — without
+ * re-implementing it. sendAlert() builds its research message and
+ * delegates here.
+ */
+export async function pushoverSend(content: {
+  title: string;
+  message: string;
+  url?: string;
+  urlTitle?: string;
+  priority?: string;
+}): Promise<{ sent: boolean; reason: string }> {
+  const settings = await readSettings().catch(() => null);
+  if (!settings) {
+    return { sent: false, reason: "settings unreadable" };
+  }
+  const userKey = settings.operatorPushoverUserKey;
+  const token = settings.operatorPushoverApiToken;
+  if (!userKey || !token) {
+    return { sent: false, reason: "Pushover credentials not configured" };
+  }
+
+  const params = {
+    token,
+    user: userKey,
+    title: content.title,
+    message:
+      content.message.length > 1023
+        ? content.message.slice(0, 1020) + "…"
+        : content.message,
+    url: content.url,
+    url_title: content.urlTitle,
+    priority: content.priority ?? "0", // Pushover normal priority
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PUSHOVER_TIMEOUT_MS);
+  try {
+    const res = await fetch(PUSHOVER_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: formBody(params),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[research/alerts] Pushover HTTP ${res.status}: ${errText.slice(0, 200)}`
+      );
+      return { sent: false, reason: `pushover ${res.status}` };
+    }
+    return { sent: true, reason: "alert delivered" };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[research/alerts] Pushover fetch failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
+    return {
+      sent: false,
+      reason: `network: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Send a Pushover alert for a research report. Fire-and-forget:
  * never throws; logs on failure. Skips silently when keys are unset
  * (caller can still log the decision).
@@ -156,53 +231,18 @@ export async function sendAlert(
   }
 
   const body = buildMessage(report);
-  const params = {
-    token,
-    user: userKey,
+  const res = await pushoverSend({
     title: body.title,
     message: body.message,
     url: body.url,
-    url_title: body.url_title,
-    priority: "0", // Pushover normal priority
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PUSHOVER_TIMEOUT_MS);
-  try {
-    const res = await fetch(PUSHOVER_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: formBody(params),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[research/alerts] Pushover HTTP ${res.status}: ${errText.slice(0, 200)}`
-      );
-      return { sent: false, reason: `pushover ${res.status}` };
-    }
-    return {
-      sent: true,
-      reason: opts.reasonOverride ?? "alert delivered",
-    };
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[research/alerts] Pushover fetch failed: ${
-        e instanceof Error ? e.message : String(e)
-      }`
-    );
-    return {
-      sent: false,
-      reason: `network: ${e instanceof Error ? e.message : String(e)}`,
-    };
-  } finally {
-    clearTimeout(timer);
+    urlTitle: body.url_title,
+    priority: "0",
+  });
+  // Preserve sendAlert's original contract: custom reason on success.
+  if (res.sent) {
+    return { sent: true, reason: opts.reasonOverride ?? "alert delivered" };
   }
+  return res;
 }
 
 /** Check whether Pushover is configured. Used by Tools UI to show

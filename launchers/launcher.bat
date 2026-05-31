@@ -215,6 +215,14 @@ echo Auto-ingest check (vault/dropbox)...
 curl -fs --max-time 60 -X POST http://127.0.0.1:%NEXT_PORT%/api/vault/auto-ingest 1>>"%LAUNCHER_LOG%" 2>>"%LAUNCHER_LOG%"
 
 REM ============================================================
+REM  Phase 10: heartbeat boot. Fire-and-forget GET — loads the
+REM  heartbeat module so ensureHeartbeatStarted() runs at launch.
+REM  No-op unless settings.heartbeat.enabled is true. Never blocks.
+REM ============================================================
+echo Heartbeat boot (phase 10)...
+curl -fs --max-time 10 http://127.0.0.1:%NEXT_PORT%/api/heartbeat/status 1>>"%LAUNCHER_LOG%" 2>>"%LAUNCHER_LOG%"
+
+REM ============================================================
 REM  Phase 5: voice presence-check.
 REM  Pure read-only probe — never spawns the binaries. If either
 REM  whisper or kokoro is missing, the UI hides its button + the

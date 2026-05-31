@@ -16,6 +16,14 @@ export interface ResearchScheduleConfig {
   arxivMinutes: number;
 }
 
+/** Phase 10 Heartbeat (2026-05-31) — ambient autonomous tick config.
+ *  enabled:false keeps the background heartbeat off (opt-in, like the
+ *  research scheduler). intervalMinutes is the wake cadence (default 30). */
+export interface HeartbeatConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+}
+
 export interface PersistedSettings {
   version: number;
   defaultPersona: PersonaId;
@@ -53,6 +61,8 @@ export interface PersistedSettings {
   /** Phase 11 — arXiv topic queries (default 4). Each fires its own
    *  query against export.arxiv.org. */
   researchArxivTopics: string[];
+  /** Phase 10 Heartbeat (2026-05-31) — ambient autonomous tick. */
+  heartbeat: HeartbeatConfig;
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -93,6 +103,12 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     "RAG",
     "AI security",
   ],
+  // Phase 10 Heartbeat: disabled until the operator opts in; 30-minute
+  // default cadence per directive.
+  heartbeat: {
+    enabled: false,
+    intervalMinutes: 30,
+  },
 };
 
 export function configDir(): string {
@@ -148,6 +164,12 @@ export async function readSettings(): Promise<PersistedSettings> {
         Array.isArray(parsed.researchArxivTopics) && parsed.researchArxivTopics.length > 0
           ? parsed.researchArxivTopics.filter((s): s is string => typeof s === "string")
           : DEFAULT_SETTINGS.researchArxivTopics,
+      // Phase 10 Heartbeat forward-compat: missing → default (disabled,
+      // 30m). Older settings.json files load cleanly.
+      heartbeat: {
+        ...DEFAULT_SETTINGS.heartbeat,
+        ...(parsed.heartbeat ?? {}),
+      },
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {
