@@ -93,6 +93,41 @@ async function waitForServer(timeoutMs = 60_000) {
   return false;
 }
 
+// Warm Ollama before the live smokes. A freshly-started dev server has no
+// model loaded, so the first smoke would otherwise race a cold model load:
+// cold nomic-embed-text yields empty/degraded vault embeddings → 0 search
+// hits (smoke-vault), and a cold chat model can deflect or time out
+// (smoke-h2/retrieval). The chat model is resolved from /api/system/info so
+// we warm exactly what the smokes will use. Best-effort — a warm failure
+// never fails the run; the smokes themselves surface any real problem.
+async function warmLive() {
+  process.stdout.write(`  warming ollama (chat + embeddings)...\n`);
+  try {
+    const settings = await fetch(`${BASE}/api/settings`, {
+      signal: AbortSignal.timeout(10_000),
+    }).then((r) => r.json());
+    const chatModel = settings?.defaultModel;
+    if (chatModel) {
+      await fetch(`${BASE}/api/model/warm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: chatModel }),
+        signal: AbortSignal.timeout(120_000),
+      }).catch(() => {});
+    }
+    // Warm nomic-embed-text by embedding a throwaway query (vault search
+    // embeds the query before scoring).
+    await fetch(`${BASE}/api/vault/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "warmup", topK: 1 }),
+      signal: AbortSignal.timeout(60_000),
+    }).catch(() => {});
+  } catch {
+    /* best-effort warm; smokes will surface real failures */
+  }
+}
+
 process.stdout.write(`check-full — argos full verification\n`);
 process.stdout.write(`${"─".repeat(64)}\n`);
 
@@ -149,6 +184,8 @@ if (!SKIP_LIVE) {
   } else {
     const t1 = Date.now() - t0;
     process.stdout.write(`  dev server ready (t+${t1}ms)\n`);
+
+    await warmLive();
 
     const okH2 = await runStaticLive("smoke-h2 (chat)", "node", [
       "scripts/smoke-h2.mjs",
