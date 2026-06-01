@@ -335,7 +335,7 @@ const sizes = {};
 await ensureDir(ABS_TARGET);
 
 // 2) Launchers at root
-console.log("[1/9] Copying launchers...");
+console.log("[1/11] Copying launchers...");
 sizes.launchers = 0;
 for (const name of ["launcher.bat", "launcher.command", "launcher.sh"]) {
   const src = path.join(ROOT, "launchers", name);
@@ -347,7 +347,7 @@ for (const name of ["launcher.bat", "launcher.command", "launcher.sh"]) {
 // 3) bin/ — copy the FULL Ollama install dir, not just ollama.exe
 //    (lib/ollama/*.dll is required at runtime). Result: F:\ARGOS\bin\
 //    mirrors %LOCALAPPDATA%\Programs\Ollama\ exactly.
-console.log("[2/9] Copying bin/ (full Ollama install tree)...");
+console.log("[2/11] Copying bin/ (full Ollama install tree)...");
 await ensureDir(path.join(ABS_TARGET, "bin"));
 sizes.bin = 0;
 if (ollamaWinAvailable) {
@@ -357,7 +357,7 @@ if (ollamaWinAvailable) {
 }
 
 // 4) app/.next
-console.log("[3/9] Copying app/.next/ (production build)...");
+console.log("[3/11] Copying app/.next/ (production build)...");
 const APP_DST = path.join(ABS_TARGET, "app");
 await ensureDir(APP_DST);
 sizes.next = await copyTree(NEXT_DIR, path.join(APP_DST, ".next"), {
@@ -365,7 +365,7 @@ sizes.next = await copyTree(NEXT_DIR, path.join(APP_DST, ".next"), {
 });
 
 // 5) app/node_modules — only runtime deps, with deny-list filter
-console.log("[4/9] Copying app/node_modules/ (runtime deps only)...");
+console.log("[4/11] Copying app/node_modules/ (runtime deps only)...");
 const runtimeDeps = Object.keys(PKG.dependencies ?? {});
 sizes.node_modules = 0;
 await ensureDir(path.join(APP_DST, "node_modules"));
@@ -412,7 +412,7 @@ if (failedCopies.length > 0) {
 }
 
 // 6) app/package.json + lockfile
-console.log("[5/9] Copying app/package.json + lock + next.config.mjs...");
+console.log("[5/11] Copying app/package.json + lock + next.config.mjs...");
 sizes.appmeta = 0;
 for (const f of [
   "package.json",
@@ -429,7 +429,7 @@ for (const f of [
 }
 
 // 7) models/
-console.log("[6/9] Copying models/ ...");
+console.log("[6/11] Copying models/ ...");
 sizes.models = 0;
 if (SKIP_MODELS) {
   console.log("    [skip] --skip-models specified");
@@ -443,7 +443,7 @@ if (SKIP_MODELS) {
 }
 
 // 8) Empty runtime dirs
-console.log("[7/9] Creating runtime dirs (vault, logs, tmp, config)...");
+console.log("[7/11] Creating runtime dirs (vault, logs, tmp, config)...");
 for (const d of [
   ["vault", "docs"],
   ["vault", "index", "chunks"],
@@ -469,7 +469,7 @@ if (!DRY_RUN) {
 }
 
 // 9) docs/, methodology/, README.txt
-console.log("[8/9] Copying docs/ + methodology/ (read-only doctrine + audit trail)...");
+console.log("[8/11] Copying docs/ + methodology/ (read-only doctrine + audit trail)...");
 sizes.docs = 0;
 sizes.methodology = 0;
 if (existsSync(path.join(ROOT, "docs"))) {
@@ -522,6 +522,33 @@ if (!DRY_RUN) {
 }
 sizes.readme = readme.length;
 
+// 9) skills/ — Markdown dispatcher skills. These live at ARGOS_ROOT (outside
+//    .next), so the main bundle copy misses them. The dispatcher reads them on
+//    demand; without them it degrades gracefully (no skill injection).
+console.log("[9/11] Copying skills directory...");
+sizes.skills = 0;
+const SKILLS_SRC = path.join(ROOT, "skills");
+if (existsSync(SKILLS_SRC)) {
+  sizes.skills = await copyTree(SKILLS_SRC, path.join(ABS_TARGET, "skills"));
+} else {
+  console.log("    [warn] no skills/ directory at source — skipping (dispatcher degrades gracefully without skills)");
+}
+
+// 10) memory seed — MEMORY.md operator profile. Also lives at ARGOS_ROOT; the
+//     dispatcher reads it for situational awareness and appends runtime entries
+//     beneath it. Seed only — never overwrites an existing target MEMORY.md is
+//     not a concern here since fresh migrations target an empty payload, but we
+//     copy unconditionally (the seed is the canonical starting state).
+console.log("[10/11] Seeding memory/MEMORY.md...");
+sizes.memory = 0;
+const MEMORY_SRC = path.join(ROOT, "MEMORY.md");
+if (existsSync(MEMORY_SRC)) {
+  await ensureDir(path.join(ABS_TARGET, "memory"));
+  sizes.memory = await copyTree(MEMORY_SRC, path.join(ABS_TARGET, "memory", "MEMORY.md"));
+} else {
+  console.log("    [warn] no MEMORY.md at source — skipping memory seed");
+}
+
 // -------------------------- post-migration smoke --------------------
 // v2 hardening: confirm the copied ollama binary can at least answer
 // --version. Doesn't validate `serve` (which depends on lib/ being
@@ -543,7 +570,7 @@ if (!DRY_RUN && !SKIP_SMOKE) {
 }
 
 // -------------------------- summary --------------------------
-console.log("\n[9/9] Verifying payload...");
+console.log("\n[11/11] Verifying payload...");
 let payloadBytes = 0;
 if (!DRY_RUN) {
   payloadBytes = await dirSize(ABS_TARGET);
@@ -552,7 +579,7 @@ if (!DRY_RUN) {
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\nMigration ${DRY_RUN ? "DRY-RUN" : "complete"} in ${elapsed}s`);
 console.log("=".repeat(64));
-const order = ["launchers", "bin", "next", "node_modules", "appmeta", "models", "docs", "methodology"];
+const order = ["launchers", "bin", "next", "node_modules", "appmeta", "models", "docs", "methodology", "skills", "memory"];
 for (const k of order) {
   const v = sizes[k] ?? 0;
   console.log(`  ${k.padEnd(14)} ${fmtMB(v).padStart(12)}`);
