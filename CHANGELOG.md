@@ -2,6 +2,113 @@
 
 Reverse-chronological. Phase letters reference the build session's audit trail (see `methodology/eyes-on-h*.md` and `methodology/thesis-evidence.md`).
 
+## [2.0.0] — 2026-05-31
+
+The autonomous-agent release. v1.0 was a local AI chat workstation; v2.0 turns
+ARGOS into an event-driven, self-routing, alerting agent platform — persona
+routing, an ambient heartbeat, a native OpenClaw-style dispatcher with a
+Markdown skills + memory layer, dual-channel alerting, and a hardened webhook —
+all still 100 % local and USB-native. Per-phase detail lives in the
+`PHASE_*_REPORT.md` files in the repo root.
+
+### Added
+
+**Phase 9 — Persona Router** (`PHASE_9_REPORT.md`)
+- `lib/persona-router.ts` — AgenticSeek-inspired keyword classifier that maps an
+  inbound query to the right persona (security→Bartimaeus, research→Sage,
+  ops→Bobby, comms→Juniper). Total/never-throws; `GET|POST /api/route`.
+
+**Phase 9 — Operator Memory** (`PHASE9_MEMORY_REPORT.md`)
+- Per-persona JSONL memory store (`data/memory/<persona>/*.jsonl`) with audit
+  chaining, 5 extraction heuristics, prompt-injection retriever, Memory page UI,
+  and a seeded operator profile.
+
+**Phase 10 — Heartbeat Dispatcher** (`PHASE_10_HEARTBEAT_REPORT.md`)
+- Ambient autonomous tick: on each interval ARGOS reads `HEARTBEAT.md`, asks the
+  triage model (Bobby) if anything needs attention, and fires an alert only when
+  actionable — silent otherwise. Settings toggle + HUD indicator + manual
+  trigger. Module-singleton scheduler (setInterval + unref + active-tick guard).
+
+**Phase 10 — Research Engine** (`PHASE10_RESEARCH_REPORT.md`)
+- Planner → searcher → crawler → factchecker → reporter pipeline with a
+  one-shot feedback loop, multi-provider fallback (DDG/SearXNG/Brave/Reddit),
+  weather/news/web intents, caching, and a quality verdict
+  (FAILED/PARTIAL/SUFFICIENT).
+
+**Phase 11 — Research Scheduler & Alerts** (`PHASE11_RESEARCH_REPORT.md`)
+- Background research streams (weather/news/ai_updates/arxiv), Pushover alerts
+  with watchlist + confidence gating, research→Phase-9-memory writer, in-flight
+  chat gate, and the scheduler admin API.
+
+**Phase 11 — OpenClaw Dispatcher** (`PHASE_11_DISPATCHER_REPORT.md`)
+- `lib/dispatcher.ts` — native (no OpenClaw install, TypeScript only) event
+  dispatcher: classify → route to persona → act over Ollama → log to Markdown
+  memory → alert if actionable / suppress on `DISPATCH_OK`. Graceful (Ollama
+  down → logged, never crashes); atomic temp+fsync+rename memory writes.
+- **Markdown memory** layer: `memory/MEMORY.md` (append-only) + per-day
+  `memory/YYYY-MM-DD.md`.
+- **Markdown skills** system: `skills/*.md` read on demand and injected into the
+  persona prompt — 7 skills (security-triage, threat-assessment,
+  research-synthesis, vault-research, ops-dispatch, schedule-ops, comms-draft).
+  Each persona gets an ordered skill list (security events inject both
+  security-triage **and** threat-assessment).
+- `POST|GET /api/dispatch`, HUD "Dispatcher" row, heartbeat→dispatcher wiring.
+
+**Operator Auth** (`OPERATOR_AUTH_REPORT.md`)
+- PIN gate, dual-mode personas (guest vs operator system prompts), memory
+  suppression for guests, HUD GUEST/OPERATOR indicator.
+
+**Voice activation** (`PHASE_7_REPORT.md`, `PHASE_7B_REPORT.md`, `VOICE_*`)
+- Voice binaries activated; Piper TTS; mic + speaker device selection; STT
+  silence trim; recording indicator; per-message playback.
+
+**Persona & vault refinement**
+- Bobby v2 (approval-gate UI), Bartimaeus v2.1, canon-identity handling
+  (`CANON_IDENTITY_REPORT.md`), long-form vault chunking + reingest.
+
+**Alerting — dual channel** (overnight block, this release)
+- Twilio SMS fallback (`twilioSend`, raw fetch — no new npm dependency):
+  Pushover primary → Twilio SMS when Pushover is unset or fails. Settings
+  "Alerts (SMS)" section + four `twilio*` settings fields.
+
+**Hardened dispatch webhook** (overnight block)
+- `lib/dispatch-guard.ts` — per-IP rate limit (10/min → 429), strict input
+  validation, `X-Dispatch-Id` idempotency (5-min cache), append-only audit log
+  of every attempt.
+
+### Changed
+
+- **D: migration** (`MIGRATION_REPORT.md`) — full 76 GB payload relocated from
+  the Desktop/H: layout to `D:\ARGOS` (NTFS); launcher derives `OLLAMA_MODELS`
+  from `ARGOS_ROOT`; desktop shortcut updated (`C:\Users\Gordy\Desktop\ARGOS.lnk`
+  → Target `D:\ARGOS\launcher.bat`, Start-in `D:\ARGOS`).
+- **Runtime artifacts gitignored** — `data/research/cache.json`, `data/memory/`,
+  `memory/`, `state/`, `_diag_*` now ignored (Phase 9 seed data preserved via
+  negation).
+
+### Fixed
+
+- **libuv teardown smokes** (`4910aff`) — model-resolution + vault-skip rewrites
+  for h2/retrieval/vault.
+- **phase11-research-smoke** — deterministic SUFFICIENT-report drive across
+  crawl-friendly streams + honest skip when providers degrade (was an
+  environmental false-fail, not an async race).
+
+### Verification — quality gates fully green
+
+- `check:full` **11/11 PASS** — static 7/7 (lint, typecheck, build,
+  verify-argos, audit-stub-honesty, audit-production-deps, smoke-launcher) +
+  live 4/4 (h2, settings, vault, retrieval). See `CHECK_FULL_REPORT.md`.
+- `smoke-dispatcher` **42/42**, `smoke-heartbeat` **26/26**,
+  `phase11-research-smoke` PASS, `smoke-persona-router` **14/14**,
+  `phase9-memory` **18/18**, `auth-smoke` **18/18**.
+- Seven USB-native doctrine rules **7/7**. No new npm dependencies. No Python.
+
+### Tags
+- `v2.0.0` (this release) — dispatcher, router, heartbeat, skills, Markdown memory.
+
+---
+
 ## [1.0.0] — 2026-05-24
 
 The v1.0 lockdown. Tag pending owner approval; this entry reflects the freeze state.
