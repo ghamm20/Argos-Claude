@@ -18,6 +18,7 @@ import type { ResearchReport } from "./types";
 
 const PUSHOVER_ENDPOINT = "https://api.pushover.net/1/messages.json";
 const PUSHOVER_TIMEOUT_MS = 8000;
+const TWILIO_TIMEOUT_MS = 8000;
 
 /** Criteria check — pure function over the report + settings. */
 export interface AlertDecision {
@@ -130,23 +131,12 @@ function formBody(params: Record<string, string | undefined>): string {
  * re-implementing it. sendAlert() builds its research message and
  * delegates here.
  */
-export async function pushoverSend(content: {
-  title: string;
-  message: string;
-  url?: string;
-  urlTitle?: string;
-  priority?: string;
-}): Promise<{ sent: boolean; reason: string }> {
-  const settings = await readSettings().catch(() => null);
-  if (!settings) {
-    return { sent: false, reason: "settings unreadable" };
-  }
-  const userKey = settings.operatorPushoverUserKey;
-  const token = settings.operatorPushoverApiToken;
-  if (!userKey || !token) {
-    return { sent: false, reason: "Pushover credentials not configured" };
-  }
-
+/** Raw Pushover POST. Assumes credentials are present. */
+async function doPushoverPost(
+  userKey: string,
+  token: string,
+  content: { title: string; message: string; url?: string; urlTitle?: string; priority?: string }
+): Promise<{ sent: boolean; reason: string }> {
   const params = {
     token,
     user: userKey,
@@ -159,7 +149,6 @@ export async function pushoverSend(content: {
     url_title: content.urlTitle,
     priority: content.priority ?? "0", // Pushover normal priority
   };
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PUSHOVER_TIMEOUT_MS);
   try {
@@ -172,26 +161,129 @@ export async function pushoverSend(content: {
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       // eslint-disable-next-line no-console
-      console.warn(
-        `[research/alerts] Pushover HTTP ${res.status}: ${errText.slice(0, 200)}`
-      );
+      console.warn(`[research/alerts] Pushover HTTP ${res.status}: ${errText.slice(0, 200)}`);
       return { sent: false, reason: `pushover ${res.status}` };
     }
     return { sent: true, reason: "alert delivered" };
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[research/alerts] Pushover fetch failed: ${
-        e instanceof Error ? e.message : String(e)
-      }`
+      `[research/alerts] Pushover fetch failed: ${e instanceof Error ? e.message : String(e)}`
     );
-    return {
-      sent: false,
-      reason: `network: ${e instanceof Error ? e.message : String(e)}`,
-    };
+    return { sent: false, reason: `network: ${e instanceof Error ? e.message : String(e)}` };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Twilio SMS send primitive — mirrors pushoverSend's pattern (read creds
+ * from settings, short-circuit cleanly when unset, POST, never throw).
+ * Used as the fallback channel when Pushover is unavailable.
+ *
+ * `to` defaults to settings.twilioTo when omitted.
+ */
+export async function twilioSend(content: {
+  to?: string;
+  message: string;
+}): Promise<{ sent: boolean; reason: string }> {
+  const settings = await readSettings().catch(() => null);
+  if (!settings) {
+    return { sent: false, reason: "settings unreadable" };
+  }
+  const sid = settings.twilioAccountSid;
+  const authToken = settings.twilioAuthToken;
+  const from = settings.twilioFrom;
+  const to = content.to ?? settings.twilioTo;
+  if (!sid || !authToken || !from || !to) {
+    return { sent: false, reason: "Twilio credentials not configured" };
+  }
+
+  const endpoint = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`;
+  const auth = Buffer.from(`${sid}:${authToken}`).toString("base64");
+  // SMS hard cap is 1600 chars across segments; trim defensively.
+  const smsBody =
+    content.message.length > 1600 ? content.message.slice(0, 1597) + "…" : content.message;
+  const body = formBody({ From: from, To: to, Body: smsBody });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TWILIO_TIMEOUT_MS);
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${auth}`,
+      },
+      body,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      // eslint-disable-next-line no-console
+      console.warn(`[research/alerts] Twilio HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return { sent: false, reason: `twilio ${res.status}` };
+    }
+    return { sent: true, reason: "alert delivered via Twilio SMS" };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[research/alerts] Twilio fetch failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+    return { sent: false, reason: `twilio network: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Notification primitive: try Pushover first, fall back to Twilio SMS.
+ *
+ *   - Pushover configured + send OK            → delivered (Pushover)
+ *   - Pushover missing OR send fails, Twilio OK → delivered (Twilio SMS)
+ *   - both fail / both missing                  → { sent:false, reason } (logged, never throws)
+ *
+ * Fire-and-forget: never throws. Reused by sendAlert (research) and the
+ * dispatcher, so every alert path gets the same Pushover→Twilio fallback.
+ */
+export async function pushoverSend(content: {
+  title: string;
+  message: string;
+  url?: string;
+  urlTitle?: string;
+  priority?: string;
+}): Promise<{ sent: boolean; reason: string }> {
+  const settings = await readSettings().catch(() => null);
+  if (!settings) {
+    return { sent: false, reason: "settings unreadable" };
+  }
+
+  // 1) Pushover (primary).
+  let pushReason = "Pushover credentials not configured";
+  const userKey = settings.operatorPushoverUserKey;
+  const token = settings.operatorPushoverApiToken;
+  if (userKey && token) {
+    const r = await doPushoverPost(userKey, token, content);
+    if (r.sent) return r; // delivered via Pushover
+    pushReason = r.reason; // failed → try the fallback
+  }
+
+  // 2) Twilio SMS (fallback) — only when all four creds are present.
+  const twilioReady =
+    !!settings.twilioAccountSid &&
+    !!settings.twilioAuthToken &&
+    !!settings.twilioFrom &&
+    !!settings.twilioTo;
+  if (twilioReady) {
+    const sms = await twilioSend({ message: `${content.title}\n${content.message}` });
+    if (sms.sent) {
+      return { sent: true, reason: `Pushover unavailable (${pushReason}); ${sms.reason}` };
+    }
+    return { sent: false, reason: `pushover: ${pushReason}; twilio: ${sms.reason}` };
+  }
+
+  // 3) No channel delivered.
+  return { sent: false, reason: `${pushReason}; Twilio not configured` };
 }
 
 /**
@@ -210,15 +302,11 @@ export async function sendAlert(
   if (!settings) {
     return { sent: false, reason: "settings unreadable" };
   }
-  const userKey = settings.operatorPushoverUserKey;
-  const token = settings.operatorPushoverApiToken;
-  if (!userKey || !token) {
-    return {
-      sent: false,
-      reason: "Pushover credentials not configured",
-    };
-  }
 
+  // Criteria gate first (skipped for forceTest). Channel selection +
+  // credential checks are delegated to pushoverSend, which now handles
+  // the Pushover→Twilio fallback — so research alerts get SMS fallback
+  // too, not just the dispatcher.
   if (!opts.forceTest) {
     const decision = decideAlert(
       report,
@@ -240,7 +328,7 @@ export async function sendAlert(
   });
   // Preserve sendAlert's original contract: custom reason on success.
   if (res.sent) {
-    return { sent: true, reason: opts.reasonOverride ?? "alert delivered" };
+    return { sent: true, reason: opts.reasonOverride ?? res.reason };
   }
   return res;
 }
@@ -255,6 +343,22 @@ export async function isPushoverConfigured(): Promise<boolean> {
       s.operatorPushoverUserKey.length > 0 &&
       typeof s.operatorPushoverApiToken === "string" &&
       s.operatorPushoverApiToken.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Check whether the Twilio SMS fallback is fully configured (all four
+ *  fields). Used by the Settings/Tools UI + the test-alert endpoint. */
+export async function isTwilioConfigured(): Promise<boolean> {
+  try {
+    const s = await readSettings();
+    return (
+      !!s.twilioAccountSid &&
+      !!s.twilioAuthToken &&
+      !!s.twilioFrom &&
+      !!s.twilioTo
     );
   } catch {
     return false;

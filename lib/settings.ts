@@ -48,6 +48,13 @@ export interface PersistedSettings {
   // UI; never embedded in build.
   operatorPushoverUserKey: string | null;
   operatorPushoverApiToken: string | null;
+  // Task 5 (2026-05-31) — Twilio SMS fallback. When Pushover is unset
+  // or its send fails AND all four of these are present, alerts fall
+  // back to an SMS via Twilio. All optional (null = no fallback).
+  twilioAccountSid: string | null;
+  twilioAuthToken: string | null;
+  twilioFrom: string | null;
+  twilioTo: string | null;
   /** Phase 11 — scheduler config. enabled:false keeps the background
    *  timers off; enabled:true starts them on next chat-route boot. */
   researchSchedule: ResearchScheduleConfig;
@@ -88,6 +95,11 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // pre-populated with sane values per the directive.
   operatorPushoverUserKey: null,
   operatorPushoverApiToken: null,
+  // Task 5: Twilio SMS fallback disabled until operator supplies creds.
+  twilioAccountSid: null,
+  twilioAuthToken: null,
+  twilioFrom: null,
+  twilioTo: null,
   researchSchedule: {
     enabled: false,
     weatherMinutes: 30,
@@ -148,6 +160,22 @@ export async function readSettings(): Promise<PersistedSettings> {
         parsed.operatorPushoverApiToken === undefined
           ? DEFAULT_SETTINGS.operatorPushoverApiToken
           : parsed.operatorPushoverApiToken,
+      twilioAccountSid:
+        parsed.twilioAccountSid === undefined
+          ? DEFAULT_SETTINGS.twilioAccountSid
+          : parsed.twilioAccountSid,
+      twilioAuthToken:
+        parsed.twilioAuthToken === undefined
+          ? DEFAULT_SETTINGS.twilioAuthToken
+          : parsed.twilioAuthToken,
+      twilioFrom:
+        parsed.twilioFrom === undefined
+          ? DEFAULT_SETTINGS.twilioFrom
+          : parsed.twilioFrom,
+      twilioTo:
+        parsed.twilioTo === undefined
+          ? DEFAULT_SETTINGS.twilioTo
+          : parsed.twilioTo,
       researchSchedule: {
         ...DEFAULT_SETTINGS.researchSchedule,
         ...(parsed.researchSchedule ?? {}),

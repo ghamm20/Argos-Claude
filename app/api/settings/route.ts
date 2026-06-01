@@ -25,6 +25,11 @@ interface SettingsPostBody {
   // Pushover keys, etc.
   operatorPushoverUserKey?: string | null;
   operatorPushoverApiToken?: string | null;
+  // Task 5 — Twilio SMS fallback creds. Each independently patchable.
+  twilioAccountSid?: string | null;
+  twilioAuthToken?: string | null;
+  twilioFrom?: string | null;
+  twilioTo?: string | null;
   researchSchedule?: Partial<{
     enabled: boolean;
     weatherMinutes: number;
@@ -136,6 +141,19 @@ export async function POST(req: NextRequest) {
       );
     }
     patch.operatorPushoverApiToken = body.operatorPushoverApiToken;
+  }
+  // Task 5 — Twilio SMS fallback creds (each string | null).
+  for (const field of ["twilioAccountSid", "twilioAuthToken", "twilioFrom", "twilioTo"] as const) {
+    const v = body[field];
+    if (v !== undefined) {
+      if (v !== null && typeof v !== "string") {
+        return Response.json(
+          { error: `${field} must be a string or null` },
+          { status: 400 }
+        );
+      }
+      patch[field] = v;
+    }
   }
   if (body.researchSchedule !== undefined) {
     if (typeof body.researchSchedule !== "object" || body.researchSchedule === null) {

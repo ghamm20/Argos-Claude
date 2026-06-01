@@ -5,21 +5,24 @@
 // No criteria check (forceTest=true); skips silently when keys
 // aren't configured.
 
-import { sendAlert, isPushoverConfigured } from "@/lib/research/alerts";
+import { sendAlert, isPushoverConfigured, isTwilioConfigured } from "@/lib/research/alerts";
 import type { ResearchReport } from "@/lib/research/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
-  const configured = await isPushoverConfigured();
-  if (!configured) {
+  // Either channel counts as configured — an operator with only the Twilio
+  // SMS fallback set up can still test delivery.
+  const pushover = await isPushoverConfigured();
+  const twilio = await isTwilioConfigured();
+  if (!pushover && !twilio) {
     return Response.json(
       {
         ok: false,
         sent: false,
         reason:
-          "Pushover credentials not configured — set operatorPushoverUserKey + operatorPushoverApiToken in Settings",
+          "Pushover credentials not configured — set operatorPushoverUserKey + operatorPushoverApiToken (or the Twilio SMS fallback) in Settings",
       },
       { status: 200 }
     );
