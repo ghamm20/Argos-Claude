@@ -19,7 +19,7 @@
 // Usage: node scripts/smoke-dispatcher.mjs [--port 7797]
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, copyFileSync, readdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -103,11 +103,16 @@ function dispatch(type, content, mockResponse) {
 }
 
 const tmpRoot = mkdtempSync(join(tmpdir(), "argos-dispatcher-smoke-"));
-// Seed skills/ into the tmp ARGOS_ROOT so skill injection (skillUsed) is exercised.
+// Seed ALL skills/ into the tmp ARGOS_ROOT so multi-skill injection is
+// genuinely exercised (e.g. security events inject security-triage AND
+// threat-assessment). skillUsed remains the FIRST/primary skill, so the
+// per-persona skillUsed assertions below are unaffected.
 mkdirSync(join(tmpRoot, "skills"), { recursive: true });
-for (const s of ["security-triage", "research-synthesis", "ops-dispatch"]) {
-  const src = join(repoRoot, "skills", `${s}.md`);
-  if (existsSync(src)) copyFileSync(src, join(tmpRoot, "skills", `${s}.md`));
+const repoSkillsDir = join(repoRoot, "skills");
+if (existsSync(repoSkillsDir)) {
+  for (const f of readdirSync(repoSkillsDir).filter((f) => f.endsWith(".md"))) {
+    copyFileSync(join(repoSkillsDir, f), join(tmpRoot, "skills", f));
+  }
 }
 const memDir = join(tmpRoot, "memory");
 const memoryFile = join(memDir, "MEMORY.md");

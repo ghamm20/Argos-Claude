@@ -65,7 +65,8 @@ export interface DispatchResult {
   source: string;
   eventType: string;
   persona: PersonaId;
-  skillUsed: string | null; // skill filename, or null if none/missing
+  skillUsed: string | null; // PRIMARY skill filename (skillsUsed[0]), or null
+  skillsUsed: string[]; // ALL skill files injected into the prompt this event
   status: DispatchStatus;
   responseSnippet: string | null;
   alert: DispatchAlertPayload | null;
@@ -114,12 +115,19 @@ export function dispatcherStatePath(): string {
 
 // ----- routing -----
 
-// Persona → skill file. Juniper (comms) has no dedicated skill in the
-// starter set; it dispatches without one.
-const PERSONA_SKILL: Partial<Record<PersonaId, string>> = {
-  bartimaeus: "security-triage",
-  sage: "research-synthesis",
-  bobby: "ops-dispatch",
+// Persona → ordered skill list. The FIRST entry is the "primary" skill
+// (reported as result.skillUsed, for back-compat with consumers + the
+// dispatcher smoke); every skill in the list that loads is injected into the
+// system prompt. Security events get BOTH security-triage (is-it-actionable)
+// AND threat-assessment (how-bad/how-likely/how-sure). Each other persona
+// pairs its triage skill with a domain skill; Juniper — which had no skill in
+// the starter set — now gets comms-draft. Missing files are skipped
+// gracefully, so removing a skill never breaks a dispatch.
+const PERSONA_SKILLS: Partial<Record<PersonaId, string[]>> = {
+  bartimaeus: ["security-triage", "threat-assessment"],
+  sage: ["research-synthesis", "vault-research"],
+  bobby: ["ops-dispatch", "schedule-ops"],
+  juniper: ["comms-draft"],
 };
 
 // Explicit event-type → persona map (directive routing).
@@ -206,12 +214,25 @@ async function loadSkill(skillName: string | undefined): Promise<{ name: string;
   }
 }
 
+/** Load an ordered list of skills, preserving order, skipping any that are
+ *  missing. Used to inject multiple skills per persona (e.g. a security
+ *  event gets both security-triage and threat-assessment). */
+async function loadSkills(skillNames: string[] | undefined): Promise<Array<{ name: string; body: string }>> {
+  if (!skillNames || skillNames.length === 0) return [];
+  const loaded: Array<{ name: string; body: string }> = [];
+  for (const n of skillNames) {
+    const s = await loadSkill(n);
+    if (s) loaded.push(s);
+  }
+  return loaded;
+}
+
 // ----- the persona action (Ollama) -----
 
 function dispatchSystemPrompt(
   persona: PersonaId,
   event: DispatchEvent,
-  skill: { name: string; body: string } | null
+  skills: Array<{ name: string; body: string }>
 ): string {
   const name = PERSONA_BY_ID[persona]?.name ?? persona;
   const parts = [
@@ -221,7 +242,10 @@ function dispatchSystemPrompt(
     "If action is needed, reply with a short, specific, actionable summary (what + why + next step). No preamble.",
     "Be conservative — only flag genuinely actionable, time-sensitive items.",
   ];
-  if (skill) {
+  if (skills.length > 1) {
+    parts.push("", `You have ${skills.length} skills below; apply all of them.`);
+  }
+  for (const skill of skills) {
     parts.push("", `--- SKILL: ${skill.name} ---`, skill.body.trim(), "--- END SKILL ---");
   }
   return parts.join("\n");
@@ -230,7 +254,7 @@ function dispatchSystemPrompt(
 async function actWithPersona(
   persona: PersonaId,
   event: DispatchEvent,
-  skill: { name: string; body: string } | null
+  skills: Array<{ name: string; body: string }>
 ): Promise<string> {
   const model = PERSONA_BY_ID[persona]?.model;
   if (!model) throw new Error(`persona ${persona} has no model`);
@@ -243,7 +267,7 @@ async function actWithPersona(
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: dispatchSystemPrompt(persona, event, skill) },
+          { role: "system", content: dispatchSystemPrompt(persona, event, skills) },
           { role: "user", content: `[${event.type} event from ${event.source}]\n${event.content}` },
         ],
         stream: false,
@@ -300,7 +324,7 @@ function memoryEntry(result: DispatchResult, event: DispatchEvent): string {
   const lines: string[] = [
     `### ${time} — [${event.type}] → ${name}  (${result.status})`,
     `- **source:** ${event.source}`,
-    `- **skill:** ${result.skillUsed ?? "(none)"}`,
+    `- **skill:** ${result.skillsUsed.length > 0 ? result.skillsUsed.join(", ") : "(none)"}`,
     `- **event:** ${event.content.replace(/\s+/g, " ").slice(0, 400)}`,
   ];
   if (result.responseSnippet) {
@@ -414,7 +438,7 @@ export async function dispatchEvent(
   const ev: DispatchEvent = { type, content, source };
 
   const { persona, basis } = classifyDispatchPersona(type, content);
-  const skillName = PERSONA_SKILL[persona];
+  const skillNames = PERSONA_SKILLS[persona];
 
   const base = (
     status: DispatchStatus,
@@ -426,6 +450,7 @@ export async function dispatchEvent(
     eventType: type,
     persona,
     skillUsed: null,
+    skillsUsed: [],
     status,
     responseSnippet: null,
     alert: null,
@@ -436,22 +461,24 @@ export async function dispatchEvent(
   });
 
   let result: DispatchResult;
+  let skills: Array<{ name: string; body: string }> = [];
   try {
-    const skill = await loadSkill(skillName);
+    skills = await loadSkills(skillNames);
 
     // 1) Persona acts (model call, or the test override).
     let reply: string;
     if (opts.responseOverride !== undefined) {
       reply = opts.responseOverride;
     } else {
-      reply = await actWithPersona(persona, ev, skill);
+      reply = await actWithPersona(persona, ev, skills);
     }
     const snippet = reply.trim().slice(0, 280) || null;
     const decision = classifyDispatchResponse(reply);
 
     if (decision === "ok") {
       result = base("ok", `DISPATCH_OK — nothing actionable (route: ${basis})`, {
-        skillUsed: skill?.name ?? null,
+        skillUsed: skills[0]?.name ?? null,
+        skillsUsed: skills.map((s) => s.name),
         responseSnippet: snippet,
       });
     } else {
@@ -465,7 +492,8 @@ export async function dispatchEvent(
         reason: `send threw: ${e instanceof Error ? e.message : String(e)}`,
       }));
       result = base("actionable", `actionable (route: ${basis})`, {
-        skillUsed: skill?.name ?? null,
+        skillUsed: skills[0]?.name ?? null,
+        skillsUsed: skills.map((s) => s.name),
         responseSnippet: snippet,
         alert: { title, message, fired: delivery.sent, reason: delivery.reason },
       });
@@ -479,7 +507,10 @@ export async function dispatchEvent(
         e instanceof Error ? e.message : String(e)
       }`
     );
-    result = base("error", `dispatch failed: ${e instanceof Error ? e.message : String(e)}`);
+    result = base("error", `dispatch failed: ${e instanceof Error ? e.message : String(e)}`, {
+      skillUsed: skills[0]?.name ?? null,
+      skillsUsed: skills.map((s) => s.name),
+    });
   }
 
   // 3) Always log to Markdown memory (even on error/ok) so the event
