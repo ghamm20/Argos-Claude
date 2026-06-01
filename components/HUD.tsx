@@ -9,6 +9,7 @@ import { AuthIndicator } from "./auth/AuthIndicator";
 import { ResearchIndicator } from "./research/ResearchIndicator";
 import { RoutingIndicator } from "./router/RoutingIndicator";
 import { HeartbeatIndicator } from "./heartbeat/HeartbeatIndicator";
+import { DispatcherIndicator } from "./dispatcher/DispatcherIndicator";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -340,6 +341,8 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         <RoutingIndicator />
         {/* Phase 10 (heartbeat) — ambient autonomous tick status. */}
         <HeartbeatIndicator />
+        {/* Phase 11 (dispatcher) — last routed event + persona + count. */}
+        <DispatcherIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}

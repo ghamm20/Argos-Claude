@@ -34,7 +34,10 @@ import { argosRoot } from "./vault/paths";
 import { readSettings } from "./settings";
 import { getOllamaBase } from "./ollama-config";
 import { isInFlight } from "./chat/inflight";
-import { pushoverSend } from "./research/alerts";
+// Phase 11 Dispatcher — an actionable heartbeat item is passed to the
+// dispatcher (classify → route → memory → alert) instead of alerting
+// directly. The dispatcher reuses the same pushoverSend primitive.
+import { dispatchEvent } from "./dispatcher";
 import { PERSONA_BY_ID } from "./personas";
 
 // ----- constants -----
@@ -340,27 +343,32 @@ export async function runHeartbeatTick(
                 triageSnippet: snippet,
               });
             } else {
-              // 5) Actionable → build + send the alert (reuses the
-              //    Phase 11 Pushover primitive; no-ops without creds).
-              const built = buildHeartbeatAlert(reply);
-              const delivery = await pushoverSend({
-                title: built.title,
-                message: built.message,
-                priority: "0",
-              }).catch((e) => ({
-                sent: false,
-                reason: `send threw: ${e instanceof Error ? e.message : String(e)}`,
-              }));
-              result = base("actionable", "actionable item flagged", {
+              // 5) Actionable → pass to the Phase 11 dispatcher BEFORE
+              //    alerting (per directive). The dispatcher classifies the
+              //    flagged item, routes it to the right persona, logs it to
+              //    Markdown memory (MEMORY.md + daily log), and fires the
+              //    Pushover alert. We thread the triage text through as the
+              //    persona response (responseOverride) so no second model
+              //    call is made. The heartbeat's `alert` mirrors the
+              //    dispatcher's delivery. dispatchEvent is total (never
+              //    throws); the `?? fallback` covers the unlikely null-alert
+              //    case so an actionable item is never silently dropped.
+              const dispatch = await dispatchEvent(
+                { type: "heartbeat", content: reply, source: "heartbeat" },
+                { responseOverride: reply }
+              );
+              const alert =
+                dispatch.alert ?? {
+                  title: buildHeartbeatAlert(reply).title,
+                  message: reply.trim(),
+                  fired: false,
+                  reason: dispatch.reason,
+                };
+              result = base("actionable", "actionable item flagged → dispatched", {
                 checklistPresent: present,
                 modelUsed: model,
                 triageSnippet: snippet,
-                alert: {
-                  title: built.title,
-                  message: built.message,
-                  fired: delivery.sent,
-                  reason: delivery.reason,
-                },
+                alert,
               });
             }
           }
