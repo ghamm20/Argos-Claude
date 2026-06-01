@@ -24,13 +24,16 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // were REMOVED from this list — they are now real, built-out features
 // (Memory: Phase 9 persistent memory UI; Tools: Phase 10/11 research +
 // scheduler/alerts UI), so they legitimately use useState/useEffect/
-// fetch and must NOT be held to stub-honesty rules. Vision and Voice
-// PAGES remain genuine stubs: Voice functionality ships via ChatPane
-// components (MicButton/PlayButton/SpeakerSelect), but app/voice/page.tsx
-// itself is still a deferred placeholder.
+// fetch and must NOT be held to stub-honesty rules.
+//
+// 2026-06-01: Voice (app/voice/page.tsx) REMOVED for the same reason —
+// Phase 7-D shipped live voice I/O (F5-TTS speak button, Web Speech API
+// mic, conversation mode), and the Voice page now renders real live status
+// via the VoiceStatusPanel client component (useState/useEffect to detect
+// browser capability). It is no longer a deferred placeholder. Vision PAGE
+// remains a genuine stub.
 const STUBS = [
   { name: "Vision", path: "app/vision/page.tsx", weekPattern: /Week\s*8/i },
-  { name: "Voice", path: "app/voice/page.tsx", weekPattern: /Week\s*6/i },
 ];
 
 const REQUIRED_PHRASES = [

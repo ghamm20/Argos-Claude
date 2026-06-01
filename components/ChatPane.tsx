@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Download, History, Trash2 } from "lucide-react";
+import { Download, History, Trash2, Radio } from "lucide-react";
 import { Eye } from "./Eye";
 import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
-import { MicButton } from "./voice/MicButton";
+import { SpeechMicButton } from "./voice/SpeechMicButton";
 import { PlayButton } from "./voice/PlayButton";
 import { SpeakerSelect } from "./voice/SpeakerSelect";
+import { useConversationMode } from "@/lib/useConversationMode";
 import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 // Operator Auth (2026-05-28) — inject the bearer token on every
 // /api/chat send. When unset (guest), the header is omitted and the
@@ -327,6 +328,7 @@ export function ChatPane() {
   const messages = useArgos((s) => s.messages);
   const isStreaming = useArgos((s) => s.isStreaming);
   const currentModel = useArgos((s) => s.currentModel);
+  const currentPersonaId = useArgos((s) => s.currentPersonaId);
   const personaName = useArgos((s) => s.personaName());
   const accent = useArgos((s) => s.accentColor());
   const vaultDocs = useArgos((s) => s.vaultStatus.docs);
@@ -778,6 +780,19 @@ export function ChatPane() {
     [isStreaming, send]
   );
 
+  // Phase 7-D: caveman conversation mode — voice loop (mic → send → Bart
+  // speaks → mic). send() already supports programmatic text.
+  const conversation = useConversationMode({
+    messages,
+    isStreaming,
+    personaId: currentPersonaId,
+    sendText: (t) => void send(t),
+  });
+  const convoActiveRef = useRef(false);
+  convoActiveRef.current = conversation.active;
+  const convoStopRef = useRef(conversation.stop);
+  convoStopRef.current = conversation.stop;
+
   // Window-level shortcuts: Cmd/Ctrl+K to clear, Cmd/Ctrl+E to export,
   // Esc to stop streaming. Only fire when the user isn't typing in
   // another input (else they'd lose draft text or confirm by accident).
@@ -792,6 +807,13 @@ export function ChatPane() {
     }
     function handler(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
+      // Esc ALWAYS exits conversation mode first (per directive — must be
+      // stoppable). Fires regardless of streaming state.
+      if (e.key === "Escape" && !mod && convoActiveRef.current) {
+        e.preventDefault();
+        convoStopRef.current();
+        return;
+      }
       // Esc to stop streaming — only fires while streaming, no modifier
       if (e.key === "Escape" && !mod && useArgos.getState().isStreaming) {
         e.preventDefault();
@@ -853,6 +875,31 @@ export function ChatPane() {
         >
           <History className="h-3.5 w-3.5" />
         </button>
+        {/* Phase 7-D: conversation ("caveman") mode toggle. Self-hides when
+            the Web Speech API is unavailable. */}
+        {conversation.supported && (
+          <button
+            type="button"
+            onClick={conversation.toggle}
+            title={
+              conversation.active
+                ? "Stop conversation mode (Esc)"
+                : "Conversation mode — talk back and forth with voice"
+            }
+            aria-label="Toggle conversation mode"
+            aria-pressed={conversation.active}
+            className={
+              "rounded p-1.5 transition-colors " +
+              (conversation.active
+                ? "text-[#00ff9d] bg-[#00ff9d]/15"
+                : "text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800/60")
+            }
+          >
+            <Radio
+              className={"h-3.5 w-3.5 " + (conversation.active ? "animate-pulse" : "")}
+            />
+          </button>
+        )}
         {!empty && (
           <>
             <button
@@ -907,6 +954,30 @@ export function ChatPane() {
 
       <div className="px-10 pb-6 pt-3 border-t border-neutral-800/60">
         <div className="max-w-2xl mx-auto">
+          {/* Phase 7-D: conversation-mode status banner. */}
+          {conversation.active && (
+            <div
+              className="mb-2 flex items-center justify-center gap-2 text-[11px] uppercase tracking-[0.18em]"
+              style={{ color: "#00ff9d" }}
+            >
+              <span
+                className="inline-block h-2 w-2 rounded-full animate-pulse"
+                style={{
+                  background: conversation.phase === "listening" ? "#ef4444" : "#00ff9d",
+                }}
+              />
+              Conversation Active
+              <span className="text-neutral-500 normal-case tracking-normal">
+                ·{" "}
+                {conversation.phase === "speaking"
+                  ? "Bartimaeus speaking…"
+                  : conversation.phase === "listening"
+                    ? "listening…"
+                    : "thinking…"}{" "}
+                · Esc to stop
+              </span>
+            </div>
+          )}
           <div className="relative">
             <textarea
               ref={textareaRef}
@@ -927,14 +998,14 @@ export function ChatPane() {
                 consumed by PlayButton via AudioContext.setSinkId().
                 Sits above the mic device selector in the same column. */}
             <SpeakerSelect accent={accent} disabled={isStreaming} />
-            {/* Mic input — self-hides when STT unavailable. Appends
-                transcribed text to the current draft so the operator
-                can dictate then type a tweak before sending. */}
-            <MicButton
+            {/* Phase 7-D: Web Speech API mic (left of Send). Self-hides when
+                the browser lacks SpeechRecognition. Dictated text is appended
+                to the draft so the operator can edit before sending. Disabled
+                during streaming + conversation mode (which drives its own mic). */}
+            <SpeechMicButton
               accent={accent}
-              disabled={isStreaming}
-              sessionId={currentSessionId ?? undefined}
-              onTranscribed={(text) =>
+              disabled={isStreaming || conversation.active}
+              onTranscript={(text) =>
                 setDraft((d) => (d.trim() ? `${d.trimEnd()} ${text}` : text))
               }
             />
