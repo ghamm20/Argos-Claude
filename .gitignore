@@ -39,3 +39,15 @@ tsconfig.tsbuildinfo
 .usb-dryrun/
 .robocopy*.log
 .migrate-out.log
+
+# Runtime artifacts — churn on every run, never commit (Task 1, 2026-05-31)
+data/research/cache.json
+data/memory/
+# ...but keep the Phase 9 seed data tracked (canonical, needed on fresh clone)
+!data/memory/SCHEMA_VERSION
+!data/memory/shared/
+!data/memory/shared/operator_profile.json
+memory/
+state/
+_diag_*.json
+_diag_*.log
