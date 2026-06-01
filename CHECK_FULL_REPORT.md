@@ -71,3 +71,20 @@ Tasks 2–5:
 ## Verdict
 
 **check:full GREEN — all 11 stages pass (static 7/7 + live 4/4).** Gate met.
+
+---
+
+## Post-cleanup re-run — 2026-05-31
+
+Re-confirmed after the post-v2.0.0 cleanup block (canonicalize project list,
+wire MEMORY.md read-back into dispatcher prompts, migrate-to-usb copies
+skills + memory seed).
+
+- Stray Next server killed (PID 22220); port 3000 free before the gate.
+- `.next` cleaned, then `check:full` re-run: **PASS — 11/11** (static 7/7 +
+  live 4/4; smoke-h2 / settings / vault / retrieval all green). No red.
+- Clean production rebuild after the gate; `.next` mirrored to `D:\ARGOS`;
+  **D: BUILD_ID = dev BUILD_ID = `lCPbxlGliJazZYj7_kylc`** (match).
+
+Nothing regressed. The dispatcher memory read-back and the expanded migration
+script did not affect any check:full stage.
