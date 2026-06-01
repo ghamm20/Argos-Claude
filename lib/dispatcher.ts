@@ -227,12 +227,48 @@ async function loadSkills(skillNames: string[] | undefined): Promise<Array<{ nam
   return loaded;
 }
 
+// ----- markdown memory read-back (situational awareness) -----
+
+/** Tail of MEMORY.md, capped to `maxChars`. The most recent entries are at the
+ *  end of the append-only file, so we keep the tail. Never throws — returns ""
+ *  on missing/empty/error so the dispatch proceeds without memory context. */
+export async function readMemory(maxChars = 2000): Promise<string> {
+  try {
+    const raw = await fsp.readFile(memoryFilePath(), "utf8");
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    return trimmed.length > maxChars ? trimmed.slice(trimmed.length - maxChars) : trimmed;
+  } catch {
+    return "";
+  }
+}
+
+/** Tail of today's daily log (memory/YYYY-MM-DD.md), capped to `maxChars`.
+ *  Same graceful contract as readMemory. */
+export async function readDailyLog(maxChars = 1000): Promise<string> {
+  try {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const raw = await fsp.readFile(dailyLogPath(stamp), "utf8");
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    return trimmed.length > maxChars ? trimmed.slice(trimmed.length - maxChars) : trimmed;
+  } catch {
+    return "";
+  }
+}
+
 // ----- the persona action (Ollama) -----
+
+interface MemoryContext {
+  memory: string;
+  dailyLog: string;
+}
 
 function dispatchSystemPrompt(
   persona: PersonaId,
   event: DispatchEvent,
-  skills: Array<{ name: string; body: string }>
+  skills: Array<{ name: string; body: string }>,
+  memoryContext: MemoryContext = { memory: "", dailyLog: "" }
 ): string {
   const name = PERSONA_BY_ID[persona]?.name ?? persona;
   const parts = [
@@ -242,6 +278,14 @@ function dispatchSystemPrompt(
     "If action is needed, reply with a short, specific, actionable summary (what + why + next step). No preamble.",
     "Be conservative — only flag genuinely actionable, time-sensitive items.",
   ];
+  // Situational awareness: operator context + recent dispatch history, injected
+  // ABOVE the skills so persona guidance still reads last (most salient).
+  if (memoryContext.memory) {
+    parts.push("", "## Operator Memory", memoryContext.memory);
+  }
+  if (memoryContext.dailyLog) {
+    parts.push("", "## Today's Log", memoryContext.dailyLog);
+  }
   if (skills.length > 1) {
     parts.push("", `You have ${skills.length} skills below; apply all of them.`);
   }
@@ -258,6 +302,17 @@ async function actWithPersona(
 ): Promise<string> {
   const model = PERSONA_BY_ID[persona]?.model;
   if (!model) throw new Error(`persona ${persona} has no model`);
+  // Pull situational awareness (MEMORY.md tail + today's log) for the prompt.
+  const [memory, dailyLog] = await Promise.all([readMemory(), readDailyLog()]);
+  const systemPrompt = dispatchSystemPrompt(persona, event, skills, { memory, dailyLog });
+  if (process.env.ARGOS_DISPATCH_DEBUG === "1") {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[dispatcher][debug] assembled system prompt (${systemPrompt.length} chars) for ${persona}:\n` +
+        systemPrompt +
+        "\n[dispatcher][debug] --- end prompt ---"
+    );
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ACTION_TIMEOUT_MS);
   try {
@@ -267,7 +322,7 @@ async function actWithPersona(
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: dispatchSystemPrompt(persona, event, skills) },
+          { role: "system", content: systemPrompt },
           { role: "user", content: `[${event.type} event from ${event.source}]\n${event.content}` },
         ],
         stream: false,
