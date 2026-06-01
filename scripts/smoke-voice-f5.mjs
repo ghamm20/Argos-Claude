@@ -131,8 +131,9 @@ try {
   });
 
   // ===== Scenario B: F5 unavailable → graceful Piper fallback =====
-  const bogusF5Home = join(repoRoot, "__no_such_f5_home__");
-  await withServer("F5 unavailable", { ARGOS_ROOT: repoRoot, ARGOS_F5_HOME: bogusF5Home }, BASE_PORT + 1, async (base) => {
+  // ARGOS_F5_DISABLE genuinely turns F5 off (a bogus ARGOS_F5_HOME no longer
+  // works now that detection auto-probes ~/dev/f5-tts + the ARGOS_ROOT sibling).
+  await withServer("F5 unavailable", { ARGOS_ROOT: repoRoot, ARGOS_F5_DISABLE: "1" }, BASE_PORT + 1, async (base) => {
     console.log("\n=== 4. F5 unavailable → Bartimaeus falls back to Piper, no crash ===");
     const s = await req(base, "/api/voice/status");
     check("status 200 (F5-down server)", s.ok && s.status === 200);

@@ -40,20 +40,46 @@ import {
 
 const IS_WINDOWS = process.platform === "win32";
 
-/** F5-TTS install root (contains venv/). Override via ARGOS_F5_HOME; the
- *  default is derived from the home dir (no hardcoded absolute path — Rule 1). */
+/** Return the F5 inference CLI path inside `home`/venv if it exists, else null. */
+function cliPathIn(home: string): string | null {
+  const win = path.join(home, "venv", "Scripts", "f5-tts_infer-cli.exe");
+  if (existsSync(win)) return win;
+  const posix = path.join(home, "venv", "bin", "f5-tts_infer-cli");
+  if (existsSync(posix)) return posix;
+  return null;
+}
+
+/** Candidate F5 install roots, in priority order. ARGOS_F5_HOME wins; otherwise
+ *  we auto-detect common locations so the operator doesn't have to set the env
+ *  var (no hardcoded absolute paths — all derived; USB-native Rule 1). */
+function f5HomeCandidates(): string[] {
+  return [
+    process.env.ARGOS_F5_HOME,
+    path.join(os.homedir(), "dev", "f5-tts"),
+    path.join(os.homedir(), "f5-tts"),
+    path.join(argosRoot(), "..", "f5-tts"),
+    path.join(argosRoot(), "tools", "f5-tts"),
+  ].filter((c): c is string => !!c);
+}
+
+/** F5-TTS install root (contains venv/). Returns the first candidate whose
+ *  venv CLI actually exists; else the preferred default (for messaging). */
 export function f5Home(): string {
+  for (const c of f5HomeCandidates()) {
+    if (cliPathIn(c)) return c;
+  }
   return process.env.ARGOS_F5_HOME || path.join(os.homedir(), "dev", "f5-tts");
 }
 
-/** Resolve the F5-TTS inference CLI inside the venv. null if absent. */
+/** Resolve the F5-TTS inference CLI. Probes all candidate homes. null if absent
+ *  or if F5 is explicitly disabled via ARGOS_F5_DISABLE=1 (operator switch to
+ *  force Bartimaeus back onto Piper). */
 export function f5Cli(): string | null {
-  const name = IS_WINDOWS ? "f5-tts_infer-cli.exe" : "f5-tts_infer-cli";
-  const full = path.join(f5Home(), "venv", "Scripts", name);
-  if (existsSync(full)) return full;
-  // POSIX venvs use bin/ not Scripts/
-  const posix = path.join(f5Home(), "venv", "bin", "f5-tts_infer-cli");
-  if (existsSync(posix)) return posix;
+  if (process.env.ARGOS_F5_DISABLE === "1") return null;
+  for (const c of f5HomeCandidates()) {
+    const cli = cliPathIn(c);
+    if (cli) return cli;
+  }
   return null;
 }
 
@@ -188,7 +214,8 @@ export function f5Status(): {
   const cli = f5Cli();
   const ref = bartReferenceWav();
   let reason: string | null = null;
-  if (!cli) reason = `F5-TTS CLI not found under ${f5Home()}\\venv (install F5-TTS or set ARGOS_F5_HOME).`;
+  if (process.env.ARGOS_F5_DISABLE === "1") reason = "F5-TTS disabled via ARGOS_F5_DISABLE=1.";
+  else if (!cli) reason = `F5-TTS CLI not found under ${f5Home()}\\venv (install F5-TTS or set ARGOS_F5_HOME).`;
   else if (!ref) reason = `Bartimaeus reference clip missing at ${bartReferenceDir()}\\bart-ref.wav.`;
   return {
     available: !!cli && !!ref,

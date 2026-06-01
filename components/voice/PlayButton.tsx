@@ -116,7 +116,10 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
         // available (any persona) OR — for Bartimaeus — F5 is available.
         const ttsOk = !!j.tts?.available;
         const f5Ok = !!j.f5?.available;
-        const canSpeak = personaId === "bartimaeus" ? ttsOk || f5Ok : ttsOk;
+        const isBart = (personaId ?? "").toLowerCase() === "bartimaeus";
+        // Bartimaeus speaks if F5 (the clone) OR Piper is available; everyone
+        // else needs Piper/Kokoro. CLI detection is enough — no daemon needed.
+        const canSpeak = isBart ? ttsOk || f5Ok : ttsOk;
         if (!cancelled) setAvailable(canSpeak);
       } catch {
         if (!cancelled) setAvailable(false);
