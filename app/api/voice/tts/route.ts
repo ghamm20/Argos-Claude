@@ -22,6 +22,7 @@ import {
 } from "@/lib/voice";
 import { appendAudit } from "@/lib/audit";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
+import { isF5Available } from "@/lib/voice-f5";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,9 +37,11 @@ interface SynthRequest {
 }
 
 export async function POST(req: NextRequest) {
-  // Capability gate
+  // Capability gate — pass if EITHER Piper/Kokoro (other personas) OR the
+  // F5-TTS Bartimaeus clone is available. Phase 7-C: F5 can serve Bartimaeus
+  // even on a box without Piper installed.
   const cap = await detectVoiceCapability();
-  if (!cap.tts.available) {
+  if (!cap.tts.available && !isF5Available()) {
     return NextResponse.json(
       {
         error: "voice TTS not available",
@@ -78,7 +81,13 @@ export async function POST(req: NextRequest) {
     const result = await synthesizeText(text, {
       voice: resolvedVoice,
       speed: body.speed,
+      // Phase 7-C: pass the persona so Bartimaeus can route to the F5-TTS
+      // voice clone (others stay on Piper). synthesizeText falls back to
+      // Piper if F5 is unavailable.
+      personaId: body.personaId,
     });
+    // Reflect the engine that actually served this request.
+    const engine = result.voice === "bartimaeus-f5" ? "f5-tts" : "piper";
 
     void appendAudit(
       "voice.spoken",
@@ -105,7 +114,7 @@ export async function POST(req: NextRequest) {
         // Echo metadata as headers so a CLI consumer can read them
         // without re-parsing. Custom x- prefix keeps them clearly
         // ARGOS-defined.
-        "x-voice-engine": "kokoro",
+        "x-voice-engine": engine,
         "x-voice-name": result.voice,
         "x-voice-duration-ms": String(result.durationMs),
         "x-voice-char-count": String(result.charCount),

@@ -787,7 +787,7 @@ export const DEFAULT_PIPER_VOICE = "en_US-ryan-high";
  */
 export async function synthesizeText(
   text: string,
-  opts: { voice?: string; speed?: number } = {}
+  opts: { voice?: string; speed?: number; personaId?: string } = {}
 ): Promise<SynthesizeResult> {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -800,6 +800,26 @@ export async function synthesizeText(
     throw new Error(
       `voice TTS: text too long (${trimmed.length} chars > ${TEXT_CAP} cap)`
     );
+  }
+
+  // Phase 7-C: Bartimaeus speaks in his cloned voice (F5-TTS) when the tool
+  // + reference clip are present. Dynamic import avoids a static circular
+  // dependency (voice-f5 imports helpers from here). Any F5 failure falls
+  // through to Piper so the voice path never breaks — graceful by design.
+  if (opts.personaId === "bartimaeus") {
+    try {
+      const { isF5Available, synthesizeF5 } = await import("./voice-f5");
+      if (isF5Available()) {
+        return await synthesizeF5(trimmed, { speed: opts.speed });
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[voice] F5-TTS unavailable/failed for Bartimaeus, falling back to Piper: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
   }
 
   // Engine selection mirrors detectVoiceCapability().

@@ -7,6 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { detectVoiceCapability } from "@/lib/voice";
+import { f5Status } from "@/lib/voice-f5";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const cap = await detectVoiceCapability();
-    return NextResponse.json(cap);
+    // Phase 7-C: F5-TTS Bartimaeus clone status (cheap, stat-only). When
+    // available, Bartimaeus TTS uses F5; all other personas use Piper.
+    return NextResponse.json({ ...cap, f5: f5Status() });
   } catch (e) {
     // detectVoiceCapability does its own fs work — wrap in case
     // the cache dir is unreadable. Still return 200 so the UI knows
@@ -39,6 +42,7 @@ export async function GET() {
       },
       argosRoot: process.env.ARGOS_ROOT ?? null,
       toolsDir: null,
+      f5: { available: false, reason: "capability probe failed" },
     });
   }
 }
