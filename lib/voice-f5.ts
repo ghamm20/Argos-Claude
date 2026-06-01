@@ -232,6 +232,58 @@ export function f5Status(): {
 
 const F5_TIMEOUT_MS = 180_000; // model load + inference; generous on cold CPU
 
+const SPEECH_MAX_SENTENCES = 3;
+const SPEECH_MAX_CHARS = 300;
+const SPEECH_FALLBACK_CHARS = 150;
+
+/**
+ * Phase 7-D TTS speed: trim what we actually SPEAK so synthesis is punchy and
+ * immediate. Bartimaeus writes long, markdown-laden replies sprinkled with
+ * parenthetical stage directions; spoken in full that is 15–30s of synth and
+ * sounds awkward. We voice a short lead-in only — the full reply stays readable
+ * in the chat. Steps, in order:
+ *   1. strip markdown links/images   [text](url) / ![alt](src) → text
+ *   2. strip parenthetical asides     (anything in parentheses) — sound wrong spoken
+ *   3. strip markdown markers         * _ ~ ` # > [ ]
+ *   4. collapse whitespace
+ *   5. take the first 3 sentences (split on . ! ?)
+ *   6. hard-cap at 300 chars (cut on a word boundary)
+ *   7. never empty — if cleaning emptied it, return the first 150 raw chars
+ */
+export function truncateSpeechText(input: string): string {
+  const raw = (input ?? "").toString();
+
+  let cleaned = raw
+    // 1. markdown links / images → their visible text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // 2. parenthetical stage directions — anything in parentheses
+    .replace(/\([^)]*\)/g, " ")
+    // 3. markdown emphasis / heading / quote / code / bracket markers
+    .replace(/[*_~`#>[\]]/g, " ")
+    // 4. collapse whitespace
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 5. first N sentences (keep each terminator).
+  const sentences = cleaned.match(/[^.!?]+[.!?]+/g);
+  let result =
+    sentences && sentences.length
+      ? sentences.slice(0, SPEECH_MAX_SENTENCES).join(" ").replace(/\s+/g, " ").trim()
+      : cleaned;
+
+  // 6. hard cap; prefer cutting on a word boundary in the back third.
+  if (result.length > SPEECH_MAX_CHARS) {
+    result = result.slice(0, SPEECH_MAX_CHARS);
+    const lastSpace = result.lastIndexOf(" ");
+    if (lastSpace > SPEECH_MAX_CHARS - 100) result = result.slice(0, lastSpace);
+    result = result.trim();
+  }
+
+  // 7. never empty — fall back to first 150 raw chars.
+  if (!result) return raw.trim().slice(0, SPEECH_FALLBACK_CHARS);
+  return result;
+}
+
 /**
  * Synthesize text → WAV using F5-TTS with the Bartimaeus reference clip.
  * Same shape as lib/voice.ts synthesizeText() so callers are uniform.
@@ -253,9 +305,13 @@ export async function synthesizeF5(
     throw new Error("F5-TTS not available (reference clip missing)");
   }
 
+  // Phase 7-D TTS speed: speak a punchy lead-in, not the whole essay. Trim once
+  // here so BOTH the daemon and CLI paths synthesize the same short text.
+  const speechText = truncateSpeechText(text);
+
   // Fast path: a warm daemon already holds the model in VRAM (~5s/clip).
   if (await isF5DaemonHealthy()) {
-    return synthesizeViaDaemon(text);
+    return synthesizeViaDaemon(speechText);
   }
 
   // Daemon down: kick off a lazy start so the NEXT call is fast, and serve
@@ -266,7 +322,7 @@ export async function synthesizeF5(
   if (!cli) {
     throw new Error("F5-TTS not available (daemon down and CLI missing)");
   }
-  return synthesizeViaCli(text, cli, refWav);
+  return synthesizeViaCli(speechText, cli, refWav);
 }
 
 /** Synthesize via the persistent daemon over local HTTP (model already loaded). */
