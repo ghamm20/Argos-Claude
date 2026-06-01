@@ -13,7 +13,7 @@
 - **Operator:** Gordy — COO, EKG Security.
 - **Primary use:** security operations, guard-force management, and AI system
   development.
-- **Active projects:** ARGOS, Guardian, Parascope, Sentry, Cortex.
+- **Active projects:** ARGOS, Jenna, Parascope, Sentry, Cortex, Guardian, Halal Jordan.
 - **Alert preferences:** Pushover primary, Twilio SMS fallback.
 - **Escalation threshold:** flag operational disruptions, security events, and
   call-off surges. Stay silent on routine, expected, or self-resolving items.
