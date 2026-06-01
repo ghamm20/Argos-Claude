@@ -208,6 +208,49 @@ try {
   console.log("\n=== 7. Graceful validation ===");
   const bad = await req("/api/dispatch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "no type" }) });
   check("missing type → 400", bad.ok && bad.status === 400);
+
+  // --- 8. Invalid type → 400 (type not in allowed set) ---
+  //   Isolated forwarded-IP so this never touches the functional bucket.
+  console.log("\n=== 8. Invalid type → 400 ===");
+  const badType = await req("/api/dispatch", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": "10.77.0.3" },
+    body: JSON.stringify({ type: "bogus-not-allowed", content: "x", source: "smoke" }),
+  });
+  check("invalid type → 400", badType.ok && badType.status === 400, `(${badType.status})`);
+  check("invalid type error names the allowed set", typeof badType.json?.error === "string" && /security/.test(badType.json.error));
+
+  // --- 9. Idempotency: duplicate X-Dispatch-Id → cached, no re-dispatch ---
+  console.log("\n=== 9. Idempotency (X-Dispatch-Id) ===");
+  const idemHeaders = {
+    "content-type": "application/json",
+    "x-forwarded-for": "10.77.0.2",
+    "x-dispatch-id": "smoke-idem-001",
+  };
+  const idemBody = JSON.stringify({ type: "ops", content: "Idempotency probe — disk at 80%.", source: "smoke", mockResponse: "DISPATCH_OK" });
+  const first = await req("/api/dispatch", { method: "POST", headers: idemHeaders, body: idemBody });
+  const second = await req("/api/dispatch", { method: "POST", headers: idemHeaders, body: idemBody });
+  check("idempotent first request → 200", first.ok && first.status === 200);
+  check("idempotent replay flagged (idempotentReplay:true)", second.json?.idempotentReplay === true);
+  check(
+    "idempotent replay returns SAME result — no re-dispatch",
+    !!first.json?.result?.at && second.json?.result?.at === first.json.result.at,
+    `(${first.json?.result?.at} vs ${second.json?.result?.at})`
+  );
+
+  // --- 10. Rate limit: 11 rapid requests from one IP → 11th = 429 ---
+  console.log("\n=== 10. Rate limit (10/min/IP) ===");
+  const rlHeaders = { "content-type": "application/json", "x-forwarded-for": "10.77.0.1" };
+  const rlBody = JSON.stringify({ type: "ops", content: "rate probe", source: "smoke", mockResponse: "DISPATCH_OK" });
+  let okCount = 0;
+  let got429 = false;
+  for (let i = 1; i <= 11; i++) {
+    const r = await req("/api/dispatch", { method: "POST", headers: rlHeaders, body: rlBody });
+    if (r.status === 200) okCount++;
+    if (i === 11) got429 = r.status === 429;
+  }
+  check("first 10 requests within limit → 200", okCount === 10, `(${okCount}/10 ok)`);
+  check("11th request → 429", got429);
 } catch (e) {
   console.log(`\n[fatal] ${e instanceof Error ? e.stack : String(e)}`);
   fail++;
