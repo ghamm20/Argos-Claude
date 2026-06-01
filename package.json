@@ -20,6 +20,8 @@
     "audit:verify": "node scripts/verify-audit-chain.mjs",
     "voice:smoke": "node scripts/smoke-voice.mjs",
     "voice:smoke-offline": "node scripts/smoke-voice.mjs --no-http",
+    "voice:smoke-f5": "node scripts/smoke-voice-f5.mjs",
+    "voice:f5-daemon": "node scripts/start-f5-daemon.mjs",
     "demo-check": "node scripts/demo-check.mjs",
     "demo-prep": "node scripts/demo-check.mjs && node -e \"console.log('\\n  Open: http://127.0.0.1:7799  (launch via ARGOS\\\\launcher.bat from your USB)')\"",
     "readiness": "npm run verify && npm run demo-check && node scripts/smoke-launcher.mjs",

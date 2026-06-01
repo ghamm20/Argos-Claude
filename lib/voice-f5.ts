@@ -19,13 +19,15 @@
 // Passing ref_text explicitly means F5 never auto-transcribes → no Whisper,
 // no ffmpeg at runtime (keeps the deployed box light).
 //
-// Tool location (dev box): C:\Users\Gordy\dev\f5-tts\venv\Scripts\
+// Tool location: <ARGOS_F5_HOME>/venv/Scripts/  (default: ~/dev/f5-tts)
 //   Override with ARGOS_F5_HOME (the f5-tts dir that contains venv/).
 // Device: ARGOS_F5_DEVICE (cuda|cpu), default cuda. On an 8GB card with Bart's
 // 9.6GB model resident, GPU inference still works via WDDM VRAM oversubscription
 // (measured ~2.0GB peak, ~0.7x realtime); set cpu to avoid any GPU contention.
 
 import { promises as fsp, existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { argosRoot } from "./vault/paths";
@@ -38,9 +40,10 @@ import {
 
 const IS_WINDOWS = process.platform === "win32";
 
-/** F5-TTS install root (contains venv/). Override via ARGOS_F5_HOME. */
+/** F5-TTS install root (contains venv/). Override via ARGOS_F5_HOME; the
+ *  default is derived from the home dir (no hardcoded absolute path — Rule 1). */
 export function f5Home(): string {
-  return process.env.ARGOS_F5_HOME || "C:\\Users\\Gordy\\dev\\f5-tts";
+  return process.env.ARGOS_F5_HOME || path.join(os.homedir(), "dev", "f5-tts");
 }
 
 /** Resolve the F5-TTS inference CLI inside the venv. null if absent. */
@@ -85,6 +88,83 @@ function f5Model(): string {
   return process.env.ARGOS_F5_MODEL || "F5TTS_v1_Base";
 }
 
+// ----- persistent daemon (eliminates the per-call cold load) -----
+
+/** Daemon listen port. Override via ARGOS_F5_PORT. */
+export function f5DaemonPort(): number {
+  const n = Number(process.env.ARGOS_F5_PORT);
+  return Number.isFinite(n) && n > 0 ? n : 7880;
+}
+function f5DaemonBase(): string {
+  return process.env.ARGOS_F5_DAEMON_URL || `http://127.0.0.1:${f5DaemonPort()}`;
+}
+
+/** The daemon server script (ships under ARGOS_ROOT/tools/voice/f5-daemon). */
+export function f5DaemonScript(): string {
+  return path.join(voiceToolsDir(), "f5-daemon", "server.py");
+}
+
+/** venv python that runs the daemon. null if absent. */
+function f5Python(): string | null {
+  const winp = path.join(f5Home(), "venv", "Scripts", IS_WINDOWS ? "python.exe" : "python");
+  if (existsSync(winp)) return winp;
+  const posix = path.join(f5Home(), "venv", "bin", "python");
+  if (existsSync(posix)) return posix;
+  return null;
+}
+
+/** Is the daemon up with the model loaded? Cheap probe, short timeout. */
+export async function isF5DaemonHealthy(timeoutMs = 1200): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(`${f5DaemonBase()}/health`, { signal: ctrl.signal }).finally(() =>
+      clearTimeout(t)
+    );
+    if (!res.ok) return false;
+    const j = (await res.json()) as { ok?: boolean; ready?: boolean };
+    return !!j.ok && j.ready !== false;
+  } catch {
+    return false;
+  }
+}
+
+// Module-scope guard so a burst of requests only spawns one daemon.
+let daemonStarting = false;
+
+/** Best-effort: start the daemon detached so it warms for the NEXT call.
+ *  Never throws, never blocks the current request. */
+export function tryStartF5Daemon(): void {
+  if (daemonStarting) return;
+  const py = f5Python();
+  const script = f5DaemonScript();
+  if (!py || !existsSync(script)) return;
+  daemonStarting = true;
+  try {
+    const child = spawn(py, [script], {
+      cwd: f5Home(),
+      env: {
+        ...process.env,
+        ARGOS_ROOT: argosRoot(),
+        ARGOS_F5_PORT: String(f5DaemonPort()),
+        ARGOS_F5_DEVICE: f5Device(),
+        ARGOS_F5_MODEL: f5Model(),
+      },
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch {
+    /* best-effort */
+  }
+  // Allow a retry later if the daemon didn't actually come up.
+  const reset = setTimeout(() => {
+    daemonStarting = false;
+  }, 60_000);
+  reset.unref?.();
+}
+
 /**
  * True iff F5-TTS can actually serve a request: the CLI exists AND the
  * reference clip is present. Cheap (stat only) — safe to call per request.
@@ -101,6 +181,8 @@ export function f5Status(): {
   hasReferenceText: boolean;
   device: "cuda" | "cpu";
   home: string;
+  daemonPort: number;
+  daemonScript: string | null;
   reason: string | null;
 } {
   const cli = f5Cli();
@@ -115,6 +197,8 @@ export function f5Status(): {
     hasReferenceText: !!bartReferenceText(),
     device: f5Device(),
     home: f5Home(),
+    daemonPort: f5DaemonPort(),
+    daemonScript: existsSync(f5DaemonScript()) ? f5DaemonScript() : null,
     reason,
   };
 }
@@ -137,13 +221,58 @@ export async function synthesizeF5(
   text: string,
   _opts: { speed?: number } = {}
 ): Promise<SynthesizeResult> {
-  const cli = f5Cli();
   const refWav = bartReferenceWav();
-  if (!cli || !refWav) {
-    throw new Error("F5-TTS not available (CLI or reference clip missing)");
+  if (!refWav) {
+    throw new Error("F5-TTS not available (reference clip missing)");
   }
-  const refText = bartReferenceText();
 
+  // Fast path: a warm daemon already holds the model in VRAM (~5s/clip).
+  if (await isF5DaemonHealthy()) {
+    return synthesizeViaDaemon(text);
+  }
+
+  // Daemon down: kick off a lazy start so the NEXT call is fast, and serve
+  // THIS request via the CLI cold-load path (don't block the user ~30s on
+  // model load). Per directive: falls back to CLI spawn when the daemon is down.
+  tryStartF5Daemon();
+  const cli = f5Cli();
+  if (!cli) {
+    throw new Error("F5-TTS not available (daemon down and CLI missing)");
+  }
+  return synthesizeViaCli(text, cli, refWav);
+}
+
+/** Synthesize via the persistent daemon over local HTTP (model already loaded). */
+async function synthesizeViaDaemon(text: string): Promise<SynthesizeResult> {
+  const start = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), F5_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${f5DaemonBase()}/synth`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, nfe_step: 64 }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      throw new Error(`f5 daemon ${res.status}: ${t.slice(0, 200)}`);
+    }
+    const wav = Buffer.from(await res.arrayBuffer());
+    if (wav.length < 64) throw new Error("f5 daemon returned an empty WAV");
+    return { wav, durationMs: Date.now() - start, voice: "bartimaeus-f5", charCount: text.length };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Synthesize by spawning the F5 CLI (cold-loads the model each call). */
+async function synthesizeViaCli(
+  text: string,
+  cli: string,
+  refWav: string
+): Promise<SynthesizeResult> {
+  const refText = bartReferenceText();
   await fsp.mkdir(voiceCacheDir(), { recursive: true });
   const id = randomUUID().replace(/-/g, "");
   const outName = `${id}.wav`;
@@ -155,8 +284,7 @@ export async function synthesizeF5(
     "-t", text,
     "-o", voiceCacheDir(),
     "-w", outName,
-    // Phase 7-C v2 (owner-approved): nfe_step 64 for higher-quality inference.
-    // Output is the raw F5 WAV — NO EQ / post-processing.
+    // Phase 7-C v2 (owner-approved): nfe_step 64. Raw F5 WAV — NO EQ.
     "--nfe_step", "64",
     "--remove_silence",
     "--device", f5Device(),
@@ -175,12 +303,7 @@ export async function synthesizeF5(
     if (wav.length < 64) {
       throw new Error("f5-tts produced an empty/invalid WAV");
     }
-    return {
-      wav,
-      durationMs: res.durationMs,
-      voice: "bartimaeus-f5",
-      charCount: text.length,
-    };
+    return { wav, durationMs: res.durationMs, voice: "bartimaeus-f5", charCount: text.length };
   } finally {
     await fsp.unlink(outPath).catch(() => {});
   }

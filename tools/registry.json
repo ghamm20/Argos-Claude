@@ -1,0 +1,43 @@
+{
+  "tools": [
+    {
+      "id": "lookingglass",
+      "name": "LookingGlass",
+      "description": "OSINT / research surface (scaffold)",
+      "port": null,
+      "healthUrl": null,
+      "autoStart": false,
+      "openInBrowser": true,
+      "icon": "globe",
+      "category": "intelligence",
+      "status": "foundation",
+      "notes": "Scaffold entry — not yet wired. Set port + healthUrl to activate."
+    },
+    {
+      "id": "superagi",
+      "name": "SuperAGI",
+      "description": "Autonomous agent runner (scaffold)",
+      "port": null,
+      "healthUrl": null,
+      "autoStart": false,
+      "openInBrowser": true,
+      "icon": "agent",
+      "category": "automation",
+      "status": "foundation",
+      "notes": "Scaffold entry — not yet wired. Set port + healthUrl to activate."
+    },
+    {
+      "id": "oculus",
+      "name": "Oculus",
+      "description": "Experimental playground (scaffold)",
+      "port": null,
+      "healthUrl": null,
+      "autoStart": false,
+      "openInBrowser": true,
+      "icon": "lab",
+      "category": "playground",
+      "status": "foundation",
+      "notes": "Scaffold entry — not yet wired. Set port + healthUrl to activate."
+    }
+  ]
+}

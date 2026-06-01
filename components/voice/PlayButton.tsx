@@ -107,8 +107,17 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
           if (!cancelled) setAvailable(false);
           return;
         }
-        const j = (await r.json()) as { tts?: { available?: boolean } };
-        if (!cancelled) setAvailable(!!j.tts?.available);
+        const j = (await r.json()) as {
+          tts?: { available?: boolean };
+          f5?: { available?: boolean };
+        };
+        // Phase 7-C: Bartimaeus can speak via the F5-TTS clone even when
+        // Piper is absent. So the Speak button shows if Piper/Kokoro is
+        // available (any persona) OR — for Bartimaeus — F5 is available.
+        const ttsOk = !!j.tts?.available;
+        const f5Ok = !!j.f5?.available;
+        const canSpeak = personaId === "bartimaeus" ? ttsOk || f5Ok : ttsOk;
+        if (!cancelled) setAvailable(canSpeak);
       } catch {
         if (!cancelled) setAvailable(false);
       }
@@ -116,7 +125,7 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [personaId]);
 
   // Hard stop — used both by the user clicking pause and by a
   // sibling button taking over playback. Releases all resources

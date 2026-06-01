@@ -131,7 +131,8 @@ try {
   });
 
   // ===== Scenario B: F5 unavailable → graceful Piper fallback =====
-  await withServer("F5 unavailable", { ARGOS_ROOT: repoRoot, ARGOS_F5_HOME: "C:\\__no_such_f5__" }, BASE_PORT + 1, async (base) => {
+  const bogusF5Home = join(repoRoot, "__no_such_f5_home__");
+  await withServer("F5 unavailable", { ARGOS_ROOT: repoRoot, ARGOS_F5_HOME: bogusF5Home }, BASE_PORT + 1, async (base) => {
     console.log("\n=== 4. F5 unavailable → Bartimaeus falls back to Piper, no crash ===");
     const s = await req(base, "/api/voice/status");
     check("status 200 (F5-down server)", s.ok && s.status === 200);
