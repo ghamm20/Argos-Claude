@@ -45,6 +45,24 @@ interface Pending {
   summary: string;
   proposals: Array<{ kind: string; description: string; target?: string }>;
 }
+interface PatchRec {
+  at?: string;
+  loopId?: string;
+  reason?: string;
+  testPassed?: boolean;
+  files?: Array<{ target: string }>;
+}
+interface OpenQ {
+  id: string;
+  question: string;
+  category: string;
+}
+interface BackupRec {
+  id: string;
+  loopId: string;
+  reason: string;
+  createdAt: string;
+}
 
 const OUTCOME_COLOR: Record<string, string> = {
   accepted: "#10b981",
@@ -66,6 +84,11 @@ export default function LoopsPage() {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
   const [bench, setBench] = useState<{ score: number | null; at: string | null } | null>(null);
+  const [patches, setPatches] = useState<{ applied: PatchRec[]; rolledBack: PatchRec[] }>({ applied: [], rolledBack: [] });
+  const [questions, setQuestions] = useState<OpenQ[]>([]);
+  const [backups, setBackups] = useState<BackupRec[]>([]);
+  const [extra, setExtra] = useState<{ patchesToday?: { applied: number; rolledBack: number }; benchmark?: { trend: string }; pendingQuestions?: number } | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [out, setOut] = useState<{ title: string; body: string } | null>(null);
 
@@ -77,11 +100,46 @@ export default function LoopsPage() {
     try {
       const r = await fetch("/api/loops/status", { cache: "no-store" });
       if (r.ok) {
-        const j = (await r.json()) as { loops: LoopSummary[]; stats: Stats; scheduler: Scheduler };
+        const j = (await r.json()) as {
+          loops: LoopSummary[];
+          stats: Stats;
+          scheduler: Scheduler;
+          patchesToday?: { applied: number; rolledBack: number };
+          benchmark?: { trend: string };
+          pendingQuestions?: number;
+        };
         setLoops(j.loops ?? []);
         setStats(j.stats ?? null);
         setScheduler(j.scheduler ?? null);
+        setExtra({ patchesToday: j.patchesToday, benchmark: j.benchmark, pendingQuestions: j.pendingQuestions });
       }
+    } catch {
+      /* offline */
+    }
+  }, []);
+  const loadPatches = useCallback(async () => {
+    try {
+      const r = await fetch("/api/loops/patches", { cache: "no-store" });
+      if (r.ok) {
+        const j = (await r.json()) as { applied: PatchRec[]; rolledBack: PatchRec[] };
+        setPatches({ applied: j.applied ?? [], rolledBack: j.rolledBack ?? [] });
+      }
+    } catch {
+      /* offline */
+    }
+  }, []);
+  const loadQuestions = useCallback(async () => {
+    try {
+      const r = await fetch("/api/loops/questions", { cache: "no-store" });
+      if (r.ok) setQuestions(((await r.json()) as { pending: OpenQ[] }).pending ?? []);
+    } catch {
+      /* offline */
+    }
+  }, []);
+  const loadBackups = useCallback(async () => {
+    try {
+      const r = await fetch("/api/loops/rollback", { cache: "no-store" });
+      if (r.ok) setBackups(((await r.json()) as { backups: BackupRec[] }).backups ?? []);
     } catch {
       /* offline */
     }
@@ -119,16 +177,49 @@ export default function LoopsPage() {
     void loadTraces();
     void loadPending();
     void loadBench();
-  }, [loadStatus, loadTraces, loadPending, loadBench]);
+    void loadPatches();
+    void loadQuestions();
+    void loadBackups();
+  }, [loadStatus, loadTraces, loadPending, loadBench, loadPatches, loadQuestions, loadBackups]);
 
   useEffect(() => {
     refreshAll();
     const t = setInterval(() => {
       void loadStatus();
       void loadPending();
+      void loadQuestions();
     }, 6000);
     return () => clearInterval(t);
-  }, [refreshAll, loadStatus, loadPending]);
+  }, [refreshAll, loadStatus, loadPending, loadQuestions]);
+
+  const answerQ = useCallback(
+    async (id: string) => {
+      const answer = (answers[id] ?? "").trim();
+      if (!answer) return;
+      await fetch("/api/loops/questions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, answer }),
+      });
+      setAnswers((a) => ({ ...a, [id]: "" }));
+      void loadQuestions();
+    },
+    [answers, loadQuestions]
+  );
+  const restoreBackup = useCallback(
+    async (id: string) => {
+      if (!window.confirm(`Restore backup ${id}? This reverts the files it snapshotted.`)) return;
+      const r = await fetch("/api/loops/rollback", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backupId: id }),
+      });
+      const j = (await r.json()) as { ok?: boolean; restored?: number; reason?: string };
+      setOut({ title: `restore ${id}`, body: j.ok ? `restored ${j.restored} file(s)` : `failed: ${j.reason}` });
+      void loadBackups();
+    },
+    [loadBackups]
+  );
 
   const runLoop = useCallback(
     async (loop: string, input: Record<string, unknown> = {}) => {
@@ -227,6 +318,20 @@ export default function LoopsPage() {
               <span>{stats.totalTraces} traces</span>
               <span className="text-yellow-500">{stats.pendingApproval} awaiting approval</span>
               <span className="text-red-400">{stats.halted} halted (gaming)</span>
+              {extra?.patchesToday && (
+                <span className="text-emerald-400">
+                  {extra.patchesToday.applied} patches applied · {extra.patchesToday.rolledBack} rolled back today
+                </span>
+              )}
+              {extra?.benchmark && (
+                <span>
+                  benchmark{" "}
+                  {extra.benchmark.trend === "up" ? "↑" : extra.benchmark.trend === "down" ? "↓" : extra.benchmark.trend === "flat" ? "→" : "—"}
+                </span>
+              )}
+              {(extra?.pendingQuestions ?? 0) > 0 && (
+                <span className="text-yellow-300">{extra!.pendingQuestions} question(s) awaiting answer</span>
+              )}
             </div>
           )}
         </header>
@@ -341,6 +446,79 @@ export default function LoopsPage() {
             </div>
           </section>
         )}
+
+        {/* Active-learning questions awaiting an answer */}
+        {questions.length > 0 && (
+          <section className="mb-6 border border-yellow-800/40 rounded-lg p-4 bg-yellow-950/10">
+            <h2 className="text-[14px] font-medium text-yellow-200 mb-3">Questions awaiting your answer ({questions.length})</h2>
+            <div className="space-y-2">
+              {questions.map((q) => (
+                <div key={q.id} className="text-[12px]">
+                  <div className="text-neutral-200">
+                    <span className="text-[10px] text-neutral-500 uppercase mr-1">{q.category}</span>
+                    {q.question}
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    <input
+                      value={answers[q.id] ?? ""}
+                      onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                      placeholder="your answer…"
+                      className="flex-1 bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-[12px] text-neutral-100"
+                    />
+                    <button type="button" onClick={() => void answerQ(q.id)} className="text-[11px] px-3 py-1 rounded bg-emerald-900/40 border border-emerald-700/60 text-emerald-200 hover:bg-emerald-900/60">
+                      answer
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Autonomous patches today + backups */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <section className="border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+            <h2 className="text-[14px] font-medium text-neutral-100 mb-2">
+              Patches <span className="text-[11px] text-emerald-400">{patches.applied.length} applied</span>{" "}
+              <span className="text-[11px] text-red-400">{patches.rolledBack.length} rolled back</span>
+            </h2>
+            <div className="space-y-1 max-h-44 overflow-y-auto text-[11px]">
+              {patches.applied.length === 0 && patches.rolledBack.length === 0 && (
+                <div className="text-neutral-600 italic">No autonomous patches yet.</div>
+              )}
+              {patches.applied.slice(0, 8).map((p, i) => (
+                <div key={`a${i}`} className="text-neutral-400">
+                  <span className="text-emerald-400">✓</span> {p.loopId} · {(p.files ?? []).map((f) => f.target).join(", ")} · {p.reason}
+                </div>
+              ))}
+              {patches.rolledBack.slice(0, 8).map((p, i) => (
+                <div key={`r${i}`} className="text-neutral-400">
+                  <span className="text-red-400">↩</span> {p.loopId} · {(p.files ?? []).map((f) => f.target).join(", ")} · {p.reason}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+            <h2 className="text-[14px] font-medium text-neutral-100 mb-2">Backups ({backups.length})</h2>
+            <div className="space-y-1 max-h-44 overflow-y-auto text-[11px]">
+              {backups.length === 0 ? (
+                <div className="text-neutral-600 italic">No backups yet.</div>
+              ) : (
+                backups.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between gap-2">
+                    <span className="text-neutral-400 truncate">
+                      {shortIso(b.createdAt)} · {b.loopId} · {b.reason}
+                    </span>
+                    <button type="button" onClick={() => void restoreBackup(b.id)} className="text-[10px] text-amber-300 hover:text-amber-200 shrink-0">
+                      restore
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
 
         {/* Loop registry */}
         <section className="mb-6">

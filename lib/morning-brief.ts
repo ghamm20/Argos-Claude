@@ -15,6 +15,7 @@ import { PERSONA_BY_ID } from "./personas";
 import { pushoverSend } from "./research/alerts";
 import { completeDir, failedDir } from "./task-queue";
 import { outputDir } from "./tools/paths";
+import { loopsBriefSection } from "./loops/brief";
 
 const BRIEF_SYSTEM =
   "You are Bartimaeus. Write a morning operational brief for the operator " +
@@ -128,12 +129,17 @@ export async function generateMorningBrief(
   }
   if (!brief || !brief.trim()) brief = fallbackBrief(completed, failed);
 
+  // Self-Evolving Loop Suite addendum — what the loops did overnight.
+  const loopsSection = await loopsBriefSection(since).catch(() => "");
+
   const md = [
     `# Morning Brief — ${date}`,
     "",
     `_Generated ${now.toISOString()} · ${completed.length} complete · ${failed.length} failed_`,
     "",
     brief.trim(),
+    "",
+    loopsSection,
     "",
   ].join("\n");
 

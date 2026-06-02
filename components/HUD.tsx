@@ -127,6 +127,10 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     traces: number;
     pending: number;
     halted: number;
+    patchesApplied: number;
+    patchesRolledBack: number;
+    benchTrend: "up" | "down" | "flat" | "none";
+    questions: number;
   } | null>(null);
   // v1.1 Task 6: runtime argosRoot from /api/system/info — overrides the
   // server-prop value baked at build time (which is wrong on deployed
@@ -213,12 +217,19 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         const j = (await r.json()) as {
           loops?: unknown[];
           stats?: { totalTraces?: number; pendingApproval?: number; halted?: number };
+          patchesToday?: { applied?: number; rolledBack?: number };
+          benchmark?: { trend?: "up" | "down" | "flat" | "none" };
+          pendingQuestions?: number;
         };
         setLoops({
           total: j.loops?.length ?? 0,
           traces: j.stats?.totalTraces ?? 0,
           pending: j.stats?.pendingApproval ?? 0,
           halted: j.stats?.halted ?? 0,
+          patchesApplied: j.patchesToday?.applied ?? 0,
+          patchesRolledBack: j.patchesToday?.rolledBack ?? 0,
+          benchTrend: j.benchmark?.trend ?? "none",
+          questions: j.pendingQuestions ?? 0,
         });
       } catch {
         /* offline; keep prior */
@@ -464,6 +475,31 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
             loops
               ? `${loops.total} loops, ${loops.traces} traces, ${loops.pending} awaiting approval, ${loops.halted} halted (gaming)`
               : "self-evolving loop suite"
+          }
+        />
+        {/* Self-Evolving Loop Suite — autonomous patches + benchmark trend + questions. */}
+        <Row
+          label="Loop patches"
+          value={
+            loops
+              ? `${loops.patchesApplied}✓ ${loops.patchesRolledBack}↩ ${
+                  loops.benchTrend === "up" ? "↑" : loops.benchTrend === "down" ? "↓" : loops.benchTrend === "flat" ? "→" : "·"
+                }${loops.questions > 0 ? ` · ${loops.questions}?` : ""}`
+              : "—"
+          }
+          accent={
+            loops?.patchesRolledBack
+              ? "#ef4444"
+              : loops?.questions
+                ? "#eab308"
+                : loops?.patchesApplied
+                  ? eyeColor
+                  : undefined
+          }
+          title={
+            loops
+              ? `${loops.patchesApplied} applied today, ${loops.patchesRolledBack} auto-rolled-back, benchmark trend ${loops.benchTrend}, ${loops.questions} question(s) awaiting answer`
+              : "autonomous patches + benchmark trend"
           }
         />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}
