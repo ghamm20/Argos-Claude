@@ -30,6 +30,10 @@ import {
   continuationPrompt,
 } from "@/lib/tools/chat-tools";
 import { requestTool } from "@/lib/tools/executor";
+// Forced current-facts grounding (2026-06-02) — time-sensitive queries get a
+// live web_search injected as authoritative context so Bart can't answer
+// office-holders / "current X" / 2026 facts from stale training data.
+import { detectCurrentFacts, buildCurrentFactsBlock } from "@/lib/current-facts-detector";
 // Phase 9 (router) — persona auto-routing suggestion. The chat path
 // uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
 // adds zero latency and never calls a model. Suggestion-only.
@@ -611,6 +615,27 @@ export async function POST(req: NextRequest) {
   const toolsEnabled = isOperator && body.personaId === "bartimaeus" && !visionTurn;
   if (toolsEnabled) {
     systemParts.push(buildToolAwarenessBlock());
+  }
+  // FORCED current-facts grounding. For time-sensitive queries we don't trust
+  // Bart to choose to call web_search — we run it server-side now and inject
+  // the fresh results as authoritative context, overriding stale training data.
+  // Graceful: a failed/empty search just skips the block (normal flow resumes).
+  if (toolsEnabled && userText) {
+    const cf = detectCurrentFacts(userText);
+    if (cf.isCurrentFacts) {
+      try {
+        const outcome = await requestTool(
+          "web_search",
+          { query: cf.suggestedQuery, limit: 5 },
+          { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
+        );
+        if (outcome.kind === "result" && outcome.result.ok) {
+          systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
+        }
+      } catch {
+        /* graceful — no grounding block; Bart's normal tool flow still applies */
+      }
+    }
   }
   if (memoryBlock.length > 0) {
     systemParts.push(memoryBlock);
