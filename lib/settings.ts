@@ -24,6 +24,14 @@ export interface HeartbeatConfig {
   intervalMinutes: number;
 }
 
+/** Web Capability TIER 0 (2026-06-02) — external API secrets. Values are
+ *  stored ENCRYPTED at rest (AES-256-GCM via lib/web/secrets.ts); the GET
+ *  /api/settings response masks them. null = unset. */
+export interface ApiKeys {
+  /** GitHub Personal Access Token (lifts /search rate 60→5000/hr). */
+  github: string | null;
+}
+
 export interface PersistedSettings {
   version: number;
   defaultPersona: PersonaId;
@@ -70,6 +78,8 @@ export interface PersistedSettings {
   researchArxivTopics: string[];
   /** Phase 10 Heartbeat (2026-05-31) — ambient autonomous tick. */
   heartbeat: HeartbeatConfig;
+  /** Web Capability TIER 0 (2026-06-02) — encrypted external API secrets. */
+  apiKeys: ApiKeys;
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -120,6 +130,10 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   heartbeat: {
     enabled: false,
     intervalMinutes: 30,
+  },
+  // Web Capability TIER 0: no API keys until the operator supplies them.
+  apiKeys: {
+    github: null,
   },
 };
 
@@ -197,6 +211,12 @@ export async function readSettings(): Promise<PersistedSettings> {
       heartbeat: {
         ...DEFAULT_SETTINGS.heartbeat,
         ...(parsed.heartbeat ?? {}),
+      },
+      // Web Capability forward-compat: missing → default (no keys). Older
+      // settings.json files (pre-web) load cleanly.
+      apiKeys: {
+        ...DEFAULT_SETTINGS.apiKeys,
+        ...(parsed.apiKeys ?? {}),
       },
     };
   } catch (e) {

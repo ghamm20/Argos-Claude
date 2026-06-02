@@ -2,13 +2,25 @@ import { NextRequest } from "next/server";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { AVAILABLE_MODELS } from "@/lib/store";
 import { readSettings, writeSettings, type SettingsPatch } from "@/lib/settings";
+import { encryptSecret, maskSecret } from "@/lib/web/secrets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const s = await readSettings();
-  return Response.json(s);
+  // Web Capability: never leak API secrets (even ciphertext) over the API.
+  // Replace apiKeys with a masked status view for the Settings UI.
+  const masked = {
+    ...s,
+    apiKeys: {
+      github: {
+        configured: !!s.apiKeys?.github,
+        hint: maskSecret(s.apiKeys?.github ?? null),
+      },
+    },
+  };
+  return Response.json(masked);
 }
 
 interface SettingsPostBody {
@@ -42,6 +54,9 @@ interface SettingsPostBody {
   researchArxivTopics?: string[];
   // Phase 10 Heartbeat — ambient dispatcher toggle + cadence.
   heartbeat?: Partial<{ enabled: boolean; intervalMinutes: number }>;
+  // Web Capability TIER 0 — API secrets. Sent as PLAINTEXT from the Settings
+  // UI; encrypted server-side before storage. github:"" or null clears it.
+  apiKeys?: Partial<{ github: string | null }>;
 }
 
 export async function POST(req: NextRequest) {
@@ -252,6 +267,29 @@ export async function POST(req: NextRequest) {
       );
     }
     patch.researchArxivTopics = body.researchArxivTopics;
+  }
+
+  // Web Capability — encrypt API secrets at rest before storing.
+  if (body.apiKeys !== undefined) {
+    if (typeof body.apiKeys !== "object" || body.apiKeys === null) {
+      return Response.json({ error: "apiKeys must be an object" }, { status: 400 });
+    }
+    const current = (await readSettings()).apiKeys;
+    const nextKeys = { ...current };
+    if (body.apiKeys.github !== undefined) {
+      const v = body.apiKeys.github;
+      if (v === null || v === "") {
+        nextKeys.github = null;
+      } else if (typeof v === "string") {
+        nextKeys.github = await encryptSecret(v.trim());
+      } else {
+        return Response.json(
+          { error: "apiKeys.github must be a string or null" },
+          { status: 400 }
+        );
+      }
+    }
+    patch.apiKeys = nextKeys;
   }
 
   if (Object.keys(patch).length === 0) {
