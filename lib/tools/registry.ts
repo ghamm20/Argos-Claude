@@ -40,6 +40,7 @@ import * as huggingface from "./huggingface";
 import * as crossref from "./crossref";
 import * as pubmed from "./pubmed";
 import * as gdelt from "./gdelt";
+import * as openMeteo from "./open-meteo";
 // Web Capability TIER 2 (2026-06-02) — self-hosted search + GitHub + Q&A + SEC.
 import * as searxng from "./searxng";
 import * as github from "./github";
@@ -196,6 +197,17 @@ export const TOOLS: ToolDefinition[] = [
     dangerous: false,
     reversible: true,
     execute: gdelt.execute,
+  },
+  {
+    id: "open_meteo_weather",
+    name: "Open-Meteo Weather",
+    description: "Structured current conditions + forecast for a place (geocodes the name). No key.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: openMeteo.execute,
   },
   // ---- web search + dev + filings (TIER 2, all safe) ----
   {

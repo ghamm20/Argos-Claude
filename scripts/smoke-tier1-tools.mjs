@@ -132,6 +132,12 @@ try {
     console.log("\n=== T27 gdelt ===");
     tolerant("gdelt", await exec(base, "gdelt_events", { query: "technology", timespan: "1d" }));
 
+    console.log("\n=== T28 open_meteo_weather ===");
+    const om = await exec(base, "open_meteo_weather", { location: "Winter Springs, Florida" });
+    reliable("open-meteo geocodes + returns current weather", om, (d) =>
+      d?.current && typeof d.current.temp === "number" && /florida/i.test(d?.location?.name ?? ""));
+    reliable("open-meteo returns a daily forecast", om, (d) => Array.isArray(d?.daily) && d.daily.length > 0);
+
     console.log("\n=== infra: audit log written ===");
     const auditFile = join(ROOT, "state", "web-audit.jsonl");
     const lines = fs.existsSync(auditFile) ? fs.readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean) : [];

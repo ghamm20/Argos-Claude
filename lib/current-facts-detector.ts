@@ -13,9 +13,10 @@
 //
 // Weather + typo tolerance (2026-06-02 update): weather is a first-class
 // trigger ("temp in", "forecast", "how hot"), the detector is misspelling-
-// tolerant via a bounded edit-distance match ("forxast" → "forecast"), and a
-// weather query is reshaped to "weather forecast <location> today" so DDG
-// actually returns the current conditions instead of junk.
+// tolerant via a bounded edit-distance match ("forxast" → "forecast"). Weather
+// queries now route to the open_meteo_weather tool (suggestedTool + extracted
+// location) — this REPLACED the old "weather forecast <location> today" DDG
+// query-reshape hack with a structured forecast API.
 //
 // Pure + dependency-free.
 
@@ -37,8 +38,13 @@ export interface CurrentFactsDetection {
   confidence: number;
   category: CurrentFactsCategory | null;
   reason: string;
-  /** The query to hand to web_search (cleaned; weather-reshaped for weather). */
+  /** The cleaned query to hand to web_search (general current-facts). */
   suggestedQuery: string;
+  /** When set, the chat route should force THIS tool instead of web_search.
+   *  Weather → "open_meteo_weather" (2026-06-02; replaced the DDG reshape). */
+  suggestedTool: string | null;
+  /** Extracted location/place for the suggested tool (weather → place name). */
+  location: string | null;
 }
 
 // Markers that the query is about the PAST. If present AND no explicit "current"
@@ -177,9 +183,11 @@ const WEATHER_STOP = new Set([
   "like", "its", "it's", "im", "i'm", "im", "be",
 ]);
 
-/** Reshape a weather query into one DDG resolves to current conditions: keep the
- *  likely location words, strip filler, prefix "weather forecast", suffix "today". */
-function weatherQuery(q: string): string {
+/** Extract the place name from a weather query for the open_meteo_weather tool.
+ *  Strips weather/filler words, leaving the location (e.g. "winter springs
+ *  florida"). Replaced the old "weather forecast X today" DDG reshape hack
+ *  (2026-06-02) — weather now routes to a structured forecast API, not search. */
+function extractWeatherLocation(q: string): string {
   const loc = q
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
@@ -187,7 +195,7 @@ function weatherQuery(q: string): string {
     .filter((w) => w && !WEATHER_STOP.has(w))
     .join(" ")
     .trim();
-  return loc ? `weather forecast ${loc} today` : `weather forecast ${cleanQuery(q)}`;
+  return loc || cleanQuery(q);
 }
 
 /**
@@ -199,7 +207,7 @@ function weatherQuery(q: string): string {
 export function detectCurrentFacts(query: string): CurrentFactsDetection {
   const q = (query ?? "").trim();
   if (!q) {
-    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "" };
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "", suggestedTool: null, location: null };
   }
 
   const explicitCurrent = EXPLICIT_CURRENT_RE.test(q);
@@ -219,7 +227,7 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   }
 
   if (matches.length === 0) {
-    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "not time-sensitive", suggestedQuery: cleanQuery(q) };
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "not time-sensitive", suggestedQuery: cleanQuery(q), suggestedTool: null, location: null };
   }
 
   // Primary = highest-confidence NON-time-relative match if any (more specific),
@@ -231,7 +239,7 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   let confidence = primary.conf;
   if (hasTimeMarker && primary.category !== "time-relative") confidence = Math.min(0.98, confidence + 0.05);
 
-  const suggestedQuery = primary.category === "weather" ? weatherQuery(q) : cleanQuery(q);
+  const isWeather = primary.category === "weather";
 
   return {
     isCurrentFacts: true,
@@ -239,7 +247,11 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
     confidence: +confidence.toFixed(2),
     category: primary.category,
     reason: primary.reason,
-    suggestedQuery,
+    // No more DDG reshape — weather routes to the open_meteo_weather tool with
+    // the extracted place; everything else uses the cleaned query for search.
+    suggestedQuery: cleanQuery(q),
+    suggestedTool: isWeather ? "open_meteo_weather" : null,
+    location: isWeather ? extractWeatherLocation(q) : null,
   };
 }
 
@@ -250,6 +262,7 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
 // tool choice. Does NOT change detectCurrentFacts.
 
 const ROUTE_RULES: Array<{ re: RegExp; tools: string[] }> = [
+  { re: /\b(weather|forecast|temperature|how (hot|cold|warm)|raining|snowing|humid)\b/i, tools: ["open_meteo_weather"] },
   { re: /\b(arxiv|paper|papers|preprint|fine[- ]?tun(e|ing)|transformer|llm|neural|machine learning|deep learning|diffusion|benchmark|sota|state[- ]of[- ]the[- ]art)\b/i, tools: ["arxiv_search", "papers_with_code", "openalex_search"] },
   { re: /\b(model|dataset|checkpoint|weights|gguf|safetensors|hugging ?face)\b/i, tools: ["huggingface_hub"] },
   { re: /\b(disease|symptom|clinical|patient|cancer|drug|gene|protein|therap(y|eutic)|medical|biolog|vaccine|trial)\b/i, tools: ["pubmed_search"] },

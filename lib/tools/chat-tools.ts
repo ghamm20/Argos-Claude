@@ -85,6 +85,7 @@ export function buildToolAwarenessBlock(): string {
     "- Academic metadata / DOI → crossref_lookup. Medical / biology → pubmed_search.",
     "- Models / datasets → huggingface_hub.",
     "- Global news / current events → gdelt_events.",
+    "- Weather / temperature / forecast → open_meteo_weather (pass the place name as `location`).",
     "- Code / dev / errors → github_search + stackexchange_search.",
     "- Public companies (filings, CEO, financials) → sec_edgar (+ wikipedia_search).",
     "- A specific page's content → web_crawl. Open-ended digging → deep_research.",

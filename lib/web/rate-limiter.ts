@@ -34,6 +34,7 @@ export const SOURCE_LIMITS: Record<string, RateConfig> = {
   crossref: { requestsPerMinute: 50, burst: 10 },
   pubmed: { requestsPerMinute: 150, burst: 3 }, // NCBI ~3/sec without key
   gdelt: { requestsPerMinute: 30, burst: 5 },
+  open_meteo: { requestsPerMinute: 120, burst: 20 }, // generous; no published limit
   searxng: { requestsPerMinute: 120, burst: 20 }, // self-hosted, generous
   github: { requestsPerMinute: 80, burst: 20 },
   stackexchange: { requestsPerMinute: 30, burst: 10 },

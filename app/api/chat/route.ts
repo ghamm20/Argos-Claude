@@ -34,6 +34,9 @@ import { requestTool } from "@/lib/tools/executor";
 // live web_search injected as authoritative context so Bart can't answer
 // office-holders / "current X" / 2026 facts from stale training data.
 import { detectCurrentFacts, buildCurrentFactsBlock } from "@/lib/current-facts-detector";
+// Weather now routes to the structured Open-Meteo tool instead of a reshaped
+// DDG search (2026-06-02). buildWeatherBlock formats its result as grounding.
+import { buildWeatherBlock } from "@/lib/tools/open-meteo";
 // Phase 9 (router) — persona auto-routing suggestion. The chat path
 // uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
 // adds zero latency and never calls a model. Suggestion-only.
@@ -624,13 +627,25 @@ export async function POST(req: NextRequest) {
     const cf = detectCurrentFacts(userText);
     if (cf.isCurrentFacts) {
       try {
-        const outcome = await requestTool(
-          "web_search",
-          { query: cf.suggestedQuery, limit: 5 },
-          { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
-        );
-        if (outcome.kind === "result" && outcome.result.ok) {
-          systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
+        if (cf.suggestedTool === "open_meteo_weather" && cf.location) {
+          // Weather → structured Open-Meteo forecast (replaces the DDG hack).
+          const outcome = await requestTool(
+            "open_meteo_weather",
+            { location: cf.location },
+            { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
+          );
+          if (outcome.kind === "result" && outcome.result.ok) {
+            systemParts.push(buildWeatherBlock(outcome.result));
+          }
+        } else {
+          const outcome = await requestTool(
+            "web_search",
+            { query: cf.suggestedQuery, limit: 5 },
+            { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
+          );
+          if (outcome.kind === "result" && outcome.result.ok) {
+            systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
+          }
         }
       } catch {
         /* graceful — no grounding block; Bart's normal tool flow still applies */

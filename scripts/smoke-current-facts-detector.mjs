@@ -4,7 +4,7 @@
 // Verifies detectCurrentFacts via /api/current-facts (pure, no model):
 //   - weather queries trigger (incl. "temp in", "how hot", typo "forxast")
 //   - the operator's failing real example fires with confidence > 0.7
-//   - weather queries are reshaped to "weather forecast <location> today"
+//   - weather queries route to open_meteo_weather with the extracted location
 //   - office-holder / price / time-relative still fire
 //   - clearly-historical + general-knowledge queries do NOT fire
 //
@@ -93,7 +93,10 @@ try {
     check("requiresTool true", d1.requiresTool === true, JSON.stringify(d1));
     check("confidence > 0.7", d1.confidence > 0.7, `(${d1.confidence})`);
     check("category weather", d1.category === "weather");
-    check("query reshaped to weather forecast", /weather forecast/i.test(d1.suggestedQuery) && /florida/i.test(d1.suggestedQuery), d1.suggestedQuery);
+    // 2026-06-02: weather no longer reshapes to a DDG query — it routes to the
+    // open_meteo_weather tool with the extracted place as `location`.
+    check("weather → open_meteo_weather tool", d1.suggestedTool === "open_meteo_weather", `tool=${d1.suggestedTool}`);
+    check("location extracted (florida)", /florida/i.test(d1.location ?? "") && !/weather|forecast|temp/i.test(d1.location ?? ""), `loc=${d1.location}`);
 
     // ===== weather variants incl. typos =====
     console.log("\n=== weather variants + typos ===");
