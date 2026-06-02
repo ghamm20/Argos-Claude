@@ -12,6 +12,7 @@ import { promises as fsp, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { webCacheDir } from "./paths";
+import { withLock } from "./mutex";
 
 export function cacheKey(url: string, params?: Record<string, unknown>): string {
   const basis = params ? `${url}|${JSON.stringify(params)}` : url;
@@ -70,13 +71,17 @@ async function readStats(): Promise<CacheStats> {
 }
 
 async function bumpStats(field: keyof CacheStats): Promise<void> {
-  try {
-    const s = await readStats();
-    s[field] += 1;
-    await atomicWrite(statsPath(), JSON.stringify(s));
-  } catch {
-    /* stats are best-effort */
-  }
+  // Serialize: concurrent cache hits/misses (the chain's parallel reads) would
+  // otherwise race on temp+rename of _stats.json (Windows EPERM). Best-effort.
+  await withLock("web-cache-stats", async () => {
+    try {
+      const s = await readStats();
+      s[field] += 1;
+      await atomicWrite(statsPath(), JSON.stringify(s));
+    } catch {
+      /* stats are best-effort */
+    }
+  });
 }
 
 /** Return the cached value if present and not expired, else null. */

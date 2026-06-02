@@ -20,6 +20,8 @@
  *
  * Covers, case-insensitively:
  *   - complete  <tool>…</tool>  (and <tool_call>/<tool_use> variants, with attrs)
+ *   - the JSON blob itself, with NO <tool> wrapper and an optional stray '>'
+ *     prefix — the observed leak: >{"id":"chain_search_to_read","params":{…}}
  *   - unclosed  <tool>…         running to end of text (streaming / unterminated)
  *   - orphan    </tool> or <tool …>  fragments left over
  */
@@ -28,6 +30,13 @@ export function stripToolTags(content: string): string {
   return content
     // complete pairs, optional attributes + underscore variants
     .replace(/<tool(?:_call|_use)?\b[^>]*>[\s\S]*?<\/tool(?:_call|_use)?>/gi, "")
+    // tool-call JSON blob with optional <tool> wrapping and/or a stray leading
+    // '>' (the observed leak format). Matches {"id":"<toolid>","params":{…}}
+    // (params is one nested object). Handles >{…}, <tool>{…}, {…}</tool>, {…}.
+    .replace(
+      /(?:<\/?tool(?:_call|_use)?\b[^>]*>|[<>])*\s*\{\s*["']?id["']?\s*:\s*["'][\w.\-]+["']\s*,\s*["']?params["']?\s*:\s*\{[\s\S]*?\}\s*\}(?:\s*<\/?tool(?:_call|_use)?\b[^>]*>)?/gi,
+      ""
+    )
     // unclosed open tag → strip to end (a broken tag has no clean answer after it)
     .replace(/<tool(?:_call|_use)?\b[^>]*>[\s\S]*$/gi, "")
     // orphan open/close fragments

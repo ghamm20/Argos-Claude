@@ -8,6 +8,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { rateLimitsPath } from "./paths";
+import { withLock } from "./mutex";
 
 export interface RateConfig {
   /** Sustained rate. */
@@ -93,27 +94,43 @@ export async function take(
   source: string,
   config: RateConfig = limitFor(source)
 ): Promise<TakeResult> {
-  const now = Date.now();
-  const state = await readState();
-  const ratePerMs = config.requestsPerMinute / 60_000;
-  const existing = state[source];
-  let tokens = existing ? existing.tokens : config.burst;
-  const last = existing ? existing.lastRefillMs : now;
-  // Refill.
-  tokens = Math.min(config.burst, tokens + (now - last) * ratePerMs);
+  // Serialize the read-modify-write of rate-limits.json. Concurrent webFetch
+  // calls (e.g. the chain tool's parallel page reads) otherwise race on
+  // temp+rename — on Windows two renames to the same target throw EPERM, which
+  // surfaced as chain_search_to_read returning ok:false and Bart falling back to
+  // training data. The mutex also makes the bucket math consistent (no lost
+  // updates). Failures here degrade open (allow) rather than blocking the call.
+  return withLock("rate-limits", async () => {
+    const now = Date.now();
+    let state: BucketState;
+    try {
+      state = await readState();
+    } catch {
+      return { allowed: true, waitMs: 0, tokensRemaining: config.burst };
+    }
+    const ratePerMs = config.requestsPerMinute / 60_000;
+    const existing = state[source];
+    let tokens = existing ? existing.tokens : config.burst;
+    const last = existing ? existing.lastRefillMs : now;
+    tokens = Math.min(config.burst, tokens + (now - last) * ratePerMs);
 
-  let result: TakeResult;
-  if (tokens >= 1) {
-    tokens -= 1;
-    result = { allowed: true, waitMs: 0, tokensRemaining: Math.floor(tokens) };
-  } else {
-    const deficit = 1 - tokens;
-    const waitMs = ratePerMs > 0 ? Math.ceil(deficit / ratePerMs) : 60_000;
-    result = { allowed: false, waitMs, tokensRemaining: 0 };
-  }
-  state[source] = { tokens, lastRefillMs: now };
-  await writeState(state);
-  return result;
+    let result: TakeResult;
+    if (tokens >= 1) {
+      tokens -= 1;
+      result = { allowed: true, waitMs: 0, tokensRemaining: Math.floor(tokens) };
+    } else {
+      const deficit = 1 - tokens;
+      const waitMs = ratePerMs > 0 ? Math.ceil(deficit / ratePerMs) : 60_000;
+      result = { allowed: false, waitMs, tokensRemaining: 0 };
+    }
+    state[source] = { tokens, lastRefillMs: now };
+    try {
+      await writeState(state);
+    } catch {
+      // Persisting the bucket failed — never fail the actual web call for it.
+    }
+    return result;
+  });
 }
 
 /** Current bucket levels for the stats endpoint. */

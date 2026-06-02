@@ -33,7 +33,7 @@ import { requestTool } from "@/lib/tools/executor";
 // Forced current-facts grounding (2026-06-02) — time-sensitive queries get a
 // live web_search injected as authoritative context so Bart can't answer
 // office-holders / "current X" / 2026 facts from stale training data.
-import { detectCurrentFacts, buildCurrentFactsBlock, buildChainBlock } from "@/lib/current-facts-detector";
+import { detectCurrentFacts, buildCurrentFactsBlock, buildChainBlock, buildNoGroundingBlock } from "@/lib/current-facts-detector";
 // Weather now routes to the structured Open-Meteo tool instead of a reshaped
 // DDG search (2026-06-02). buildWeatherBlock formats its result as grounding.
 import { buildWeatherBlock } from "@/lib/tools/open-meteo";
@@ -647,11 +647,17 @@ export async function POST(req: NextRequest) {
           if (prior) query = prior;
         }
         const toolCtx = { sessionId: null, personaId: "bartimaeus", model: effectiveModel };
+        // Track whether grounding was actually injected. If the forced tool
+        // fails/returns nothing, we inject a GUARD block forbidding Bart from
+        // answering from (stale) training data — so he can't hallucinate a
+        // plausible-but-wrong answer (the "Michael Levy" CEO bug).
+        let grounded = false;
         if (cf.suggestedTool === "open_meteo_weather" && cf.location) {
           // Weather → structured Open-Meteo forecast (replaces the DDG hack).
           const outcome = await requestTool("open_meteo_weather", { location: cf.location }, toolCtx);
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildWeatherBlock(outcome.result));
+            grounded = true;
           }
         } else if (cf.suggestedTool === "chain_search_to_read") {
           // Entity / company / events → chain searches AND reads the pages,
@@ -659,6 +665,7 @@ export async function POST(req: NextRequest) {
           const outcome = await requestTool("chain_search_to_read", { query }, toolCtx);
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildChainBlock(cf, outcome.result));
+            grounded = true;
           }
         } else {
           const outcome = await requestTool(
@@ -668,7 +675,11 @@ export async function POST(req: NextRequest) {
           );
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
+            grounded = true;
           }
+        }
+        if (!grounded) {
+          systemParts.push(buildNoGroundingBlock(cf));
         }
       } catch {
         /* graceful — no grounding block; Bart's normal tool flow still applies */

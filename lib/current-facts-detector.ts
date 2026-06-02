@@ -390,3 +390,23 @@ export function buildChainBlock(
     sources.length ? `\nSources: ${sources.join("  ")}` : "",
   ].filter(Boolean).join("\n");
 }
+
+/**
+ * Guard block: a tool WAS supposed to ground this answer but failed/returned
+ * nothing. Forbids answering from (stale) training data so Bart can't guess a
+ * plausible-but-wrong name/number (the "Michael Levy" hallucination). Injected
+ * by the chat route whenever a forced tool produced no usable grounding.
+ */
+export function buildNoGroundingBlock(detection: CurrentFactsDetection): string {
+  return [
+    "GROUNDING UNAVAILABLE — DO NOT ANSWER FROM TRAINING DATA.",
+    "",
+    `The operator asked a question requiring live data (${detection.category ?? "current facts"}).`,
+    "ARGOS tried to fetch it just now but the lookup returned no usable content (the",
+    "source failed, timed out, or had nothing). Your training data is FROZEN and may",
+    "be wrong here. Do NOT guess or speculate a specific answer — no names, numbers,",
+    "office-holders, or 'plausible' figures. Tell the operator plainly that you could",
+    "not verify this right now and they can retry. One or two sentences. Do not",
+    "fabricate, and do not label a guess as 'speculation' — simply decline to guess.",
+  ].join("\n");
+}

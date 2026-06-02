@@ -98,6 +98,25 @@ try {
     const c3 = (await render(base, "Result here</tool>")).json;
     check("orphan close tag removed", c3?.answer === "Result here", JSON.stringify(c3?.answer));
 
+    console.log("\n=== BUG 2 (v2.3.3): wrapper-less tool-call JSON leak ===");
+    // The exact v2.3.2 pilot leak — a '>' prefix, NO <tool> wrapper, full blob.
+    const b1 = (await render(base, 'Let me look that up. >{"id":"chain_search_to_read","params":{"query":"CEO of Levi Strauss"}} ')).json;
+    check("'>{json}' leak stripped", !/chain_search_to_read/.test(b1?.answer ?? "") && !/"id"/.test(b1?.answer ?? ""), JSON.stringify(b1?.answer));
+    check("prose before leak preserved", /Let me look that up\./.test(b1?.answer ?? ""), JSON.stringify(b1?.answer));
+
+    // Bare blob, no prefix at all.
+    const b2 = (await render(base, '{"id":"web_search","params":{"query":"x"}}')).json;
+    check("bare tool-call JSON stripped", (b2?.answer ?? "") === "", JSON.stringify(b2?.answer));
+
+    // Blob with a trailing </tool> but no opening tag.
+    const b3 = (await render(base, 'Done {"id":"open_meteo_weather","params":{"location":"Orlando"}}</tool>')).json;
+    check("blob + orphan close stripped", b3?.answer === "Done", JSON.stringify(b3?.answer));
+
+    // A normal JSON object the operator might legitimately discuss must survive
+    // (no "id"+"params" tool-call shape → not a control blob).
+    const b4 = (await render(base, 'The config is {"name":"argos","port":7842}.')).json;
+    check("legit JSON object untouched", /\{"name":"argos","port":7842\}/.test(b4?.answer ?? ""), JSON.stringify(b4?.answer));
+
     console.log("\n=== TASK 2: reasoning panel ===");
     const r1 = (await render(base, "<think>I should check the weather first.</think>The temp is 75F.")).json;
     check("<think> answer is clean", r1?.answer === "The temp is 75F.", JSON.stringify(r1?.answer));
@@ -128,7 +147,7 @@ try {
     console.log("\n=== TASK 3: build-baked version ===");
     const rt = (await req(base, "/api/runtime")).json;
     check("runtime version == package.json", rt?.version === PKG.version, `runtime=${rt?.version} pkg=${PKG.version}`);
-    check("version is 2.2.0", rt?.version === "2.2.0", rt?.version);
+    check("version is valid semver", /^\d+\.\d+\.\d+$/.test(rt?.version ?? ""), rt?.version);
   });
 } catch (e) {
   console.error(`\n[fatal] ${e.stack || e.message}`);
