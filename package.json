@@ -31,6 +31,7 @@
     "current-facts:smoke": "node scripts/smoke-current-facts-detector.mjs",
     "chat-render:smoke": "node scripts/smoke-chat-render.mjs",
     "web:smoke-infra": "node scripts/smoke-web-infra.mjs",
+    "web:smoke-t1": "node scripts/smoke-tier1-tools.mjs",
     "loops:smoke-infra": "node scripts/smoke-loops-infra.mjs",
     "loops:smoke-t1": "node scripts/smoke-loops-tier1.mjs",
     "loops:smoke-t2": "node scripts/smoke-loops-tier2.mjs",

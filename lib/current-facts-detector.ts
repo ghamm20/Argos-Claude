@@ -243,6 +243,34 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   };
 }
 
+// ----- source routing (Web Capability, 2026-06-02) -----
+//
+// Additive: maps a query to the specialized web tools that best fit it, in
+// addition to general search. Used by the chat surface / Bart's prompt to bias
+// tool choice. Does NOT change detectCurrentFacts.
+
+const ROUTE_RULES: Array<{ re: RegExp; tools: string[] }> = [
+  { re: /\b(arxiv|paper|papers|preprint|fine[- ]?tun(e|ing)|transformer|llm|neural|machine learning|deep learning|diffusion|benchmark|sota|state[- ]of[- ]the[- ]art)\b/i, tools: ["arxiv_search", "papers_with_code", "openalex_search"] },
+  { re: /\b(model|dataset|checkpoint|weights|gguf|safetensors|hugging ?face)\b/i, tools: ["huggingface_hub"] },
+  { re: /\b(disease|symptom|clinical|patient|cancer|drug|gene|protein|therap(y|eutic)|medical|biolog|vaccine|trial)\b/i, tools: ["pubmed_search"] },
+  { re: /\b(doi|journal|citation|cited by|peer[- ]reviewed|publication)\b/i, tools: ["crossref_lookup", "openalex_search"] },
+  { re: /\b(news|breaking|headline|happening|protest|election|conflict|outbreak|event(s)? in)\b/i, tools: ["gdelt_events"] },
+  { re: /\bwho (is|was|are)\b|\bwhat (is|are)\b|\b(biography|born|founded|capital of|population of)\b/i, tools: ["wikipedia_search", "wikidata_query"] },
+];
+
+/** Recommend specialized web tools for a query (best-first, deduped). */
+export function suggestSources(query: string): string[] {
+  const q = (query ?? "").trim();
+  if (!q) return [];
+  const out: string[] = [];
+  for (const rule of ROUTE_RULES) {
+    if (rule.re.test(q)) {
+      for (const t of rule.tools) if (!out.includes(t)) out.push(t);
+    }
+  }
+  return out;
+}
+
 /** Minimal shape of the web_search ToolResult we read (data is `unknown`). */
 export interface WebSearchResultShape {
   data?: unknown;

@@ -69,6 +69,15 @@ export function buildToolAwarenessBlock(): string {
       "for current facts. If web_search returns a current president, that IS the current " +
       "president. Use it.",
     "",
+    "WHEN TO USE WHICH SOURCE (web knowledge):",
+    "- Entities / people / places / concepts → wikipedia_search (prose) + wikidata_query (structured facts).",
+    "- AI / ML / research papers → arxiv_search + papers_with_code; broaden with openalex_search.",
+    "- Academic metadata / DOI → crossref_lookup. Medical / biology → pubmed_search.",
+    "- Models / datasets → huggingface_hub.",
+    "- Global news / current events → gdelt_events (and web_search for general queries).",
+    "- A specific page's content → web_crawl. Open-ended digging → deep_research.",
+    "Always cite the source URL. State result freshness when it matters.",
+    "",
     "Available tools:",
     toolListForPrompt(),
   ].join("\n");

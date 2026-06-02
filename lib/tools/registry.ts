@@ -30,6 +30,16 @@ import * as fileOps from "./file-ops";
 import * as shellExec from "./shell-exec";
 import * as oculus from "./oculus-integration";
 import * as mirofish from "./mirofish-integration";
+// Web Capability TIER 1 (2026-06-02) — keyless knowledge sources.
+import * as wikipedia from "./wikipedia";
+import * as wikidata from "./wikidata";
+import * as arxiv from "./arxiv";
+import * as openalex from "./openalex";
+import * as papersWithCode from "./papers-with-code";
+import * as huggingface from "./huggingface";
+import * as crossref from "./crossref";
+import * as pubmed from "./pubmed";
+import * as gdelt from "./gdelt";
 
 export const TOOLS: ToolDefinition[] = [
   // ---- web (all safe) ----
@@ -76,6 +86,106 @@ export const TOOLS: ToolDefinition[] = [
     dangerous: false,
     reversible: true,
     execute: osint.execute,
+  },
+  // ---- web knowledge sources (TIER 1, all safe + keyless) ----
+  {
+    id: "wikipedia_search",
+    name: "Wikipedia",
+    description: "Look up an entity/topic on Wikipedia — summary + full article text.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: wikipedia.execute,
+  },
+  {
+    id: "wikidata_query",
+    name: "Wikidata",
+    description: "Structured entity facts from Wikidata (or a raw SPARQL query).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: wikidata.execute,
+  },
+  {
+    id: "arxiv_search",
+    name: "arXiv",
+    description: "Search arXiv preprints (AI/ML/physics/math) by query, category, date.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: arxiv.execute,
+  },
+  {
+    id: "openalex_search",
+    name: "OpenAlex",
+    description: "Open scholarly works — citations, authors, institutions, OA links.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: openalex.execute,
+  },
+  {
+    id: "papers_with_code",
+    name: "Papers With Code",
+    description: "ML papers linked to code + SOTA benchmarks/leaderboards.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: papersWithCode.execute,
+  },
+  {
+    id: "huggingface_hub",
+    name: "Hugging Face Hub",
+    description: "Discover models/datasets — downloads, likes, tags, license.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: huggingface.execute,
+  },
+  {
+    id: "crossref_lookup",
+    name: "Crossref",
+    description: "Academic metadata + DOI resolution (title, authors, journal, year).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: crossref.execute,
+  },
+  {
+    id: "pubmed_search",
+    name: "PubMed",
+    description: "Medical/biological literature (NCBI) — abstracts + journal metadata.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: pubmed.execute,
+  },
+  {
+    id: "gdelt_events",
+    name: "GDELT",
+    description: "Global news/event monitoring — recent articles by query/timespan/country.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: gdelt.execute,
   },
   // ---- documents ----
   {
