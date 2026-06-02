@@ -52,5 +52,9 @@ data/memory/
 # fixed 2026-06-02 so new memory API routes are trackable.
 /memory/
 /state/
+# Tools Phase (2026-06-02) — runtime tool artifacts (generated docs +
+# restore-point snapshots). Never committed.
+/output/
+/restore/
 _diag_*.json
 _diag_*.log

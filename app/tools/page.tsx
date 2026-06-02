@@ -63,6 +63,29 @@ interface SchedulerStatus {
   };
 }
 
+// Tools Phase (2026-06-02) — the 18-tool governed suite.
+interface SuiteTool {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  dangerous: boolean;
+  requiresApproval: boolean;
+  requiresRestore: boolean;
+  reversible: boolean;
+  executions: number;
+  lastUsed: string | null;
+  lastOk: boolean | null;
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  web: "Web",
+  document: "Documents",
+  comms: "Comms",
+  security: "Security",
+  system: "System",
+};
+
 function shortIso(s: string): string {
   return s ? s.replace("T", " ").slice(0, 16) : "";
 }
@@ -98,6 +121,8 @@ export default function ToolsPage() {
   // Phase 11 — scheduler + alerts state.
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
   const [pushoverConfigured, setPushoverConfigured] = useState<boolean | null>(null);
+  // Tools Phase — the 18 governed tools.
+  const [suite, setSuite] = useState<SuiteTool[] | null>(null);
 
   const refreshCache = useCallback(async () => {
     try {
@@ -140,11 +165,23 @@ export default function ToolsPage() {
     }
   }, []);
 
+  const refreshSuite = useCallback(async () => {
+    try {
+      const r = await fetch("/api/tools/suite", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as { tools: SuiteTool[] };
+      setSuite(j.tools);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     void refreshCache();
     void refreshScheduler();
     void refreshPushover();
-  }, [refreshCache, refreshScheduler, refreshPushover]);
+    void refreshSuite();
+  }, [refreshCache, refreshScheduler, refreshPushover, refreshSuite]);
 
   const toggleScheduler = useCallback(
     async (action: "start" | "stop") => {
@@ -247,10 +284,84 @@ export default function ToolsPage() {
         <header className="mb-6">
           <h1 className="text-[20px] font-medium tracking-tight">Tools</h1>
           <p className="text-[12px] text-neutral-500 mt-1">
-            Phase 10 — research pipeline. Network only fires when these
-            buttons run or when a chat turn triggers a research keyword.
+            Bartimaeus&apos;s tool suite (governed: disclose · approve · restore ·
+            audit) plus the Phase 10 research pipeline.
           </p>
         </header>
+
+        {/* Tools Phase — the 18 governed tools */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">
+              Tool suite{" "}
+              <span className="text-neutral-500 text-[11px]">
+                {suite ? `(${suite.length})` : ""}
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => void refreshSuite()}
+              className="text-[11px] text-neutral-400 hover:text-neutral-200"
+            >
+              Reload
+            </button>
+          </div>
+          {suite === null ? (
+            <div className="text-[12px] text-neutral-500">Loading…</div>
+          ) : (
+            ["web", "document", "comms", "security", "system"].map((cat) => {
+              const tools = suite.filter((t) => t.category === cat);
+              if (tools.length === 0) return null;
+              return (
+                <div key={cat} className="mb-3 last:mb-0">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-600 mb-1">
+                    {CATEGORY_LABEL[cat] ?? cat}
+                  </div>
+                  <ul className="space-y-1">
+                    {tools.map((t) => (
+                      <li
+                        key={t.id}
+                        className="flex items-center gap-2 px-2 py-1 rounded border border-neutral-800/60 text-[12px]"
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full shrink-0"
+                          style={{
+                            background: t.dangerous ? "#f59e0b" : "#10b981",
+                          }}
+                          title={t.dangerous ? "dangerous (approval required)" : "safe"}
+                        />
+                        <span className="font-mono text-[11px] text-neutral-300 w-40 shrink-0 truncate">
+                          {t.id}
+                        </span>
+                        <span className="text-neutral-400 flex-1 truncate">
+                          {t.description}
+                        </span>
+                        {t.requiresApproval && (
+                          <span className="text-[9px] uppercase tracking-wider text-amber-400">
+                            approval
+                          </span>
+                        )}
+                        {t.requiresRestore && (
+                          <span className="text-[9px] uppercase tracking-wider text-blue-400">
+                            restore
+                          </span>
+                        )}
+                        <span
+                          className="text-[10px] text-neutral-500 w-24 text-right shrink-0"
+                          title={t.lastUsed ? `last used ${t.lastUsed}` : "never used"}
+                        >
+                          {t.executions > 0
+                            ? `${t.executions}× · ${t.lastUsed ? shortIso(t.lastUsed) : ""}`
+                            : "—"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })
+          )}
+        </section>
 
         {/* Research streams */}
         <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">

@@ -16,7 +16,7 @@ import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 // server falls back to guest mode if requirePin is enabled, or to
 // operator mode otherwise.
 import { getSessionToken } from "@/lib/auth-client";
-import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
+import { Paperclip, ChevronDown, ChevronRight, Wrench } from "lucide-react";
 // Vision Phase 1 (2026-06-02) — image drop, screenshot, preview strip.
 import { ImageDropButton } from "./vision/ImageDropButton";
 import { ScreenshotButton } from "./vision/ScreenshotButton";
@@ -26,7 +26,12 @@ import {
   useArgos,
   type ChatMessage,
   type CitedHit,
+  type ToolResultCard,
 } from "@/lib/store";
+import {
+  ToolApprovalDialog,
+  type ToolApprovalReq,
+} from "./tools/ToolApprovalDialog";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { chatToMarkdown, exportFilename } from "@/lib/chat-export";
 
@@ -166,6 +171,60 @@ function SourcesBlock({
   );
 }
 
+/** Tools Phase — strip Bart's <tool>{json}</tool> tags from displayed text. */
+function stripToolTags(content: string): string {
+  return content.replace(/<tool>[\s\S]*?<\/tool>/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Tools Phase — inline result card for a tool execution. */
+function ToolResultCardView({ card, accent }: { card: ToolResultCard; accent: string }) {
+  const [open, setOpen] = useState(false);
+  const color = card.ok ? accent : "#ef4444";
+  return (
+    <div
+      className="rounded-md border bg-black/30 px-3 py-2 text-[12px]"
+      style={{ borderColor: `${color}55` }}
+      data-testid="tool-result-card"
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full text-left"
+      >
+        <Wrench className="h-3.5 w-3.5" style={{ color }} />
+        <span className="font-mono text-[11px]" style={{ color }}>
+          {card.toolId}
+        </span>
+        <span className="text-neutral-300 flex-1 truncate">{card.summary}</span>
+        {open ? (
+          <ChevronDown className="h-3 w-3 text-neutral-500" />
+        ) : (
+          <ChevronRight className="h-3 w-3 text-neutral-500" />
+        )}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1">
+          {card.error && <div className="text-red-400 text-[11px]">{card.error}</div>}
+          {card.data != null && (
+            <pre className="text-[10px] text-neutral-400 bg-black/40 rounded p-2 overflow-x-auto max-h-60 whitespace-pre-wrap">
+              {JSON.stringify(card.data, null, 2).slice(0, 4000)}
+            </pre>
+          )}
+          {card.sources && card.sources.length > 0 && (
+            <div className="text-[10px] text-neutral-500">
+              {card.sources.slice(0, 5).map((s, i) => (
+                <div key={i} className="truncate">
+                  · {s}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({
   msg,
   onPillClick,
@@ -255,7 +314,9 @@ function MessageBubble({
               <>
                 <span>
                   {renderWithCitations(
-                    msg.content,
+                    // Tools Phase — hide the <tool>{…}</tool> control tags
+                    // from the operator; only the prose is shown.
+                    stripToolTags(msg.content),
                     msg.retrievalHits,
                     accent,
                     onPillClick
@@ -278,6 +339,14 @@ function MessageBubble({
                     accent={accent}
                     onHitClick={onPillClick}
                   />
+                )}
+                {/* Tools Phase — inline tool result cards. */}
+                {msg.toolResults && msg.toolResults.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {msg.toolResults.map((t, i) => (
+                      <ToolResultCardView key={i} card={t} accent={accent} />
+                    ))}
+                  </div>
                 )}
                 {/* Voice UX (2026-05-27): PlayButton lives BELOW the
                     message body now. Big teal "▶ Speak" button — see
@@ -349,6 +418,18 @@ interface OllamaStreamLine {
   // recalled this turn; injected = whether a recall block was added.
   factsFound?: number;
   injected?: boolean;
+  // Tools Phase — tool_result + tool_approval_required frames. (`error` is
+  // already declared above for Ollama errors; reuse it.)
+  ok?: boolean;
+  toolId?: string;
+  summary?: string;
+  sources?: string[] | null;
+  data?: unknown;
+  approvalId?: string;
+  tool?: string;
+  description?: string;
+  risks?: string;
+  reversible?: boolean;
 }
 
 export function ChatPane() {
@@ -412,6 +493,10 @@ export function ChatPane() {
   // errors (oversize/unsupported/over-cap). attachError auto-clears.
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // Tools Phase — pending dangerous-tool approval (drives the modal dialog)
+  // and the per-turn accumulator of tool result cards.
+  const [pendingApproval, setPendingApproval] = useState<ToolApprovalReq | null>(null);
+  const turnToolsRef = useRef<ToolResultCard[]>([]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Holds the in-flight stream's AbortController so the operator can
@@ -446,6 +531,60 @@ export function ChatPane() {
   const removeImage = useCallback((id: string) => {
     setAttachedImages((prev) => prev.filter((i) => i.id !== id));
   }, []);
+
+  // Tools Phase — resolve a pending approval (APPROVE/DENY/timeout). On approve
+  // the executor runs the tool (restore point first if required) and returns
+  // the result; on deny we record the non-execution. Append the outcome as a
+  // tool card on the current assistant message.
+  const appendToolCard = useCallback((card: ToolResultCard) => {
+    const msgs = useArgos.getState().messages;
+    const last = msgs[msgs.length - 1];
+    const prior = last?.toolResults ?? [];
+    patchLastMessage({ toolResults: [...prior, card] });
+  }, [patchLastMessage]);
+
+  const resolveApproval = useCallback(
+    async (decision: "approve" | "deny") => {
+      const req = pendingApproval;
+      setPendingApproval(null);
+      if (!req) return;
+      if (decision === "deny") {
+        appendToolCard({
+          toolId: req.toolId,
+          ok: false,
+          summary: "denied by operator",
+          error: "operator denied the tool",
+        });
+        return;
+      }
+      try {
+        const r = await fetch("/api/tools/approve", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ approvalId: req.approvalId, decision: "approve" }),
+        });
+        const j = (await r.json()) as { result?: ToolResultCard | null };
+        if (j.result) {
+          appendToolCard({
+            toolId: j.result.toolId ?? req.toolId,
+            ok: j.result.ok === true,
+            summary: j.result.summary ?? "",
+            data: j.result.data ?? null,
+            sources: j.result.sources ?? null,
+            error: j.result.error ?? null,
+          });
+        }
+      } catch (e) {
+        appendToolCard({
+          toolId: req.toolId,
+          ok: false,
+          summary: "approval request failed",
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    },
+    [pendingApproval, appendToolCard]
+  );
 
   // Hydrate vault counts on mount so retrieval is enabled even if the user
   // never visits the Vault tab.
@@ -603,6 +742,8 @@ export function ChatPane() {
       setAttachError(null);
     }
     setStreaming(true);
+    // Tools Phase — fresh tool-result accumulator for this turn.
+    turnToolsRef.current = [];
 
     // Wire history: prior turns are text-only (bound payload); only the
     // current user turn carries images, in Ollama's native `images` field.
@@ -745,6 +886,32 @@ export function ChatPane() {
               });
               continue;
             }
+            if (data?.type === "tool_result") {
+              // Tools Phase — a safe tool ran (or an approved one returned).
+              const card: ToolResultCard = {
+                toolId: data.toolId ?? "tool",
+                ok: data.ok === true,
+                summary: data.summary ?? "",
+                data: data.data ?? null,
+                sources: data.sources ?? null,
+                error: data.error ?? null,
+              };
+              turnToolsRef.current = [...turnToolsRef.current, card];
+              patchLastMessage({ toolResults: [...turnToolsRef.current] });
+              continue;
+            }
+            if (data?.type === "tool_approval_required") {
+              // Tools Phase — a dangerous tool needs operator confirmation.
+              setPendingApproval({
+                approvalId: data.approvalId ?? "",
+                toolId: data.toolId ?? "",
+                tool: data.tool ?? data.toolId ?? "tool",
+                description: data.description ?? "",
+                risks: data.risks ?? "",
+                reversible: data.reversible === true,
+              });
+              continue;
+            }
             const chunk = data?.message?.content;
             if (chunk) {
               if (firstTokenAt === null) {
@@ -821,6 +988,7 @@ export function ChatPane() {
               retrievalError: m.retrievalError,
               errored: m.errored,
               images: m.images,
+              toolResults: m.toolResults,
             })),
           };
           const r = await fetch("/api/chat/sessions", {
@@ -1023,6 +1191,10 @@ export function ChatPane() {
         )}
       </div>
       {showHistory && <SessionList onClose={() => setShowHistory(false)} />}
+      {/* Tools Phase — governance approval gate (modal, 60s auto-deny). */}
+      {pendingApproval && (
+        <ToolApprovalDialog req={pendingApproval} onResolve={resolveApproval} />
+      )}
       <div
         ref={scrollerRef}
         className="flex-1 px-10 py-4 overflow-y-auto relative"

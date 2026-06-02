@@ -33,7 +33,9 @@ const NAV: NavItem[] = [
   // Memory Phase (2026-06-02) — Memory is a real feature (Phase 9 store +
   // semantic cross-session recall). No longer a stub → no v2 label.
   { id: "memory", label: "Memory", icon: Database, active: true, route: "/memory" },
-  { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools", stub: true },
+  // Tools Phase (2026-06-02) — Tools is a real feature (research pipeline +
+  // Bartimaeus's 18-tool governed suite). No longer a stub → no v2 label.
+  { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools" },
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 

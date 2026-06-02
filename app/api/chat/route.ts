@@ -20,6 +20,16 @@ import {
 // after the stream closes (Bobby). Both degrade silently — chat never breaks.
 import { retrieveMemories } from "@/lib/memory-retrieve";
 import { extractAndStore } from "@/lib/memory-extract";
+// Tools Phase (2026-06-02) — Bartimaeus tool suite. Tool awareness is injected
+// into his system prompt; <tool>{...}</tool> calls in his reply route through
+// the governance executor (disclose/approve/restore/audit). Graceful: a tool
+// failure is reported, chat continues.
+import {
+  buildToolAwarenessBlock,
+  parseToolCalls,
+  continuationPrompt,
+} from "@/lib/tools/chat-tools";
+import { requestTool } from "@/lib/tools/executor";
 // Phase 9 (router) — persona auto-routing suggestion. The chat path
 // uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
 // adds zero latency and never calls a model. Suggestion-only.
@@ -557,6 +567,13 @@ export async function POST(req: NextRequest) {
     systemParts.push(recall.block);
   }
   systemParts.push(baseSystemPrompt);
+  // Tools Phase — give Bartimaeus tool awareness (operator turns only; guests
+  // never get tools). Other personas don't carry the tool block, so they won't
+  // emit tool tags. Skipped on vision turns (the model is gemma4 there).
+  const toolsEnabled = isOperator && body.personaId === "bartimaeus" && !visionTurn;
+  if (toolsEnabled) {
+    systemParts.push(buildToolAwarenessBlock());
+  }
   if (memoryBlock.length > 0) {
     systemParts.push(memoryBlock);
   }
@@ -828,6 +845,87 @@ export async function POST(req: NextRequest) {
             }
           }
         }
+
+        // ---- Tools Phase: execute a tool if Bartimaeus requested one ----
+        // Bounded to ONE tool per turn. Safe tools run now and Bart continues
+        // with the result; dangerous tools emit an approval request and pause
+        // (the operator confirms via the dialog → /api/tools/approve). Wrapped
+        // so a tool failure can NEVER break the chat stream.
+        if (toolsEnabled) {
+          try {
+            const calls = parseToolCalls(assistantBuf);
+            if (calls.length > 0) {
+              const call = calls[0];
+              const outcome = await requestTool(call.id, call.params, {
+                sessionId: null,
+                personaId: body.personaId,
+                model: effectiveModel,
+              });
+              if (outcome.kind === "approval") {
+                controllerInner.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "tool_approval_required",
+                      approvalId: outcome.approvalId,
+                      toolId: outcome.toolId,
+                      tool: outcome.toolName,
+                      description: outcome.description,
+                      risks: outcome.risks,
+                      reversible: outcome.reversible,
+                    })}\n`
+                  )
+                );
+              } else {
+                const r = outcome.result;
+                controllerInner.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "tool_result",
+                      toolId: r.toolId,
+                      ok: r.ok,
+                      summary: r.summary,
+                      data: r.data ?? null,
+                      sources: r.sources ?? null,
+                      error: r.error ?? null,
+                    })}\n`
+                  )
+                );
+                // Continuation: feed the result back so Bart finishes his
+                // answer with it in hand. Best-effort, single round.
+                try {
+                  const cont = await fetch(OLLAMA_CHAT, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      model: effectiveModel,
+                      messages: [
+                        ...ollamaMessages,
+                        { role: "assistant", content: assistantBuf },
+                        { role: "user", content: continuationPrompt(call.id, r) },
+                      ],
+                      stream: true,
+                      think: false,
+                      options: { think: false },
+                    }),
+                  });
+                  if (cont.ok && cont.body) {
+                    const cr = cont.body.getReader();
+                    while (true) {
+                      const { done: cdone, value: cval } = await cr.read();
+                      if (cdone) break;
+                      if (cval) controllerInner.enqueue(cval);
+                    }
+                  }
+                } catch {
+                  /* continuation is best-effort */
+                }
+              }
+            }
+          } catch {
+            /* tool processing must never break the chat stream */
+          }
+        }
+
         // Tail the stream with our retrieval set so the client can render pills.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(retrievalEvent)}\n`)

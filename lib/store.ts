@@ -29,6 +29,18 @@ export interface ChatMessage {
   /** Vision Phase 1 — data-URL images attached to a user turn. Rendered as
    *  thumbnails in the chat history and sent to the multimodal model. */
   images?: string[];
+  /** Tools Phase — structured tool results returned during this assistant
+   *  turn, rendered as inline cards. */
+  toolResults?: ToolResultCard[];
+}
+
+export interface ToolResultCard {
+  toolId: string;
+  ok: boolean;
+  summary: string;
+  data?: unknown;
+  sources?: string[] | null;
+  error?: string | null;
 }
 
 export interface HudMetrics {
