@@ -4,16 +4,20 @@
 //
 // THE PROBLEM: asked "who is the president?", Bartimaeus answered from training
 // data ("Joe Biden") instead of calling web_search — training data is frozen,
-// so any current-fact answer is silently stale.
+// so any current-fact answer is silently stale. Same for weather, prices, news.
 //
 // THE FIX: detect time-sensitive / current-fact queries server-side and FORCE a
 // live web_search BEFORE the model generates, injecting the fresh results as
 // authoritative context. The model can no longer answer office-holders, "the
-// latest X", prices, weather, or "as of 2026" from memory — the current truth
-// is already in front of it.
+// latest X", prices, weather, or "as of 2026" from memory.
 //
-// Pure + dependency-free. The chat route owns the actual web_search call; this
-// module only decides WHEN to force it and how to frame the result.
+// Weather + typo tolerance (2026-06-02 update): weather is a first-class
+// trigger ("temp in", "forecast", "how hot"), the detector is misspelling-
+// tolerant via a bounded edit-distance match ("forxast" → "forecast"), and a
+// weather query is reshaped to "weather forecast <location> today" so DDG
+// actually returns the current conditions instead of junk.
+//
+// Pure + dependency-free.
 
 export type CurrentFactsCategory =
   | "office-holder"
@@ -27,78 +31,133 @@ export type CurrentFactsCategory =
 
 export interface CurrentFactsDetection {
   isCurrentFacts: boolean;
+  /** Alias of isCurrentFacts — should the chat route force a tool call? */
+  requiresTool: boolean;
+  /** 0..1 confidence that this needs live grounding. */
+  confidence: number;
   category: CurrentFactsCategory | null;
   reason: string;
-  /** The query to hand to web_search (lightly cleaned). */
+  /** The query to hand to web_search (cleaned; weather-reshaped for weather). */
   suggestedQuery: string;
 }
 
-// Markers that the query is about the PAST (a historical fact, not a current
-// one). If these are present AND no explicit "current" marker is, we do NOT
-// force a search — "who was the first president" should not trigger.
+// Markers that the query is about the PAST. If present AND no explicit "current"
+// marker is, we do NOT force a search — "who was the first president" must not
+// trigger.
 const HISTORICAL_RE =
   /\b(was|were|former|ex-|previous(ly)?|used to|in (1\d{3}|20[01]\d)|history of|founded|founding|first (ever|president|ruler)|originally|back in|centuries? ago|ancient)\b/i;
 
-// Explicit "I mean RIGHT NOW" markers — these override the historical guard.
+// Explicit "I mean RIGHT NOW" markers — override the historical guard.
 const EXPLICIT_CURRENT_RE =
   /\b(current(ly)?|right now|as of (today|now|this)|today|tonight|this (year|month|week|morning)|these days|nowadays|at the moment|latest|most recent|up[- ]to[- ]date)\b/i;
+
+// Explicit weather triggers (incl. "temp", common forecast misspellings).
+const WEATHER_RE =
+  /\b(weather|forecast|forcast|forxast|forecst|temp|temperature|how (hot|cold|warm)|(is it )?(raining|snowing|sunny|rainy|humid|windy)|degrees|fahrenheit|celsius)\b/i;
 
 interface Pattern {
   category: CurrentFactsCategory;
   re: RegExp;
   reason: string;
+  /** base confidence when this pattern matches */
+  conf: number;
 }
 
-// Each pattern, if matched, marks the query as current-facts. Office-holder and
-// the others fire even without an explicit "current" word, because the present
-// tense ("who is the president") is inherently a current-fact question.
 const PATTERNS: Pattern[] = [
+  {
+    category: "weather",
+    re: WEATHER_RE,
+    reason: "asks about current weather / temperature / forecast",
+    conf: 0.9,
+  },
   {
     category: "office-holder",
     re: /\bwho('?s| is| are)\b[^?]*\b(president|vice[- ]president|prime minister|pm|chancellor|premier|monarch|king|queen|pope|ceo|chief executive|governor|mayor|senator|secretary of|head of state|leader|chair(man|woman|person)?)\b/i,
     reason: "asks who currently holds an office/role",
+    conf: 0.9,
   },
   {
     category: "office-holder",
     re: /\b(president|prime minister|chancellor|ceo|governor|mayor|leader|monarch|king|queen|pope)\s+of\s+[a-z]/i,
     reason: "names a current office/role of an entity",
-  },
-  {
-    category: "time-relative",
-    re: EXPLICIT_CURRENT_RE,
-    reason: "uses a time-relative marker (current/now/today/latest/…)",
-  },
-  {
-    category: "explicit-year",
-    re: /\b(202[4-9]|20[3-9]\d)\b/,
-    reason: "references a current/near-future year",
-  },
-  {
-    category: "price-market",
-    re: /\b(stock price|share price|market cap|exchange rate|price of|how much (is|does|are)|bitcoin|ethereum|crypto|gas price|interest rate|inflation rate)\b/i,
-    reason: "asks about a live price / market figure",
-  },
-  {
-    category: "weather",
-    re: /\b(weather|forecast|temperature (in|at|today|right now)|is it (raining|snowing|sunny))\b/i,
-    reason: "asks about current weather",
-  },
-  {
-    category: "news-event",
-    re: /\b(news|headlines?|breaking|what'?s happening|latest on|update on|did .* (win|happen|announce))\b/i,
-    reason: "asks about recent news / events",
-  },
-  {
-    category: "sports",
-    re: /\b(score|who won|winner of|champions?|standings|final score|playoffs?|world cup|super bowl)\b/i,
-    reason: "asks about a live/recent sports result",
+    conf: 0.85,
   },
   {
     category: "datetime",
     re: /\b(what (time|day|date) is it|what'?s the (time|date)|today'?s date|current (time|date))\b/i,
     reason: "asks for the current date/time",
+    conf: 0.9,
+  },
+  {
+    category: "price-market",
+    re: /\b(stock price|share price|market cap|exchange rate|price of|how much (is|does|are)|bitcoin|ethereum|crypto|gas price|interest rate|inflation rate)\b/i,
+    reason: "asks about a live price / market figure",
+    conf: 0.85,
+  },
+  {
+    category: "news-event",
+    re: /\b(news|headlines?|breaking|what'?s happening|latest on|update on|did .* (win|happen|announce))\b/i,
+    reason: "asks about recent news / events",
+    conf: 0.8,
+  },
+  {
+    category: "sports",
+    re: /\b(score|who won|winner of|champions?|standings|final score|playoffs?|world cup|super bowl)\b/i,
+    reason: "asks about a live/recent sports result",
+    conf: 0.8,
+  },
+  {
+    category: "time-relative",
+    re: EXPLICIT_CURRENT_RE,
+    reason: "uses a time-relative marker (current/now/today/latest/…)",
+    conf: 0.8,
+  },
+  {
+    category: "explicit-year",
+    re: /\b(202[4-9]|20[3-9]\d)\b/,
+    reason: "references a current/near-future year",
+    conf: 0.7,
   },
 ];
+
+// ----- typo tolerance -----
+
+/** Bounded Levenshtein (returns 3+ when clearly far / length gap > 2). */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 3;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(
+        dp[j] + 1,
+        dp[j - 1] + 1,
+        prev + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+const WEATHER_VOCAB = ["weather", "forecast", "temperature", "raining", "snowing", "humidity", "sunny"];
+
+/** Fuzzy weather match — catches misspellings like "forxast" → "forecast". */
+function fuzzyWeather(q: string): boolean {
+  const tokens = q.toLowerCase().replace(/[^a-z]/g, " ").split(/\s+/).filter((w) => w.length >= 5);
+  for (const tok of tokens) {
+    for (const w of WEATHER_VOCAB) {
+      if (editDistance(tok, w) <= 2) return true;
+    }
+  }
+  return false;
+}
+
+// ----- query shaping -----
 
 function cleanQuery(q: string): string {
   return q
@@ -109,40 +168,79 @@ function cleanQuery(q: string): string {
     .slice(0, 200);
 }
 
+const WEATHER_STOP = new Set([
+  "what", "whats", "what's", "is", "the", "a", "an", "temp", "temperature", "weather",
+  "forecast", "forxast", "forcast", "forecst", "in", "at", "for", "right", "now", "today",
+  "tonight", "currently", "current", "also", "how", "hot", "cold", "warm", "raining",
+  "snowing", "sunny", "rainy", "humid", "windy", "degrees", "fahrenheit", "celsius",
+  "me", "tell", "where", "you", "got", "this", "answer", "snswer", "of", "and", "please",
+  "like", "its", "it's", "im", "i'm", "im", "be",
+]);
+
+/** Reshape a weather query into one DDG resolves to current conditions: keep the
+ *  likely location words, strip filler, prefix "weather forecast", suffix "today". */
+function weatherQuery(q: string): string {
+  const loc = q
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !WEATHER_STOP.has(w))
+    .join(" ")
+    .trim();
+  return loc ? `weather forecast ${loc} today` : `weather forecast ${cleanQuery(q)}`;
+}
+
 /**
  * Decide whether a query is time-sensitive enough that the model must NOT answer
  * from training data. Conservative on clearly-historical questions (unless an
- * explicit "current" marker is present).
+ * explicit "current" marker is present). Returns a confidence score and, for
+ * weather, a reshaped search query.
  */
 export function detectCurrentFacts(query: string): CurrentFactsDetection {
   const q = (query ?? "").trim();
-  const none: CurrentFactsDetection = {
-    isCurrentFacts: false,
-    category: null,
-    reason: "not time-sensitive",
-    suggestedQuery: cleanQuery(q),
-  };
-  if (!q) return none;
+  if (!q) {
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "" };
+  }
 
   const explicitCurrent = EXPLICIT_CURRENT_RE.test(q);
   const historical = HISTORICAL_RE.test(q);
 
+  // Collect every matching pattern (so we can take the strongest signal + boost
+  // when a category co-occurs with an explicit "right now").
+  const matches: Pattern[] = [];
   for (const p of PATTERNS) {
     if (!p.re.test(q)) continue;
-    // The time-relative pattern IS the explicit-current marker, so it always
-    // counts. For the others, a clearly-historical phrasing without a current
-    // marker is treated as a past-fact question and NOT forced.
-    if (p.category !== "time-relative" && historical && !explicitCurrent) {
-      continue;
-    }
-    return {
-      isCurrentFacts: true,
-      category: p.category,
-      reason: p.reason,
-      suggestedQuery: cleanQuery(q),
-    };
+    if (p.category !== "time-relative" && historical && !explicitCurrent) continue;
+    matches.push(p);
   }
-  return none;
+  // Typo-tolerant weather fallback (e.g. "forxast" the regex missed).
+  if (!matches.some((m) => m.category === "weather") && fuzzyWeather(q) && (!historical || explicitCurrent)) {
+    matches.push({ category: "weather", re: WEATHER_RE, reason: "weather term (fuzzy/misspelled)", conf: 0.85 });
+  }
+
+  if (matches.length === 0) {
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "not time-sensitive", suggestedQuery: cleanQuery(q) };
+  }
+
+  // Primary = highest-confidence NON-time-relative match if any (more specific),
+  // else the time-relative one.
+  const nonTime = matches.filter((m) => m.category !== "time-relative");
+  const primary = (nonTime.length ? nonTime : matches).reduce((a, b) => (b.conf > a.conf ? b : a));
+  const hasTimeMarker = matches.some((m) => m.category === "time-relative");
+  // Co-occurring "right now" + a specific category → higher confidence.
+  let confidence = primary.conf;
+  if (hasTimeMarker && primary.category !== "time-relative") confidence = Math.min(0.98, confidence + 0.05);
+
+  const suggestedQuery = primary.category === "weather" ? weatherQuery(q) : cleanQuery(q);
+
+  return {
+    isCurrentFacts: true,
+    requiresTool: true,
+    confidence: +confidence.toFixed(2),
+    category: primary.category,
+    reason: primary.reason,
+    suggestedQuery,
+  };
 }
 
 /** Minimal shape of the web_search ToolResult we read (data is `unknown`). */
