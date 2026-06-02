@@ -20,6 +20,9 @@ import {
   isWithinBoundary,
 } from "../rsi-gate";
 import { argosRoot } from "../../vault/paths";
+import { applyWithBackupTest, type ApplyTest } from "../apply";
+import { readAllTraces } from "../trace-store";
+import { readLessons } from "../lessons";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -131,15 +134,36 @@ export const rsiApply: LoopDefinition = {
 };
 
 // --- Loop3: Codebase Rewrite (Saturday 2AM) ---------------------------------
-// Propose a full-file rewrite of a NON-governance source file. The proposal
-// (kind "patch", payload = new file content) requires operator approval + a
-// restore point; it is applied only by approve-patch. Refuses governance
-// targets and anything outside the boundary.
+// Three modes, all governance- and boundary-gated:
+//   - No target (the Saturday 2AM scheduled run): analyze the week's failures +
+//     reflexion lessons and write a PATCH-PROPOSAL REPORT. It does NOT pick and
+//     rewrite files unattended — autonomous rewrites are scoped to explicit
+//     operator/loop targets, because a wrong file choice at 2AM is exactly the
+//     failure mode the doctrine's backup+test guards against, and a bad target
+//     can still typecheck.
+//   - target + apply:true: AUTONOMOUS — backup -> write -> test -> keep if
+//     green, rollback if red (the all-night doctrine). Test is typecheck by
+//     default (or input.test = none|reject for the smoke).
+//   - target, no apply: propose-only (returns a patch proposal).
+function inputBool(ctx: LoopContext, key: string): boolean {
+  return ctx.input?.[key] === true;
+}
+function resolveCodeTest(kind: string): ApplyTest {
+  switch (kind) {
+    case "none":
+      return { kind: "none" };
+    case "reject":
+      return { kind: "fn", run: async () => false };
+    default:
+      return { kind: "command", argv: ["npm", "run", "typecheck"], shell: true, timeoutMs: 180_000 };
+  }
+}
+
 export const codebaseRewrite: LoopDefinition = {
   id: "codebase_rewrite",
   loopNumber: 3,
   name: "Codebase Rewrite",
-  description: "Propose a reviewed full-file rewrite (Saturday 2AM, operator-gated).",
+  description: "Autonomous full-file rewrite behind backup+test (Saturday 2AM analysis; targeted apply).",
   trigger: "scheduled",
   schedule: { dayOfWeek: 6, hour: 2, minute: 0, label: "Saturday 2AM" },
   governed: true,
@@ -148,73 +172,134 @@ export const codebaseRewrite: LoopDefinition = {
     try {
       const target = inputStr(ctx, "target");
       const goal = inputStr(ctx, "goal") || "Improve clarity and add comments without changing behavior.";
+
+      // ---- Mode 1: scheduled analysis (no target) → write a proposal report ----
       if (!target) {
+        const failures = (await readAllTraces(60)).filter(
+          (t) => t.outcome === "error" || t.outcome === "rejected" || t.outcome === "halted"
+        );
+        const lessons = (await readLessons()).filter((l) => l.failureCount >= 2);
+        const day = new Date().toISOString().slice(0, 10);
+        const lines = [
+          `# ARGOS codebase patch proposals — ${day}`,
+          "",
+          `${failures.length} failures + ${lessons.length} recurring lessons reviewed.`,
+          "",
+          "> Autonomous unattended rewrites are NOT performed without an explicit",
+          "> target. To apply a fix: /api/loops/evolve { loop: codebase_rewrite,",
+          "> input: { target, goal, apply: true } } — backup + typecheck-gated.",
+          "",
+          "## Recurring lessons (candidates for a code fix)",
+          ...(lessons.length ? lessons.map((l) => `- (${l.failureCount}×) ${l.lesson}`) : ["- none"]),
+          "",
+          "## Recent failures",
+          ...(failures.length ? failures.slice(0, 20).map((f) => `- ${f.loopId}: ${f.result.summary}`) : ["- none"]),
+        ];
+        const reportPath = path.join(argosRoot(), "state", "loops", "patches", `proposals-${day}.md`);
+        try {
+          await fsp.mkdir(path.dirname(reportPath), { recursive: true });
+          await fsp.writeFile(reportPath, lines.join("\n") + "\n", "utf8");
+        } catch {
+          /* report best-effort */
+        }
         return {
           loopId: "codebase_rewrite",
           loopNumber: 3,
           ok: true,
-          summary: "no target file — nothing proposed",
+          summary: `analyzed ${failures.length} failures + ${lessons.length} lessons → proposal report`,
           claimedImprovement: false,
           claimedScore: null,
           benchmarkBefore: null,
           benchmarkAfter: null,
           evidence: [],
           proposals: [],
-          data: { note: "Provide a target file to propose a rewrite. Governance files are refused." },
+          data: { reportPath, failures: failures.length, lessons: lessons.length, output: "patch-proposal-report" },
           error: null,
           durationMs: Date.now() - start,
         };
       }
-      // Hard refusals BEFORE reading anything. (Governance targets are blocked
-      // later by annotateRsiProposal unless ARGOS_RSI_ALLOW_GOVERNANCE is set.)
-      if (!isWithinBoundary(target)) {
-        return refusal(start, target, "outside the ARGOS_ROOT boundary");
+
+      // ---- Hard refusals BEFORE reading/writing anything ----
+      if (!isWithinBoundary(target)) return refusal(start, target, "outside the ARGOS_ROOT boundary");
+      const gate = checkRsiProposal({ kind: "patch", description: goal, target });
+      if (!gate.allowed) return refusal(start, target, gate.reason);
+
+      // ---- Source content: from an input override (smoke hook) or a model rewrite ----
+      let proposed = inputStr(ctx, "content");
+      let originalLength = 0;
+      if (!proposed) {
+        const abs = path.isAbsolute(target) ? target : path.join(argosRoot(), target);
+        let current = "";
+        try {
+          current = await fsp.readFile(abs, "utf8");
+        } catch {
+          return refusal(start, target, "file not found / unreadable");
+        }
+        originalLength = current.length;
+        if (current.length > 24_000) {
+          return refusal(start, target, "file too large to safely rewrite in one pass (>24k chars)");
+        }
+        const rewritten = await loopModelCall(
+          personaModel("bobby"),
+          "You rewrite a source file to satisfy a goal WITHOUT changing its public behavior. Output ONLY the complete new file content — no markdown fences, no commentary.",
+          `GOAL: ${goal}\n\nFILE (${target}):\n${current}`,
+          { numPredict: 2000, temperature: 0.2, timeoutMs: 180_000 }
+        );
+        proposed = rewritten.replace(/^```[a-z]*\n?|\n?```$/g, "").trim();
       }
-      const abs = path.isAbsolute(target) ? target : path.join(argosRoot(), target);
-      let current = "";
-      try {
-        current = await fsp.readFile(abs, "utf8");
-      } catch {
-        return refusal(start, target, "file not found / unreadable");
+
+      // ---- Mode 3: propose-only ----
+      if (!inputBool(ctx, "apply")) {
+        const annotated = annotateRsiProposal({ kind: "patch", description: `Full-file rewrite of ${target}: ${goal}`, target, payload: proposed });
+        return {
+          loopId: "codebase_rewrite",
+          loopNumber: 3,
+          ok: true,
+          summary: `proposed rewrite of ${target} (set apply:true to auto-apply with backup+test)`,
+          claimedImprovement: false,
+          claimedScore: null,
+          benchmarkBefore: null,
+          benchmarkAfter: null,
+          evidence: [],
+          proposals: [annotated],
+          data: { target, goal, originalLength, proposedLength: proposed.length, mode: "propose" },
+          error: null,
+          durationMs: Date.now() - start,
+        };
       }
-      if (current.length > 24_000) {
-        return refusal(start, target, "file too large to safely rewrite in one pass (>24k chars)");
-      }
-      const rewritten = await loopModelCall(
-        personaModel("bobby"),
-        "You rewrite a source file to satisfy a goal WITHOUT changing its public behavior. Output ONLY the complete new file content — no markdown fences, no commentary.",
-        `GOAL: ${goal}\n\nFILE (${target}):\n${current}`,
-        { numPredict: 2000, temperature: 0.2, timeoutMs: 180_000 }
-      );
-      const proposed = rewritten.replace(/^```[a-z]*\n?|\n?```$/g, "").trim();
-      const raw = {
-        kind: "patch" as const,
-        description: `Full-file rewrite of ${target}: ${goal}`,
-        target,
-        payload: proposed,
-      };
-      const annotated = annotateRsiProposal(raw);
-      const blocked = annotated.description.startsWith("BLOCKED");
+
+      // ---- Mode 2: AUTONOMOUS apply — backup -> write -> test -> keep/rollback ----
+      const res = await applyWithBackupTest({
+        loopId: "codebase_rewrite",
+        reason: `${goal} (${target})`,
+        files: [{ target, content: proposed }],
+        test: resolveCodeTest(inputStr(ctx, "test", "typecheck")),
+      });
       return {
         loopId: "codebase_rewrite",
         loopNumber: 3,
         ok: true,
-        summary: blocked
-          ? `REFUSED — ${target} is governance code`
-          : `proposed rewrite of ${target} (awaiting approval + restore)`,
+        summary: res.kept
+          ? `APPLIED ${target} — test green`
+          : res.applied
+            ? `ROLLED BACK ${target} — ${res.reason}`
+            : `refused: ${res.reason}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
         benchmarkAfter: null,
         evidence: [],
-        proposals: blocked ? [] : [annotated],
+        proposals: [], // applied autonomously — nothing left pending
         data: {
           target,
           goal,
-          originalLength: current.length,
-          proposedLength: proposed.length,
-          refused: blocked,
-          refusalReason: blocked ? annotated.description : null,
+          mode: "apply",
+          applied: res.applied,
+          kept: res.kept,
+          rolledBack: res.rolledBack,
+          backupId: res.backupId,
+          testPassed: res.testPassed,
+          logPath: res.logPath,
         },
         error: null,
         durationMs: Date.now() - start,

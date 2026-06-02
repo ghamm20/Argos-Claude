@@ -3,10 +3,14 @@
 // Optimization loops: Prompt Optimizer (6), Evolutionary (5),
 // Reward Optimization (14), Curriculum (17).
 
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import type { LoopDefinition, LoopContext } from "../loop";
 import { personaModel, loopModelCall } from "../loop";
 import { loopFail, type LoopResult } from "../types";
 import { readAllTraces, readTraces } from "../trace-store";
+import { argosRoot } from "../../vault/paths";
+import { pushoverSend } from "../../research/alerts";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -199,47 +203,120 @@ export const rewardOptimization: LoopDefinition = {
 };
 
 // --- Loop17: Curriculum -----------------------------------------------------
-// Order benchmark categories easy→hard (from the latest benchmark trace if
-// present) to focus practice. Informational.
+// Per-topic mastery tracking from the latest benchmark byCategory. Mastery >0.85
+// advances the topic to a harder level; <0.3 for 5 attempts marks it "stuck" and
+// pages the operator to break it down. State: data/curriculum/<topic>-progress.json.
+interface TopicProgress {
+  attempts: number;
+  mastery: number;
+  level: number;
+  lowStreak: number;
+  status: "learning" | "advanced" | "struggling";
+}
 export const curriculum: LoopDefinition = {
   id: "curriculum",
   loopNumber: 17,
   name: "Curriculum",
-  description: "Order topics easy→hard for focused improvement.",
+  description: "Per-topic mastery tracking; advance on >0.85, alert when stuck.",
   trigger: "manual",
-  async run(_ctx): Promise<LoopResult> {
+  async run(ctx): Promise<LoopResult> {
     const start = Date.now();
     try {
-      const benchTraces = await readTraces("benchmark", 1);
-      const perTask =
-        (benchTraces[0]?.result?.data as { perTask?: Array<{ category: string; passed: boolean }> })
-          ?.perTask ?? [];
-      const byCat: Record<string, { pass: number; total: number }> = {};
-      for (const t of perTask) {
-        byCat[t.category] = byCat[t.category] ?? { pass: 0, total: 0 };
-        byCat[t.category].total += 1;
-        if (t.passed) byCat[t.category].pass += 1;
+      const masteryByCat: Record<string, number> = {};
+      // Test/override hook: callers may pass byCategory mastery directly.
+      const override = ctx.input?.byCategory as Record<string, number> | undefined;
+      const benchTraces = override ? [] : await readTraces("benchmark", 1);
+      const data = (benchTraces[0]?.result?.data ?? {}) as {
+        perTask?: Array<{ category: string; passed: boolean }>;
+        byCategory?: Record<string, { score: number }>;
+      };
+      if (override && typeof override === "object") {
+        for (const [cat, score] of Object.entries(override)) {
+          if (typeof score === "number") masteryByCat[cat] = score;
+        }
+      } else if (data.byCategory) {
+        for (const [cat, c] of Object.entries(data.byCategory)) masteryByCat[cat] = c.score;
+      } else {
+        const byCat: Record<string, { pass: number; total: number }> = {};
+        for (const t of data.perTask ?? []) {
+          byCat[t.category] = byCat[t.category] ?? { pass: 0, total: 0 };
+          byCat[t.category].total += 1;
+          if (t.passed) byCat[t.category].pass += 1;
+        }
+        for (const [cat, c] of Object.entries(byCat)) masteryByCat[cat] = c.total ? c.pass / c.total : 0;
       }
-      // Easy→hard = highest pass rate first.
+
+      const curDir = path.join(argosRoot(), "data", "curriculum");
+      const progress: Record<string, TopicProgress> = {};
+      const advanced: string[] = [];
+      const stuck: string[] = [];
+      for (const [cat, mastery] of Object.entries(masteryByCat)) {
+        const file = path.join(curDir, `${cat}-progress.json`);
+        let p: TopicProgress = { attempts: 0, mastery: 0, level: 1, lowStreak: 0, status: "learning" };
+        try {
+          p = { ...p, ...(JSON.parse(await fsp.readFile(file, "utf8")) as Partial<TopicProgress>) };
+        } catch {
+          /* first attempt */
+        }
+        p.attempts += 1;
+        p.mastery = mastery;
+        if (mastery > 0.85) {
+          p.level += 1;
+          p.lowStreak = 0;
+          p.status = "advanced";
+          advanced.push(cat);
+        } else if (mastery < 0.3) {
+          p.lowStreak += 1;
+          p.status = "struggling";
+          if (p.lowStreak >= 5) stuck.push(cat);
+        } else {
+          p.lowStreak = 0;
+          p.status = "learning";
+        }
+        try {
+          await fsp.mkdir(curDir, { recursive: true });
+          const tmp = `${file}.${process.pid}.tmp`;
+          await fsp.writeFile(tmp, JSON.stringify(p, null, 2), "utf8");
+          await fsp.rename(tmp, file);
+        } catch {
+          /* persist best-effort */
+        }
+        progress[cat] = p;
+      }
+
+      let alerted = false;
+      if (stuck.length > 0) {
+        try {
+          const d = await pushoverSend({
+            title: "📚 ARGOS curriculum — stuck topic(s)",
+            message: `Mastery < 0.3 after 5+ attempts: ${stuck.join(", ")}. Break these into smaller steps.`,
+            priority: "0",
+          });
+          alerted = d.sent;
+        } catch {
+          /* alert best-effort */
+        }
+      }
+
       const ordered =
-        Object.keys(byCat).length > 0
-          ? Object.entries(byCat)
-              .map(([cat, c]) => ({ cat, rate: c.total ? c.pass / c.total : 0 }))
-              .sort((a, b) => b.rate - a.rate)
-              .map((x) => x.cat)
-          : ["format", "factual", "math", "logic", "reasoning"]; // static fallback
+        Object.keys(masteryByCat).length > 0
+          ? Object.entries(masteryByCat).sort((a, b) => b[1] - a[1]).map((x) => x[0])
+          : ["format", "factual", "math", "logic", "reasoning"];
       return {
         loopId: "curriculum",
         loopNumber: 17,
         ok: true,
-        summary: `curriculum order: ${ordered.join(" → ")}`,
+        summary:
+          `order: ${ordered.join(" → ")}` +
+          (advanced.length ? `; advanced ${advanced.join(",")}` : "") +
+          (stuck.length ? `; STUCK ${stuck.join(",")}` : ""),
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
         benchmarkAfter: null,
         evidence: [],
         proposals: [],
-        data: { order: ordered, byCategory: byCat, basis: perTask.length ? "benchmark" : "static" },
+        data: { order: ordered, masteryByCat, progress, advanced, stuck, alerted, basis: Object.keys(masteryByCat).length ? "benchmark" : "static" },
         error: null,
         durationMs: Date.now() - start,
       };
