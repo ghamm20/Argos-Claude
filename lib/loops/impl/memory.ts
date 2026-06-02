@@ -13,6 +13,8 @@ import { readFacts } from "../../memory-extract";
 import { readAllTraces } from "../trace-store";
 import { runBenchmark } from "../benchmark";
 import { argosRoot } from "../../vault/paths";
+import { recordQuestion } from "../questions";
+import { pushoverSend } from "../../research/alerts";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -296,47 +298,85 @@ export const skillAcquisition: LoopDefinition = {
 };
 
 // --- Loop16: Active Learning ------------------------------------------------
-// Run the GROUND-TRUTH benchmark, find the weakest category (the most
-// informative gap to close), and report it. Diagnostic — no proposal, no
-// improvement claim (it measures, it does not change).
+// Find the most informative gap (ground-truth benchmark or an explicit
+// uncertainty signal). When genuinely uncertain (weakest mastery < 0.6), ask
+// the operator ONE focused question — deduped so it never asks twice — and page
+// it. The answer is stored permanently.
 export const activeLearning: LoopDefinition = {
   id: "active_learning",
   loopNumber: 16,
   name: "Active Learning",
-  description: "Find the most informative gap via the ground-truth benchmark.",
+  description: "Find the informative gap; ask the operator one focused question when uncertain.",
   trigger: "manual",
   async run(ctx): Promise<LoopResult> {
     const start = Date.now();
     try {
-      const bench = await runBenchmark({ model: inputStr(ctx, "model") || undefined });
-      const byCat: Record<string, { pass: number; total: number }> = {};
-      for (const t of bench.perTask) {
-        byCat[t.category] = byCat[t.category] ?? { pass: 0, total: 0 };
-        byCat[t.category].total += 1;
-        if (t.passed) byCat[t.category].pass += 1;
-      }
+      // Uncertainty source: an explicit signal (cheap / testable) or the
+      // ground-truth benchmark.
       let weakest = "none";
-      let weakestRate = 2;
-      for (const [cat, c] of Object.entries(byCat)) {
-        const rate = c.total > 0 ? c.pass / c.total : 1;
-        if (rate < weakestRate) {
-          weakestRate = rate;
-          weakest = cat;
+      let weakestRate = 1;
+      let score: number | null = null;
+      let failing: string[] = [];
+      const uncertainty = ctx.input?.uncertainty as { category?: string; mastery?: number } | undefined;
+      if (uncertainty && typeof uncertainty.category === "string") {
+        weakest = uncertainty.category;
+        weakestRate = typeof uncertainty.mastery === "number" ? uncertainty.mastery : 0;
+      } else {
+        const bench = await runBenchmark({ model: inputStr(ctx, "model") || undefined });
+        score = bench.score;
+        for (const [cat, c] of Object.entries(bench.byCategory)) {
+          if (c.score < weakestRate) {
+            weakestRate = c.score;
+            weakest = cat;
+          }
+        }
+        failing = bench.perTask.filter((t) => !t.passed).map((t) => t.id);
+      }
+
+      // Uncertainty trigger: ask only when the gap is real (< 0.6).
+      let asked = false;
+      let question: string | null = null;
+      if (weakest !== "none" && weakestRate < 0.6) {
+        const q = (
+          await loopModelCall(
+            personaModel("bartimaeus"),
+            "You are forming ONE focused question to ask the operator that would most reduce uncertainty about a weak area. Output only the question (one sentence).",
+            `WEAK AREA: ${weakest} (mastery ${(weakestRate * 100).toFixed(0)}%). What single question should we ask?`,
+            { numPredict: 80, temperature: 0.4 }
+          ).catch(() => `What guidance do you have for improving ${weakest}?`)
+        )
+          .split("\n")[0]
+          .trim();
+        const rec = await recordQuestion(q, weakest); // dedups: never asks twice
+        if (rec.recorded) {
+          question = rec.question!.question;
+          asked = true;
+          try {
+            await pushoverSend({
+              title: "❓ ARGOS has a question",
+              message: question,
+              priority: "0",
+            });
+          } catch {
+            /* alert best-effort */
+          }
+        } else {
+          question = q; // already asked before → not re-sent
         }
       }
-      const failing = bench.perTask.filter((t) => !t.passed).map((t) => t.id);
+
       return {
         loopId: "active_learning",
         loopNumber: 16,
         ok: true,
-        summary: `benchmark ${(bench.score * 100).toFixed(0)}%; weakest "${weakest}" (${(weakestRate * 100).toFixed(0)}%)`,
+        summary: `weakest "${weakest}" (${(weakestRate * 100).toFixed(0)}%)${asked ? " — asked operator" : question ? " — already asked" : ""}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
-        benchmarkAfter: bench.score, // a measurement, not an improvement claim
+        benchmarkAfter: score,
         evidence: failing.map((id) => ({ kind: "benchmark" as const, ref: id, note: "failing task" })),
         proposals: [],
-        data: { score: bench.score, weakest, weakestRate, failing, byCategory: byCat },
+        data: { score, weakest, weakestRate, failing, asked, question, output: question ?? weakest },
         error: null,
         durationMs: Date.now() - start,
       };

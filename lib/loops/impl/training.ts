@@ -2,11 +2,14 @@
 //
 // Training-adjacent loops: Self-Training (13), Benchmark (19).
 
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import type { LoopDefinition, LoopContext } from "../loop";
 import { loopFail, type LoopResult } from "../types";
 import { readFacts } from "../../memory-extract";
 import { readAllTraces } from "../trace-store";
 import { runBenchmark, benchmarkTaskIds } from "../benchmark";
+import { argosRoot } from "../../vault/paths";
 import {
   readBaseline,
   saveBaseline,
@@ -30,8 +33,9 @@ export const selfTraining: LoopDefinition = {
   id: "self_training",
   loopNumber: 13,
   name: "Self-Training",
-  description: "Curate a fine-tune dataset (does NOT fine-tune locally).",
-  trigger: "manual",
+  description: "Weekly: assemble a fine-tune dataset (does NOT fine-tune locally).",
+  trigger: "scheduled",
+  schedule: { dayOfWeek: 0, hour: 6, minute: 0, label: "Sunday 6AM (weekly dataset)" },
   async run(_ctx): Promise<LoopResult> {
     const start = Date.now();
     try {
@@ -58,12 +62,27 @@ export const selfTraining: LoopDefinition = {
       const jsonl = examples.map((e) => JSON.stringify(e)).join("\n");
       const note =
         "ARGOS does not fine-tune locally (no training infrastructure, no new deps). " +
-        "This dataset is curated for a future off-rig fine-tune only.";
+        "This dataset is curated for a future off-rig fine-tune only. Each line is a " +
+        "{instruction,input,output} record — Ollama-Modelfile / Alpaca compatible.";
+
+      // Actually WRITE the dataset (additive; data/training/YYYY-MM-DD.jsonl).
+      let datasetPath: string | null = null;
+      if (examples.length > 0) {
+        try {
+          const dir = path.join(argosRoot(), "data", "training");
+          await fsp.mkdir(dir, { recursive: true });
+          datasetPath = path.join(dir, `${new Date().toISOString().slice(0, 10)}.jsonl`);
+          await fsp.writeFile(datasetPath, jsonl + "\n", "utf8");
+        } catch {
+          datasetPath = null;
+        }
+      }
+
       return {
         loopId: "self_training",
         loopNumber: 13,
         ok: true,
-        summary: `curated ${examples.length} training examples (no local fine-tune)`,
+        summary: `assembled ${examples.length} training examples${datasetPath ? " → dataset written" : ""} (no local fine-tune)`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
@@ -74,12 +93,12 @@ export const selfTraining: LoopDefinition = {
             ? [
                 {
                   kind: "dataset",
-                  description: `Save ${examples.length} curated examples as a fine-tune dataset (operator decides; not used locally).`,
+                  description: `Fine-tune dataset of ${examples.length} examples written for a future off-rig run.`,
                   payload: jsonl,
                 },
               ]
             : [],
-        data: { exampleCount: examples.length, note, preview: examples.slice(0, 3) },
+        data: { exampleCount: examples.length, note, datasetPath, preview: examples.slice(0, 3) },
         error: null,
         durationMs: Date.now() - start,
       };

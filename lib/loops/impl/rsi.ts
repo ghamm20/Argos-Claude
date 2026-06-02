@@ -23,6 +23,9 @@ import { argosRoot } from "../../vault/paths";
 import { applyWithBackupTest, type ApplyTest } from "../apply";
 import { readAllTraces } from "../trace-store";
 import { readLessons } from "../lessons";
+import { evaluateResult } from "../eval-gate";
+import { runBenchmark } from "../benchmark";
+import { readBaseline } from "../benchmark-baseline";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -36,8 +39,9 @@ export const rsiPropose: LoopDefinition = {
   id: "rsi_propose",
   loopNumber: 1,
   name: "RSI Propose",
-  description: "Propose a governed self-improvement (operator-approval gated).",
-  trigger: "manual",
+  description: "Propose a governed self-improvement (Sunday 4AM; governance refused without flag).",
+  trigger: "scheduled",
+  schedule: { dayOfWeek: 0, hour: 4, minute: 0, label: "Sunday 4AM" },
   governed: true,
   async run(ctx): Promise<LoopResult> {
     const start = Date.now();
@@ -90,40 +94,118 @@ export const rsiPropose: LoopDefinition = {
 };
 
 // --- Loop2: RSI Apply -------------------------------------------------------
-// The triple gate, made explicit. Applying an RSI change requires: (1) the
-// eval gate to pass, (2) the benchmark to not regress, (3) operator approval.
-// This loop does NOT apply — actual application is the governed approve-patch
-// route's job (restore point + boundary + governance check). Here it reports
-// the gate state for a candidate, and refuses governance targets outright.
+// The full self-improvement pipeline, triple-gated:
+//   (1) detectGaming pre-check on the claimed improvement — halt if it games.
+//   (2) governance + boundary gate (rsi-gate; governance refused w/o the flag).
+//   (3) backup -> write -> TEST (benchmark non-regression by default) ->
+//       keep if green, rollback if red.
+// Nothing is applied without ALL THREE passing. Test = "benchmark" (capture
+// baseline, apply, re-run benchmark, keep iff score did not regress), or
+// none/reject for the smoke. No target → reports status (nothing to apply).
+async function benchmarkNonRegressionTest(): Promise<boolean> {
+  const baseline = (await readBaseline())?.score ?? 0;
+  const after = (await runBenchmark()).score;
+  return after >= baseline - 1e-9;
+}
 export const rsiApply: LoopDefinition = {
   id: "rsi_apply",
   loopNumber: 2,
   name: "RSI Apply",
-  description: "Triple-gated application of an approved RSI change (operator-gated).",
+  description: "Full RSI pipeline: gaming check → gate → backup → apply → benchmark → keep/rollback.",
   trigger: "manual",
   governed: true,
   async run(ctx): Promise<LoopResult> {
     const start = Date.now();
     try {
       const target = inputStr(ctx, "target");
-      const gateState = target ? checkRsiProposal({ kind: "patch", description: "rsi apply candidate", target }) : null;
-      const note = target
-        ? gateState!.allowed
-          ? `Candidate "${target}" passes the rsi-gate. Application requires operator approval + a restore point via /api/loops/approve-patch. RSI never auto-applies.`
-          : `Candidate "${target}" REFUSED by the rsi-gate: ${gateState!.reason}`
-        : "No candidate target. RSI changes are applied only via the governed approve-patch route after operator approval.";
+      const content = inputStr(ctx, "content");
+      if (!target || !content) {
+        return {
+          loopId: "rsi_apply",
+          loopNumber: 2,
+          ok: true,
+          summary: "no candidate (target + content) — nothing to apply",
+          claimedImprovement: false,
+          claimedScore: null,
+          benchmarkBefore: null,
+          benchmarkAfter: null,
+          evidence: [],
+          proposals: [],
+          data: { note: "Provide target + content to apply an RSI change. Governance code is refused." },
+          error: null,
+          durationMs: Date.now() - start,
+        };
+      }
+
+      // (1) Gaming pre-check — synthesize the claim and run it through the gate.
+      const num = (k: string): number | null => {
+        const v = ctx.input?.[k];
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
+      };
+      const synthetic: LoopResult = {
+        loopId: "rsi_apply",
+        loopNumber: 2,
+        ok: true,
+        summary: "rsi candidate",
+        claimedImprovement: ctx.input?.claimedImprovement === true,
+        claimedScore: num("claimedScore"),
+        benchmarkBefore: num("benchmarkBefore"),
+        benchmarkAfter: num("benchmarkAfter"),
+        evidence: [],
+        proposals: [{ kind: "config", description: "rsi candidate", target }],
+        data: null,
+        error: null,
+        durationMs: 0,
+      };
+      const pre = evaluateResult(synthetic);
+      if (pre.gamingDetected) {
+        return {
+          loopId: "rsi_apply",
+          loopNumber: 2,
+          ok: true,
+          summary: "HALTED before apply — gaming detected",
+          claimedImprovement: false,
+          claimedScore: null,
+          benchmarkBefore: null,
+          benchmarkAfter: null,
+          evidence: [],
+          proposals: [],
+          data: { target, halted: true, gamingReasons: pre.gamingReasons },
+          error: null,
+          durationMs: Date.now() - start,
+        };
+      }
+
+      // (2)+(3) Governance/boundary gate + backup + apply + test (in the pipeline).
+      const testKind = inputStr(ctx, "test", "benchmark");
+      const test: ApplyTest =
+        testKind === "none"
+          ? { kind: "none" }
+          : testKind === "reject"
+            ? { kind: "fn", run: async () => false }
+            : { kind: "fn", run: benchmarkNonRegressionTest };
+      const res = await applyWithBackupTest({
+        loopId: "rsi_apply",
+        reason: inputStr(ctx, "goal", "RSI self-improvement"),
+        files: [{ target, content }],
+        test,
+      });
       return {
         loopId: "rsi_apply",
         loopNumber: 2,
         ok: true,
-        summary: target ? (gateState!.allowed ? "candidate passes gate (operator must approve)" : "candidate refused by rsi-gate") : "no pending RSI application",
+        summary: res.kept
+          ? `APPLIED ${target} — benchmark held`
+          : res.applied
+            ? `ROLLED BACK ${target} — ${res.reason}`
+            : `refused: ${res.reason}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
         benchmarkAfter: null,
         evidence: [],
-        proposals: [], // never proposes an auto-apply
-        data: { target: target || null, gate: gateState, note },
+        proposals: [],
+        data: { target, applied: res.applied, kept: res.kept, rolledBack: res.rolledBack, backupId: res.backupId, testPassed: res.testPassed, logPath: res.logPath },
         error: null,
         durationMs: Date.now() - start,
       };

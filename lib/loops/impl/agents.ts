@@ -189,13 +189,17 @@ export const redBlueTeam: LoopDefinition = {
 };
 
 // --- Loop15: World Model (/simulate) ----------------------------------------
-// Predict the likely outcomes, second-order effects, and risks of an action
-// BEFORE taking it. Bartimaeus reasons forward.
+// Simulate THREE scenarios (best / likely / worst) for a proposed action,
+// trace consequences, and compute a 0-1 risk score. Auto-triggers for
+// high-stakes actions (restore-requiring tools, complexity > 0.8).
+export function shouldAutoSimulate(opts: { requiresRestore?: boolean; complexity?: number }): boolean {
+  return opts.requiresRestore === true || (typeof opts.complexity === "number" && opts.complexity > 0.8);
+}
 export const worldModel: LoopDefinition = {
   id: "world_model",
   loopNumber: 15,
   name: "World Model",
-  description: "Predict an action's outcomes + risks before taking it (/simulate).",
+  description: "Simulate best/likely/worst scenarios + risk score before acting (/simulate).",
   trigger: "command",
   command: "simulate",
   async run(ctx): Promise<LoopResult> {
@@ -203,24 +207,44 @@ export const worldModel: LoopDefinition = {
     try {
       const action = inputStr(ctx, "action") || inputStr(ctx, "scenario");
       if (!action) return loopFail("world_model", 15, "no action/scenario provided", start);
-      const prediction = await loopModelCall(
+      const raw = await loopModelCall(
         personaModel("bartimaeus"),
-        "You are a world model. Given a proposed action, predict: (1) the most likely outcome, (2) two plausible second-order effects, (3) the main risk. Be concrete. Use short labelled lines.",
+        "You are a world model. For the proposed action, output STRICT JSON: {\"best\":\"best-case outcome\",\"likely\":\"most likely outcome\",\"worst\":\"worst-case outcome\",\"secondOrder\":[\"effect1\",\"effect2\"],\"risk\":0.0}. risk is 0 (safe) to 1 (catastrophic). JSON only.",
         `PROPOSED ACTION: ${action}`,
-        { numPredict: 380, temperature: 0.4 }
+        { numPredict: 460, temperature: 0.4 }
       );
+      // Parse the JSON; degrade gracefully to the raw text if the model strays.
+      let parsed: { best?: string; likely?: string; worst?: string; secondOrder?: string[]; risk?: number } = {};
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          parsed = JSON.parse(m[0]);
+        } catch {
+          /* keep raw */
+        }
+      }
+      const risk =
+        typeof parsed.risk === "number" && Number.isFinite(parsed.risk)
+          ? Math.max(0, Math.min(1, parsed.risk))
+          : null;
+      const scenarios = {
+        best: parsed.best ?? null,
+        likely: parsed.likely ?? raw.trim().slice(0, 400),
+        worst: parsed.worst ?? null,
+        secondOrder: Array.isArray(parsed.secondOrder) ? parsed.secondOrder.slice(0, 4) : [],
+      };
       return {
         loopId: "world_model",
         loopNumber: 15,
-        ok: prediction.trim().length > 0,
-        summary: `simulated outcome of: ${action.slice(0, 70)}`,
+        ok: raw.trim().length > 0,
+        summary: `simulated "${action.slice(0, 60)}" — risk ${risk === null ? "n/a" : risk.toFixed(2)}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
         benchmarkAfter: null,
         evidence: [],
         proposals: [],
-        data: { action, prediction: prediction.trim() },
+        data: { action, scenarios, risk, output: scenarios.likely, raw: raw.trim() },
         error: null,
         durationMs: Date.now() - start,
       };

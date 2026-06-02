@@ -173,6 +173,52 @@ export const rewardOptimization: LoopDefinition = {
         suggestion = "More halts than accepts — verify loops are providing real evidence; gate is doing its job.";
       else suggestion = "Reward thresholds look balanced; no change recommended.";
       const recommend = !suggestion.startsWith("Reward thresholds look balanced");
+
+      // Build a reward model from multiple signals: per-loop outcome reward
+      // (accepted=+1, applied=+1.5, rejected=-0.5, halted=-2, error=-1) plus the
+      // operator-feedback average. Persisted to state/loops/reward-model.json so
+      // routing/scoring can consume it. This is additive STATE, not code — it
+      // does not auto-apply a behavior change.
+      const rewardFor = (o: string): number =>
+        o === "applied" ? 1.5 : o === "accepted" ? 1 : o === "rejected" ? -0.5 : o === "halted" ? -2 : o === "error" ? -1 : 0;
+      const byLoop: Record<string, { reward: number; runs: number }> = {};
+      for (const t of recent) {
+        byLoop[t.loopId] = byLoop[t.loopId] ?? { reward: 0, runs: 0 };
+        byLoop[t.loopId].reward += rewardFor(t.outcome);
+        byLoop[t.loopId].runs += 1;
+      }
+      const weights: Record<string, number> = {};
+      for (const [loop, v] of Object.entries(byLoop)) weights[loop] = v.runs ? +(v.reward / v.runs).toFixed(3) : 0;
+      // Operator feedback average (state/loops/feedback.jsonl).
+      let feedbackAvg: number | null = null;
+      try {
+        const raw = await fsp.readFile(path.join(argosRoot(), "state", "loops", "feedback.jsonl"), "utf8");
+        const ratings = raw
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((l) => {
+            try {
+              return (JSON.parse(l) as { rating?: number }).rating;
+            } catch {
+              return null;
+            }
+          })
+          .filter((r): r is number => typeof r === "number");
+        if (ratings.length) feedbackAvg = +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2);
+      } catch {
+        /* no feedback yet */
+      }
+      const rewardModel = { generatedAt: new Date().toISOString(), weights, feedbackAvg, sampleSize: recent.length };
+      try {
+        const p = path.join(argosRoot(), "state", "loops", "reward-model.json");
+        await fsp.mkdir(path.dirname(p), { recursive: true });
+        const tmp = `${p}.${process.pid}.tmp`;
+        await fsp.writeFile(tmp, JSON.stringify(rewardModel, null, 2), "utf8");
+        await fsp.rename(tmp, p);
+      } catch {
+        /* persist best-effort */
+      }
       return {
         loopId: "reward_optimization",
         loopNumber: 14,
@@ -192,7 +238,7 @@ export const rewardOptimization: LoopDefinition = {
               },
             ]
           : [],
-        data: { counts, rejectRate, suggestion },
+        data: { counts, rejectRate, suggestion, rewardModel },
         error: null,
         durationMs: Date.now() - start,
       };
