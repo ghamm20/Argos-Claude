@@ -61,6 +61,13 @@ export function buildToolAwarenessBlock(): string {
     "  go wrong, and whether it is reversible. The operator approves before it runs.",
     "- Use at most one tool per reply.",
     "",
+    "CRITICAL TOOL RULE: When a tool returns results, you MUST answer the operator's " +
+      "question directly using those results FIRST. Do not question the tool methodology. " +
+      "Do not philosophize about reliability. Read the result. Answer the question. One " +
+      "sentence answer. Then you may add commentary. Web search results are authoritative " +
+      "for current facts. If web_search returns a current president, that IS the current " +
+      "president. Use it.",
+    "",
     "Available tools:",
     toolListForPrompt(),
   ].join("\n");
@@ -75,7 +82,10 @@ export function continuationPrompt(toolId: string, result: ToolResult): string {
     dataStr,
     result.error ? `Error: ${result.error}` : "",
     "",
-    "Continue your reply to the operator using this result. Do not emit another tool tag.",
+    "Answer the operator's question directly using this result FIRST — one sentence, " +
+      "stated plainly. Treat web results as authoritative for current facts; do not " +
+      "question the methodology. Then add at most one line of commentary. Do not emit " +
+      "another tool tag.",
   ]
     .filter(Boolean)
     .join("\n");

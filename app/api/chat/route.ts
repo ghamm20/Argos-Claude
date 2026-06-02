@@ -598,24 +598,49 @@ export async function POST(req: NextRequest) {
   }
   const systemPrompt = systemParts.join("\n\n");
 
+  // ---- Response-length governance (2026-06-02) ----
+  // Bartimaeus is brief by default (a max-tokens cap via Ollama's num_predict).
+  // The operator can request a long answer by leading their message with
+  // "/deep" — that lifts the cap to 2000 and the prefix is stripped before the
+  // model ever sees it. The cap applies to Bartimaeus TEXT turns only: Sage and
+  // the other personas stay long-form, and vision turns run uncapped so image
+  // analysis isn't truncated.
+  let lastUserIdx = -1;
+  for (let i = body.messages.length - 1; i >= 0; i--) {
+    if (body.messages[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  const deepMode =
+    lastUserIdx >= 0 && /^\s*\/deep\b/i.test(body.messages[lastUserIdx].content);
+  const DEFAULT_MAX_TOKENS = 400;
+  const maxTokens =
+    body.personaId === "bartimaeus" && !visionTurn
+      ? deepMode
+        ? 2000
+        : DEFAULT_MAX_TOKENS
+      : null;
+
   // Build the Ollama message list. Vision Phase 1: when a user turn carries
   // images, attach them as Ollama's native `images: [base64]` field (data-URL
-  // prefixes stripped). Text turns are unchanged.
+  // prefixes stripped). The "/deep" prefix is stripped from the current user
+  // turn so the model never sees the command token.
   const ollamaMessages: Array<{
     role: WireRole;
     content: string;
     images?: string[];
   }> = [
     { role: "system", content: systemPrompt },
-    ...body.messages.map((m) =>
-      m.images && m.images.length > 0
-        ? {
-            role: m.role,
-            content: m.content,
-            images: m.images.map(stripDataUrl),
-          }
-        : { role: m.role, content: m.content }
-    ),
+    ...body.messages.map((m, i) => {
+      const content =
+        i === lastUserIdx && deepMode
+          ? m.content.replace(/^\s*\/deep\b[ \t]*/i, "")
+          : m.content;
+      return m.images && m.images.length > 0
+        ? { role: m.role, content, images: m.images.map(stripDataUrl) }
+        : { role: m.role, content };
+    }),
   ];
 
   // ---- Open Ollama stream ----
@@ -645,7 +670,12 @@ export async function POST(req: NextRequest) {
         messages: ollamaMessages,
         stream: true,
         think: personaThink,
-        options: { think: personaThink },
+        // Ollama's num_predict is the response token cap. Brief by default for
+        // Bartimaeus; /deep lifts it to 2000; null = uncapped (Sage, vision).
+        options: {
+          think: personaThink,
+          ...(maxTokens != null ? { num_predict: maxTokens } : {}),
+        },
       }),
       signal: controller.signal,
     });
@@ -915,7 +945,7 @@ export async function POST(req: NextRequest) {
                       ],
                       stream: true,
                       think: false,
-                      options: { think: false },
+                      options: { think: false, num_predict: maxTokens ?? 400 },
                     }),
                   });
                   if (cont.ok && cont.body) {
