@@ -1068,7 +1068,9 @@ export function ChatPane() {
   ]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    // Enter (or Cmd/Ctrl+Enter) sends; Shift+Enter inserts a newline. Ignore
+    // Enter while an IME composition is in progress (CJK/voice etc).
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
     }
@@ -1255,7 +1257,7 @@ export function ChatPane() {
               {vaultDocs > 0
                 ? `Retrieval over ${vaultDocs} doc${vaultDocs === 1 ? "" : "s"}.`
                 : "No vault yet — chat will run without retrieval."}{" "}
-              Cmd/Ctrl+Enter to send.
+              Enter to send, Shift+Enter for newline.
             </p>
           ) : (
             messages.map((m) => (
@@ -1319,7 +1321,7 @@ export function ChatPane() {
               placeholder={
                 isStreaming
                   ? "Streaming…"
-                  : `Message ${personaName} (Cmd/Ctrl+Enter to send)`
+                  : `Message ${personaName} (Enter to send, Shift+Enter for newline)`
               }
               className="w-full resize-none bg-neutral-900/60 border border-neutral-800 rounded-md pl-4 pr-60 py-3 text-[13px] text-neutral-200 placeholder:text-neutral-600 focus:outline-none focus:ring-1 focus:ring-neutral-700 disabled:opacity-60"
             />

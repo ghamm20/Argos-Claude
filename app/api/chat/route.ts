@@ -33,7 +33,7 @@ import { requestTool } from "@/lib/tools/executor";
 // Forced current-facts grounding (2026-06-02) — time-sensitive queries get a
 // live web_search injected as authoritative context so Bart can't answer
 // office-holders / "current X" / 2026 facts from stale training data.
-import { detectCurrentFacts, buildCurrentFactsBlock } from "@/lib/current-facts-detector";
+import { detectCurrentFacts, buildCurrentFactsBlock, buildChainBlock } from "@/lib/current-facts-detector";
 // Weather now routes to the structured Open-Meteo tool instead of a reshaped
 // DDG search (2026-06-02). buildWeatherBlock formats its result as grounding.
 import { buildWeatherBlock } from "@/lib/tools/open-meteo";
@@ -199,6 +199,18 @@ function isConnRefused(e: unknown): boolean {
 function lastUserText(msgs: WireMessage[]): string | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === "user") return msgs[i].content;
+  }
+  return null;
+}
+
+/** The user message BEFORE the most recent one — the query for an explicit
+ *  "go look it up" request, whose literal text isn't the thing to search. */
+function priorUserText(msgs: WireMessage[]): string | null {
+  let seenLast = false;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role !== "user") continue;
+    if (seenLast) return msgs[i].content;
+    seenLast = true;
   }
   return null;
 }
@@ -627,21 +639,32 @@ export async function POST(req: NextRequest) {
     const cf = detectCurrentFacts(userText);
     if (cf.isCurrentFacts) {
       try {
+        // Resolve the query: an explicit "go look it up" uses the PRIOR user
+        // message (the thing to research), not the literal command.
+        let query = cf.suggestedQuery;
+        if (cf.usePriorMessage) {
+          const prior = priorUserText(body.messages);
+          if (prior) query = prior;
+        }
+        const toolCtx = { sessionId: null, personaId: "bartimaeus", model: effectiveModel };
         if (cf.suggestedTool === "open_meteo_weather" && cf.location) {
           // Weather → structured Open-Meteo forecast (replaces the DDG hack).
-          const outcome = await requestTool(
-            "open_meteo_weather",
-            { location: cf.location },
-            { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
-          );
+          const outcome = await requestTool("open_meteo_weather", { location: cf.location }, toolCtx);
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildWeatherBlock(outcome.result));
+          }
+        } else if (cf.suggestedTool === "chain_search_to_read") {
+          // Entity / company / events → chain searches AND reads the pages,
+          // so "who is the CEO of X" gets real content, not shallow snippets.
+          const outcome = await requestTool("chain_search_to_read", { query }, toolCtx);
+          if (outcome.kind === "result" && outcome.result.ok) {
+            systemParts.push(buildChainBlock(cf, outcome.result));
           }
         } else {
           const outcome = await requestTool(
             "web_search",
-            { query: cf.suggestedQuery, limit: 5 },
-            { sessionId: null, personaId: "bartimaeus", model: effectiveModel }
+            { query, limit: 5 },
+            toolCtx
           );
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
@@ -663,6 +686,25 @@ export async function POST(req: NextRequest) {
   }
   if (body.truthMode === true) {
     systemParts.push(TRUTH_MODE_CLAUSE);
+  }
+  // Conversational-memory reminder, pushed LAST so it's the final system
+  // content immediately before the message thread — maximum recency. Bart's
+  // bound model (royhodge812/Orchestrator) reflexively denies having memory of
+  // the conversation; an instruction buried in his long persona prompt gets
+  // ignored. Only applied to a MULTI-TURN session (≥2 user turns) so it never
+  // fires on a fresh first message. Kept short + general (harmless to other
+  // personas, which already handle context correctly).
+  {
+    const userTurns = body.messages.filter((m) => m.role === "user").length;
+    if (userTurns >= 2) {
+      systemParts.push(
+        "CONVERSATION MEMORY: The full message thread below is visible to you. " +
+          "If the operator asks what they (or you) said, asked, or established earlier in " +
+          "this conversation, read the messages and answer from them. NEVER claim the " +
+          "operator hasn't told you something that is present in the thread, and never " +
+          "recite an \"I have no memory of past interactions\" disclaimer — it is false here."
+      );
+    }
   }
   const systemPrompt = systemParts.join("\n\n");
 

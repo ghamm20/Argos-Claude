@@ -41,10 +41,14 @@ export interface CurrentFactsDetection {
   /** The cleaned query to hand to web_search (general current-facts). */
   suggestedQuery: string;
   /** When set, the chat route should force THIS tool instead of web_search.
-   *  Weather → "open_meteo_weather" (2026-06-02; replaced the DDG reshape). */
+   *  Weather → "open_meteo_weather"; entity/company/current-events →
+   *  "chain_search_to_read" (searches AND reads pages, not just snippets). */
   suggestedTool: string | null;
   /** Extracted location/place for the suggested tool (weather → place name). */
   location: string | null;
+  /** True for explicit "go look it up" requests — the chat route should use
+   *  the IMMEDIATE PRIOR user message as the query, not the literal command. */
+  usePriorMessage: boolean;
 }
 
 // Markers that the query is about the PAST. If present AND no explicit "current"
@@ -60,6 +64,11 @@ const EXPLICIT_CURRENT_RE =
 // Explicit weather triggers (incl. "temp", common forecast misspellings).
 const WEATHER_RE =
   /\b(weather|forecast|forcast|forxast|forecst|temp|temperature|how (hot|cold|warm)|(is it )?(raining|snowing|sunny|rainy|humid|windy)|degrees|fahrenheit|celsius)\b/i;
+
+// Explicit "go research this" commands. These fire a forced search whose QUERY
+// is the IMMEDIATE PRIOR user message (the thing to look up), not this command.
+const RESEARCH_REQUEST_RE =
+  /\b(go look|look (it|that|this)\s*up|look up|search (for|the web|online|again|it|that)|find out|google (it|that|this)|(look|check)\s+(it\s+)?(on|in)\s+the\s+(internet|web)|on the (internet|web)|do a (web )?search|search again|check online)\b/i;
 
 interface Pattern {
   category: CurrentFactsCategory;
@@ -207,7 +216,23 @@ function extractWeatherLocation(q: string): string {
 export function detectCurrentFacts(query: string): CurrentFactsDetection {
   const q = (query ?? "").trim();
   if (!q) {
-    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "", suggestedTool: null, location: null };
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "", suggestedTool: null, location: null, usePriorMessage: false };
+  }
+
+  // Explicit "go look it up" command → force a chain search whose QUERY is the
+  // PRIOR user message (the thing to research), resolved by the chat route.
+  if (RESEARCH_REQUEST_RE.test(q)) {
+    return {
+      isCurrentFacts: true,
+      requiresTool: true,
+      confidence: 0.9,
+      category: "news-event",
+      reason: "explicit request to search / look something up",
+      suggestedQuery: cleanQuery(q),
+      suggestedTool: "chain_search_to_read",
+      location: null,
+      usePriorMessage: true,
+    };
   }
 
   const explicitCurrent = EXPLICIT_CURRENT_RE.test(q);
@@ -227,7 +252,7 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   }
 
   if (matches.length === 0) {
-    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "not time-sensitive", suggestedQuery: cleanQuery(q), suggestedTool: null, location: null };
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "not time-sensitive", suggestedQuery: cleanQuery(q), suggestedTool: null, location: null, usePriorMessage: false };
   }
 
   // Primary = highest-confidence NON-time-relative match if any (more specific),
@@ -240,6 +265,10 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   if (hasTimeMarker && primary.category !== "time-relative") confidence = Math.min(0.98, confidence + 0.05);
 
   const isWeather = primary.category === "weather";
+  // Entity / company / current-events → chain_search_to_read (searches AND
+  // READS the top pages). web_search alone returns shallow snippets that often
+  // don't contain the answer (e.g. "who is the CEO of X").
+  const useChain = primary.category === "office-holder" || primary.category === "news-event";
 
   return {
     isCurrentFacts: true,
@@ -247,11 +276,12 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
     confidence: +confidence.toFixed(2),
     category: primary.category,
     reason: primary.reason,
-    // No more DDG reshape — weather routes to the open_meteo_weather tool with
-    // the extracted place; everything else uses the cleaned query for search.
+    // Weather → open_meteo_weather; entity/company/events → chain_search_to_read;
+    // everything else uses the cleaned query for a plain web_search.
     suggestedQuery: cleanQuery(q),
-    suggestedTool: isWeather ? "open_meteo_weather" : null,
+    suggestedTool: isWeather ? "open_meteo_weather" : useChain ? "chain_search_to_read" : null,
     location: isWeather ? extractWeatherLocation(q) : null,
+    usePriorMessage: false,
   };
 }
 
@@ -333,4 +363,30 @@ export function buildCurrentFactsBlock(
     results.length ? "Results:" : "(no results returned — say you couldn't verify the current fact)",
     ...lines,
   ].join("\n");
+}
+
+/**
+ * Frame chain_search_to_read output as authoritative grounding. Unlike
+ * web_search (snippets), the chain READ the top pages — so this injects the
+ * actual page text, which is what makes "who is the CEO of X" answerable.
+ */
+export function buildChainBlock(
+  detection: CurrentFactsDetection,
+  search: WebSearchResultShape
+): string {
+  const d = (search.data ?? {}) as { engine?: string; aggregated?: string; sources?: unknown; query?: string };
+  const agg = (typeof d.aggregated === "string" ? d.aggregated : "").trim();
+  const sources = Array.isArray(d.sources) ? (d.sources as unknown[]).filter((s): s is string => typeof s === "string").slice(0, 5) : [];
+  return [
+    "CURRENT FACTS — FRESHLY SEARCHED + READ, AUTHORITATIVE.",
+    "",
+    `ARGOS searched (${d.engine ?? "web"}) and READ the top pages for: ${detection.suggestedQuery || d.query || ""}.`,
+    "The text below is actual page content, not snippets. Answer the operator's",
+    "question from it FIRST, in one or two plain sentences. It overrides training",
+    "data. If the answer genuinely is not in this content, say so plainly.",
+    "",
+    agg ? "READ CONTENT:" : "(no readable content returned — say you couldn't verify)",
+    agg.slice(0, 8000),
+    sources.length ? `\nSources: ${sources.join("  ")}` : "",
+  ].filter(Boolean).join("\n");
 }

@@ -113,6 +113,19 @@ try {
     check("bitcoin price fires", (await get(base, "bitcoin price right now")).detection.requiresTool === true);
     check("'latest news' fires", (await get(base, "latest news on the election")).detection.requiresTool === true);
 
+    // ===== chain-first routing (Problem 1, 2026-06-02) =====
+    console.log("\n=== chain routing + re-search requests ===");
+    const ceo = (await get(base, "who is the CEO of Lever Soap")).detection;
+    check("CEO query → chain_search_to_read", ceo.requiresTool === true && ceo.suggestedTool === "chain_search_to_read", `tool=${ceo.suggestedTool}`);
+    const go = (await get(base, "go look on the internet")).detection;
+    check("'go look' fires + uses prior message", go.requiresTool === true && go.usePriorMessage === true && go.suggestedTool === "chain_search_to_read", `tool=${go.suggestedTool} prior=${go.usePriorMessage}`);
+    const look = (await get(base, "look it up")).detection;
+    check("'look it up' fires", look.requiresTool === true && look.usePriorMessage === true);
+    const search = (await get(base, "search the web for that")).detection;
+    check("'search the web' fires", search.requiresTool === true && search.usePriorMessage === true);
+    // weather still routes to open_meteo, not chain
+    check("weather still → open_meteo_weather", (await get(base, "temp in miami")).detection.suggestedTool === "open_meteo_weather");
+
     // ===== negatives: must NOT fire =====
     console.log("\n=== negatives (must not force a tool) ===");
     check("historical 'who was the first president' does NOT fire", (await get(base, "who was the first president of the united states")).detection.requiresTool === false);

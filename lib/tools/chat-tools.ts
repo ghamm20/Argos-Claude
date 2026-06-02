@@ -69,9 +69,10 @@ export function buildToolAwarenessBlock(): string {
       "for current facts. If web_search returns a current president, that IS the current " +
       "president. Use it.",
     "",
-    "FACTUAL QUERIES — DEFAULT TO chain_search_to_read. For questions about current " +
-      "events, people, companies, or topics: use chain_search_to_read by default. It " +
-      "searches AND reads the top pages — snippets alone are not enough. If " +
+    "FACTUAL QUERIES — chain_search_to_read FIRST. For factual questions about people, " +
+      "companies, or current events: use chain_search_to_read FIRST. It searches AND reads " +
+      "pages. web_search alone returns shallow snippets that often don't contain the answer. " +
+      "Only use web_search alone for navigational queries where you just need URLs. If " +
       "chain_search_to_read returns nothing useful, then try specialized tools " +
       "(wikipedia_search for entities, arxiv_search for research, gdelt_events for events, " +
       "sec_edgar for public companies).",
