@@ -9,8 +9,8 @@
 // the trace "awaiting_approval"; actual application happens in the governed
 // /api/loops/approve-patch route (restore point + boundary + governance gate).
 
-import { evaluateResult, verdictToOutcome } from "./eval-gate";
-import { appendTrace, collectTraceRefs } from "./trace-store";
+import { evaluateResult, verdictToOutcome, type GamingContext } from "./eval-gate";
+import { appendTrace, collectTraceRefs, readTraces } from "./trace-store";
 import { benchmarkTaskIds } from "./benchmark";
 import { loopFail } from "./types";
 import { pushoverSend } from "../research/alerts";
@@ -38,6 +38,48 @@ async function knownRefs(): Promise<Set<string>> {
   return refs;
 }
 
+/** A short signature of a loop result's output, for shortcut-pattern detection. */
+function outputSignature(result: LoopResult): string {
+  const d = (result.data ?? {}) as Record<string, unknown>;
+  const candidate =
+    (typeof d.output === "string" && d.output) ||
+    (typeof d.refined === "string" && d.refined) ||
+    (typeof d.suggestion === "string" && d.suggestion) ||
+    (typeof d.lesson === "string" && d.lesson) ||
+    (typeof d.insight === "string" && d.insight) ||
+    result.summary ||
+    "";
+  return String(candidate).replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/** Build the cross-run gaming context for a loop from its recent traces. */
+async function buildGamingContext(
+  def: LoopDefinition,
+  result: LoopResult
+): Promise<GamingContext> {
+  let prior: LoopTrace[] = [];
+  try {
+    prior = await readTraces(def.id, 5);
+  } catch {
+    prior = [];
+  }
+  const d = (result.data ?? {}) as Record<string, unknown>;
+  const specOf = (t: LoopTrace): string | null => {
+    const td = (t.result.data ?? {}) as Record<string, unknown>;
+    return typeof td.spec === "string" ? td.spec : typeof td.criteria === "string" ? td.criteria : null;
+  };
+  const recentOutputs = [...prior].reverse().map((t) => outputSignature(t.result));
+  recentOutputs.push(outputSignature(result));
+  return {
+    priorScore: prior[0]?.evaluation?.score ?? null,
+    priorSpec: prior[0] ? specOf(prior[0]) : null,
+    currentSpec: typeof d.spec === "string" ? d.spec : typeof d.criteria === "string" ? d.criteria : null,
+    recentOutputs,
+    outputMatchesSpec:
+      typeof d.outputMatchesSpec === "boolean" ? d.outputMatchesSpec : null,
+  };
+}
+
 export async function runLoop(
   def: LoopDefinition,
   ctx: LoopContext
@@ -57,6 +99,7 @@ export async function runLoop(
 
   const evaluation: EvalResult = evaluateResult(result, {
     knownRefs: await knownRefs(),
+    context: await buildGamingContext(def, result),
   });
 
   // Map verdict → outcome; a fatal loop error is recorded as "error" (more

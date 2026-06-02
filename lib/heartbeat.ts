@@ -44,6 +44,10 @@ import { PERSONA_BY_ID } from "./personas";
 // it never blocks or competes with the heartbeat's own work. The dedicated
 // task scheduler runs this on its own interval too; the pump is idempotent.
 import { pumpTaskQueue } from "./task-scheduler";
+// Self-Evolving Loop Suite (2026-06-02) — the heartbeat tick also pumps due
+// scheduled improvement loops (nightly 2AM, Sun 3AM, Sun 4AM, Fri 11PM, Sat
+// 2AM). Idempotent per window; fire-and-forget so it never blocks the tick.
+import { pumpScheduledLoops } from "./loops/scheduler-hook";
 
 // ----- constants -----
 
@@ -288,6 +292,8 @@ export async function runHeartbeatTick(
   // Overnight Engine — pump the task queue on every heartbeat tick (background,
   // guarded, never blocks the heartbeat or the UI).
   void pumpTaskQueue().catch(() => {});
+  // Self-Evolving Loop Suite — pump due scheduled loops (idempotent per day).
+  pumpScheduledLoops();
   runningTick = (async () => {
     const start = Date.now();
     const source = opts.source ?? "manual";

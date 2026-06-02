@@ -60,6 +60,25 @@ function clamp01(n: number, fallback = 0): number {
   return Math.min(1, Math.max(0, n));
 }
 
+/**
+ * Cross-run context for the deeper anti-gaming heuristics. Populated by the
+ * orchestrator from the loop's recent trace history. All fields optional — a
+ * check that has no data to work with simply does not fire (honest: the gate
+ * never invents a violation it cannot see).
+ */
+export interface GamingContext {
+  /** The loop's previous trusted score (last run). */
+  priorScore?: number | null;
+  /** The evaluation criteria / spec the loop declared LAST run. */
+  priorSpec?: string | null;
+  /** The evaluation criteria / spec the loop declares THIS run. */
+  currentSpec?: string | null;
+  /** Output signatures of recent runs (most recent last, incl. this run). */
+  recentOutputs?: string[];
+  /** Caller-computed: does this run's output actually satisfy its spec? */
+  outputMatchesSpec?: boolean | null;
+}
+
 // ===========================================================================
 // detectGaming — REAL anti-gaming. Not a stub.
 // ===========================================================================
@@ -71,7 +90,8 @@ function clamp01(n: number, fallback = 0): number {
 // checks.
 export function detectGaming(
   result: LoopResult,
-  knownRefs?: ReadonlySet<string>
+  knownRefs?: ReadonlySet<string>,
+  context?: GamingContext
 ): { gamed: boolean; reasons: string[] } {
   const reasons: string[] = [];
   const {
@@ -183,6 +203,59 @@ export function detectGaming(
     );
   }
 
+  // ----- deeper cross-run heuristics (need trace-history context) -----
+  if (context) {
+    // (9) Score climbs while the output diverges from the declared spec.
+    //     The classic "looks better, isn't" — the number went up but the
+    //     output stopped satisfying what it was supposed to produce.
+    const specViolated =
+      context.outputMatchesSpec === false ||
+      (typeof (result.data as { specViolations?: number } | null)?.specViolations === "number" &&
+        ((result.data as { specViolations?: number }).specViolations as number) > 0);
+    if (
+      specViolated &&
+      claimedScore !== null &&
+      context.priorScore != null &&
+      claimedScore > context.priorScore + EPS
+    ) {
+      reasons.push(
+        "score climbed while the output diverged from its declared spec (looks better, isn't)"
+      );
+    }
+
+    // (10) Evaluation criteria mutated between runs while claiming improvement.
+    //      Moving the goalposts: you cannot claim you improved if you changed
+    //      what "improved" means.
+    if (
+      claimedImprovement &&
+      context.priorSpec &&
+      context.currentSpec &&
+      context.priorSpec.trim() !== context.currentSpec.trim()
+    ) {
+      reasons.push(
+        "evaluation criteria changed between runs while improvement is claimed (moving the goalposts)"
+      );
+    }
+
+    // (11) Shortcut pattern: the same output signature repeated across recent
+    //      runs (the loop emits one canned answer regardless of input) while
+    //      claiming improvement. Real reward hacking looks exactly like this.
+    if (claimedImprovement && context.recentOutputs && context.recentOutputs.length >= 3) {
+      const counts = new Map<string, number>();
+      for (const sig of context.recentOutputs) {
+        const k = (sig ?? "").trim().toLowerCase();
+        if (!k) continue;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      const maxRepeat = Math.max(0, ...counts.values());
+      if (maxRepeat >= 3) {
+        reasons.push(
+          `output is a repeated shortcut pattern (same response ${maxRepeat}× regardless of input)`
+        );
+      }
+    }
+  }
+
   return { gamed: reasons.length > 0, reasons };
 }
 
@@ -258,10 +331,10 @@ function needsRestore(result: LoopResult): boolean {
 // ===========================================================================
 export function evaluateResult(
   result: LoopResult,
-  opts: { knownRefs?: ReadonlySet<string> } = {}
+  opts: { knownRefs?: ReadonlySet<string>; context?: GamingContext } = {}
 ): EvalResult {
   const notes: string[] = [];
-  const gaming = detectGaming(result, opts.knownRefs);
+  const gaming = detectGaming(result, opts.knownRefs, opts.context);
   const { score, improved, basis } = scoreImprovement(result);
   notes.push(`score basis: ${basis}`);
 

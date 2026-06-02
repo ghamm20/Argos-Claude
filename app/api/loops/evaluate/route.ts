@@ -6,7 +6,7 @@
 // behavior is exercised + tested over HTTP. Always 200.
 
 import { NextRequest, NextResponse } from "next/server";
-import { evaluateResult } from "@/lib/loops/eval-gate";
+import { evaluateResult, type GamingContext } from "@/lib/loops/eval-gate";
 import { benchmarkTaskIds } from "@/lib/loops/benchmark";
 import { collectTraceRefs } from "@/lib/loops/trace-store";
 import type { LoopResult } from "@/lib/loops/types";
@@ -37,7 +37,10 @@ function coerce(r: Record<string, unknown>): LoopResult {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => ({}))) as { result?: Record<string, unknown> };
+    const body = (await req.json().catch(() => ({}))) as {
+      result?: Record<string, unknown>;
+      context?: GamingContext;
+    };
     if (!body.result || typeof body.result !== "object") {
       return NextResponse.json({ ok: false, error: "result object is required" }, { status: 200 });
     }
@@ -47,7 +50,10 @@ export async function POST(req: NextRequest) {
     } catch {
       /* benchmark ids alone are enough */
     }
-    const evaluation = evaluateResult(coerce(body.result), { knownRefs: refs });
+    const evaluation = evaluateResult(coerce(body.result), {
+      knownRefs: refs,
+      context: body.context && typeof body.context === "object" ? body.context : undefined,
+    });
     return NextResponse.json({ ok: true, evaluation });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 200 });
