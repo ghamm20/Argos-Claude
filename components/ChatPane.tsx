@@ -16,7 +16,10 @@ import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 // server falls back to guest mode if requirePin is enabled, or to
 // operator mode otherwise.
 import { getSessionToken } from "@/lib/auth-client";
-import { Paperclip, ChevronDown, ChevronRight, Wrench } from "lucide-react";
+import { Paperclip, ChevronDown, ChevronRight, Wrench, Brain } from "lucide-react";
+// Chat-render cleanups (2026-06-02): strip <tool> control tags + split
+// internal reasoning into a collapsible panel. Pure, client-safe helpers.
+import { stripToolTags, splitReasoning } from "@/lib/chat-render";
 // Vision Phase 1 (2026-06-02) — image drop, screenshot, preview strip.
 import { ImageDropButton } from "./vision/ImageDropButton";
 import { ScreenshotButton } from "./vision/ScreenshotButton";
@@ -171,9 +174,41 @@ function SourcesBlock({
   );
 }
 
-/** Tools Phase — strip Bart's <tool>{json}</tool> tags from displayed text. */
-function stripToolTags(content: string): string {
-  return content.replace(/<tool>[\s\S]*?<\/tool>/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+/**
+ * Reasoning panel (2026-06-02). Collapsible, closed by default. Renders the
+ * model's extracted internal monologue (<think> blocks or labeled prose like
+ * "Self-Correction:" / "Internal Monologue:") below the clean answer. The main
+ * bubble shows only the answer; reasoning is available on click.
+ */
+function ReasoningPanel({ text, accent }: { text: string; accent: string }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <div className="mt-2 pt-2 border-t border-neutral-800/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-neutral-500 hover:text-neutral-300 transition-colors"
+        aria-expanded={open}
+      >
+        <Brain className="h-3 w-3" />
+        Reasoning
+        {open ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+      </button>
+      {open && (
+        <div
+          className="mt-1.5 pl-2.5 border-l-2 text-[12px] leading-relaxed text-neutral-400 whitespace-pre-wrap"
+          style={{ borderColor: `${accent}40` }}
+        >
+          {text}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Tools Phase — inline result card for a tool execution. */
@@ -267,6 +302,15 @@ function MessageBubble({
     );
   }
 
+  // Clean the assistant output for display:
+  //   - strip <tool> control tags (the result card already shows what ran)
+  //   - split internal reasoning into a collapsible panel (finalized turns
+  //     only; while streaming we show raw tokens so the operator sees flow).
+  const stripped = stripToolTags(msg.content);
+  const { answer, reasoning } = msg.isStreaming
+    ? { answer: stripped, reasoning: null as string | null }
+    : splitReasoning(stripped);
+
   return (
     <div className="flex justify-start my-3">
       <div
@@ -314,9 +358,9 @@ function MessageBubble({
               <>
                 <span>
                   {renderWithCitations(
-                    // Tools Phase — hide the <tool>{…}</tool> control tags
-                    // from the operator; only the prose is shown.
-                    stripToolTags(msg.content),
+                    // Cleaned answer: <tool> control tags stripped, internal
+                    // reasoning split out (see ReasoningPanel below).
+                    answer,
                     msg.retrievalHits,
                     accent,
                     onPillClick
@@ -329,6 +373,11 @@ function MessageBubble({
                     animate={{ opacity: [0.3, 1, 0.3] }}
                     transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
                   />
+                )}
+                {/* Reasoning panel — collapsible internal monologue, on
+                    finalized turns only. Closed by default. */}
+                {!msg.isStreaming && reasoning && (
+                  <ReasoningPanel text={reasoning} accent={accent} />
                 )}
                 {/* Phase 3-B: collapsible Sources block. Only renders on
                     finalized assistant turns that actually used retrieval.
@@ -353,9 +402,9 @@ function MessageBubble({
                     components/voice/PlayButton.tsx header for the
                     why-it-was-invisible note. Self-hides if TTS isn't
                     available or message is empty. */}
-                {!msg.errored && !msg.isStreaming && msg.content.length > 0 && (
+                {!msg.errored && !msg.isStreaming && answer.length > 0 && (
                   <PlayButton
-                    text={msg.content}
+                    text={answer}
                     accent={accent}
                     sessionId={sessionId}
                     personaId={msg.personaId}

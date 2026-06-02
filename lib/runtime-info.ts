@@ -1,7 +1,20 @@
-import { promises as fsp } from "node:fs";
-import path from "node:path";
 import { argosRoot } from "./vault/paths";
 import { getOllamaBase } from "./ollama-config";
+// Build-time version (2026-06-02 HUD fix). Importing package.json INLINES the
+// name + version into the compiled server bundle at BUILD time (webpack /
+// Next, resolveJsonModule). The reported version then travels INSIDE `.next`
+// (which we mirror to the USB payload) and is INDEPENDENT of the runtime cwd.
+//
+// Why this matters: getRuntimeInfo used to read package.json from
+// process.cwd() at runtime and cache it for the process lifetime. The HUD
+// could show a stale version (the v0.1.0 bug) because:
+//   - the running server process pinned the value read at first request, and
+//   - the deployed D:\ARGOS\app\package.json is not part of the `.next`
+//     mirror, so a cwd read could lag the source bump.
+// Baking the version at build removes both failure modes — the value is fixed
+// when `npm run build` runs in the dev repo (single source of truth) and ships
+// with the build artifact.
+import pkg from "../package.json";
 
 export interface RuntimeInfo {
   appName: string;
@@ -13,31 +26,13 @@ export interface RuntimeInfo {
 }
 
 const STARTED_AT = Date.now();
-let pkgCache: { name: string; version: string } | null = null;
-
-async function readPackage(): Promise<{ name: string; version: string }> {
-  if (pkgCache) return pkgCache;
-  try {
-    const raw = await fsp.readFile(
-      path.join(process.cwd(), "package.json"),
-      "utf8"
-    );
-    const parsed = JSON.parse(raw) as { name?: string; version?: string };
-    pkgCache = {
-      name: parsed.name ?? "argos-claude",
-      version: parsed.version ?? "0.0.0",
-    };
-  } catch {
-    pkgCache = { name: "argos-claude", version: "0.0.0" };
-  }
-  return pkgCache;
-}
+const BUILD_NAME = (pkg as { name?: string }).name ?? "argos-claude";
+const BUILD_VERSION = (pkg as { version?: string }).version ?? "0.0.0";
 
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
-  const pkg = await readPackage();
   return {
-    appName: pkg.name,
-    version: pkg.version,
+    appName: BUILD_NAME,
+    version: BUILD_VERSION,
     argosRoot: argosRoot(),
     isDev: !process.env.ARGOS_ROOT,
     ollamaUrl: getOllamaBase(),

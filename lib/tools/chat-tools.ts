@@ -11,6 +11,12 @@
 
 import { toolListForPrompt } from "./registry";
 import type { ToolResult } from "./types";
+// Single source of truth for display stripping — the hardened version also
+// catches unclosed / orphan tool tags (see lib/chat-render.ts). Re-exported
+// so existing server-side importers keep working unchanged.
+import { stripToolTags } from "../chat-render";
+
+export { stripToolTags };
 
 export interface ParsedToolCall {
   id: string;
@@ -37,11 +43,6 @@ export function parseToolCalls(text: string): ParsedToolCall[] {
     }
   }
   return calls;
-}
-
-/** Remove all tool tags from displayed text (used client-side). */
-export function stripToolTags(text: string): string {
-  return text.replace(TOOL_TAG_RE, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** The tool-awareness block prepended/added to Bartimaeus's system prompt. */
