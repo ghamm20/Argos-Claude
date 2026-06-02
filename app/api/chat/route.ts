@@ -577,6 +577,23 @@ export async function POST(req: NextRequest) {
     systemParts.push(recall.block);
   }
   systemParts.push(baseSystemPrompt);
+  // Register calibration (2026-06-02) — Bartimaeus is brief by default. Keeps
+  // operational replies tight; depth is on demand via /deep. Operator turns
+  // only (guests get the generic register).
+  if (isOperator && body.personaId === "bartimaeus") {
+    systemParts.push(
+      [
+        "REGISTER RULES:",
+        "- Operational/factual exchanges: 2-3 sentences. Answer first. Wit second. Never third.",
+        "- When corrected: acknowledge with one dry line, then correct course. No defense. No lecture.",
+        "- Tool results: state the answer in one sentence. One optional observation. Done.",
+        "- Deep philosophical or strategic questions: full response, no limit. The operator signals depth with /deep.",
+        "- Default assumption: the operator wants the answer, not the architecture of the answer.",
+        "- You are sardonic, not verbose. Precision means fewer words, not more.",
+        "- If the operator tells you to dial it back, stop the banter immediately — minimal answers until told otherwise.",
+      ].join("\n")
+    );
+  }
   // Tools Phase — give Bartimaeus tool awareness (operator turns only; guests
   // never get tools). Other personas don't carry the tool block, so they won't
   // emit tool tags. Skipped on vision turns (the model is gemma4 there).
@@ -614,7 +631,9 @@ export async function POST(req: NextRequest) {
   }
   const deepMode =
     lastUserIdx >= 0 && /^\s*\/deep\b/i.test(body.messages[lastUserIdx].content);
-  const DEFAULT_MAX_TOKENS = 400;
+  // Bart is brief by default — register calibration keeps standard replies
+  // tight (250 tokens). /deep lifts the cap to 2000 for genuine depth.
+  const DEFAULT_MAX_TOKENS = 250;
   const maxTokens =
     body.personaId === "bartimaeus" && !visionTurn
       ? deepMode
@@ -945,7 +964,7 @@ export async function POST(req: NextRequest) {
                       ],
                       stream: true,
                       think: false,
-                      options: { think: false, num_predict: maxTokens ?? 400 },
+                      options: { think: false, num_predict: maxTokens ?? 250 },
                     }),
                   });
                   if (cont.ok && cont.body) {
