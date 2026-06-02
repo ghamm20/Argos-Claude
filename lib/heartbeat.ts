@@ -39,6 +39,11 @@ import { isInFlight } from "./chat/inflight";
 // directly. The dispatcher reuses the same pushoverSend primitive.
 import { dispatchEvent } from "./dispatcher";
 import { PERSONA_BY_ID } from "./personas";
+// Overnight Engine (2026-06-02) — the heartbeat tick also pumps the task queue
+// (per directive: "extends the heartbeat tick"). Fire-and-forget + guarded, so
+// it never blocks or competes with the heartbeat's own work. The dedicated
+// task scheduler runs this on its own interval too; the pump is idempotent.
+import { pumpTaskQueue } from "./task-scheduler";
 
 // ----- constants -----
 
@@ -280,6 +285,9 @@ export async function runHeartbeatTick(
   // Serialize: if a tick is already running, await it rather than
   // overlapping (mirrors scheduler's active-tick guard).
   if (runningTick) return runningTick;
+  // Overnight Engine — pump the task queue on every heartbeat tick (background,
+  // guarded, never blocks the heartbeat or the UI).
+  void pumpTaskQueue().catch(() => {});
   runningTick = (async () => {
     const start = Date.now();
     const source = opts.source ?? "manual";

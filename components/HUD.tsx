@@ -115,6 +115,12 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const [now, setNow] = useState(() => Date.now());
   // v1.1 Task 1: live audit chain event count.
   const [eventCount, setEventCount] = useState<number | null>(null);
+  // Overnight Engine — task queue snapshot for the HUD TASKS row.
+  const [tasks, setTasks] = useState<{
+    queued: number;
+    running: string | null;
+    completedToday: number;
+  } | null>(null);
   // v1.1 Task 6: runtime argosRoot from /api/system/info — overrides the
   // server-prop value baked at build time (which is wrong on deployed
   // payload). null means "still using the server-prop"; populated value
@@ -170,11 +176,34 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     void fetchCount();
     const countPoll = setInterval(() => void fetchCount(), 5000);
 
+    // Overnight Engine — poll the task queue snapshot.
+    const fetchTasks = async () => {
+      try {
+        const r = await fetch("/api/tasks/queue", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as {
+          queued?: unknown[];
+          running?: Array<{ goal?: string }>;
+          completedToday?: number;
+        };
+        setTasks({
+          queued: j.queued?.length ?? 0,
+          running: j.running?.[0]?.goal ?? null,
+          completedToday: j.completedToday ?? 0,
+        });
+      } catch {
+        /* offline; keep prior */
+      }
+    };
+    void fetchTasks();
+    const tasksPoll = setInterval(() => void fetchTasks(), 5000);
+
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancel = true;
       clearInterval(tick);
       clearInterval(countPoll);
+      clearInterval(tasksPoll);
     };
   }, [setVaultCounts]);
 
@@ -373,6 +402,25 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
           title="Facts recalled from past sessions and injected into this turn"
         />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
+        {/* Overnight Engine — task queue snapshot. */}
+        <Row
+          label="Tasks"
+          value={
+            tasks
+              ? tasks.running
+                ? `running · ${tasks.completedToday} done`
+                : `${tasks.queued} queued · ${tasks.completedToday} done`
+              : "—"
+          }
+          accent={tasks?.running ? eyeColor : undefined}
+          title={
+            tasks?.running
+              ? `Running: ${tasks.running}`
+              : tasks
+                ? `${tasks.queued} queued, ${tasks.completedToday} completed today`
+                : "task queue"
+          }
+        />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}
         <Row
           label="Events"

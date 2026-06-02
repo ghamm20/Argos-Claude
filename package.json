@@ -25,6 +25,7 @@
     "vision:smoke": "node scripts/smoke-vision.mjs",
     "memory:smoke": "node scripts/smoke-memory-extract.mjs",
     "tools:smoke": "node scripts/smoke-tools.mjs",
+    "tasks:smoke": "node scripts/smoke-tasks.mjs",
     "demo-check": "node scripts/demo-check.mjs",
     "demo-prep": "node scripts/demo-check.mjs && node -e \"console.log('\\n  Open: http://127.0.0.1:7799  (launch via ARGOS\\\\launcher.bat from your USB)')\"",
     "readiness": "npm run verify && npm run demo-check && node scripts/smoke-launcher.mjs",

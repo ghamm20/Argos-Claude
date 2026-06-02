@@ -61,6 +61,9 @@ import { ensureSchedulerStarted } from "@/lib/research/scheduler";
 // (in addition to the launcher curl + status route) so it starts on
 // first chat in dev even without the launcher.
 import { ensureHeartbeatStarted } from "@/lib/heartbeat";
+// Overnight Engine (2026-06-02) — boot the task scheduler (queue pump + morning
+// brief). Always-on; only acts when the operator drops a task. Idempotent.
+import { ensureTaskSchedulerStarted } from "@/lib/task-scheduler";
 import { afterReport } from "@/lib/research/afterReport";
 
 // Module-level init kicker — runs once per process lifetime when this
@@ -91,6 +94,13 @@ void ensureSchedulerStarted().catch((e) => {
 void ensureHeartbeatStarted().catch((e) => {
   // eslint-disable-next-line no-console
   console.warn(`[chat] heartbeat boot failed: ${(e as Error).message}`);
+});
+
+// Overnight Engine — boot the task scheduler. No-op work until a task is
+// dropped into ARGOS_ROOT/tasks/queue/. Idempotent.
+void ensureTaskSchedulerStarted().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(`[chat] task scheduler boot failed: ${(e as Error).message}`);
 });
 
 export const runtime = "nodejs";

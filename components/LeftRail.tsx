@@ -10,6 +10,7 @@ import {
   Mic,
   Database,
   Wrench,
+  ListChecks,
   Settings,
 } from "lucide-react";
 
@@ -36,6 +37,8 @@ const NAV: NavItem[] = [
   // Tools Phase (2026-06-02) — Tools is a real feature (research pipeline +
   // Bartimaeus's 18-tool governed suite). No longer a stub → no v2 label.
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools" },
+  // Overnight Engine (2026-06-02) — task queue + runner + morning brief.
+  { id: "tasks", label: "Tasks", icon: ListChecks, active: true, route: "/tasks" },
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 
