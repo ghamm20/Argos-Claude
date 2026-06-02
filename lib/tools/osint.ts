@@ -64,9 +64,9 @@ export const execute: ToolExecute = async (params) => {
     }
   }
 
-  // General web search.
+  // General web search (unrestricted — up to 20 results).
   try {
-    const web = await ddgSearch(subject, 5);
+    const web = await ddgSearch(subject, 20);
     if (web.length) {
       sections.push({
         source: "Web search (DuckDuckGo)",
@@ -80,7 +80,7 @@ export const execute: ToolExecute = async (params) => {
 
   // LinkedIn public profiles (site-restricted search).
   try {
-    const li = await ddgSearch(`${subject} site:linkedin.com`, 3);
+    const li = await ddgSearch(`${subject} site:linkedin.com`, 10);
     if (li.length) {
       sections.push({
         source: "LinkedIn (public, via search)",
@@ -94,7 +94,7 @@ export const execute: ToolExecute = async (params) => {
 
   // News mentions.
   try {
-    const news = await ddgSearch(`${subject} news`, 3);
+    const news = await ddgSearch(`${subject} news`, 10);
     if (news.length) {
       sections.push({
         source: "News search",

@@ -86,6 +86,98 @@ export function extractMetaDescription(html: string): string | null {
   return m ? decodeEntities(m[1]).trim() : null;
 }
 
+// Unrestricted web crawl (2026-06-02) — full structured extraction.
+
+/** Rotating user-agents for multi-attempt fetches (some sites gate on UA). */
+export const CRAWL_USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+];
+
+/** Fetch a URL trying multiple user-agents until one returns usable HTML.
+ *  We can't execute JavaScript without a browser engine (no new deps), so this
+ *  is the honest "render as best we can" path: follow redirects, retry under
+ *  different UAs, and prefer the response with the most extractable text. */
+export async function fetchWithUserAgents(
+  url: string,
+  opts: { timeoutMs?: number; maxChars?: number } = {}
+): Promise<FetchResult & { uaUsed?: string }> {
+  let best: (FetchResult & { uaUsed?: string }) | null = null;
+  for (const ua of CRAWL_USER_AGENTS) {
+    const r = await fetchText(url, {
+      timeoutMs: opts.timeoutMs ?? 60_000,
+      maxChars: opts.maxChars,
+      headers: {
+        "user-agent": ua,
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+      },
+    });
+    if (r.ok && r.text) {
+      const score = stripHtml(r.text).length;
+      if (!best || score > stripHtml(best.text).length) best = { ...r, uaUsed: ua };
+      // A solidly-rendered page (lots of text) is good enough; stop early.
+      if (score > 1500) break;
+    } else if (!best) {
+      best = { ...r, uaUsed: ua };
+    }
+  }
+  return best ?? { ok: false, status: 0, text: "" };
+}
+
+function absolutize(href: string, base: string): string | null {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Extract absolute http(s) hyperlinks from a page (deduped, capped). */
+export function extractLinks(html: string, baseUrl: string, max = 200): string[] {
+  const out = new Set<string>();
+  const re = /<a[^>]+href=["']([^"'#]+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const abs = absolutize(m[1].trim(), baseUrl);
+    if (abs && /^https?:\/\//i.test(abs)) out.add(abs);
+    if (out.size >= max) break;
+  }
+  return [...out];
+}
+
+/** Extract absolute image URLs from a page (deduped, capped). */
+export function extractImages(html: string, baseUrl: string, max = 100): string[] {
+  const out = new Set<string>();
+  const re = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const abs = absolutize(m[1].trim(), baseUrl);
+    if (abs && /^https?:\/\//i.test(abs)) out.add(abs);
+    if (out.size >= max) break;
+  }
+  return [...out];
+}
+
+/** Extract page metadata (description, OpenGraph, keywords, author, canonical). */
+export function extractMetadata(html: string): Record<string, string> {
+  const meta: Record<string, string> = {};
+  const re =
+    /<meta[^>]+(?:name|property)=["']([^"']+)["'][^>]*content=["']([^"']*)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const key = m[1].toLowerCase();
+    if (/description|title|keywords|author|og:|twitter:/.test(key)) {
+      meta[key] = decodeEntities(m[2]).trim();
+    }
+  }
+  const canon = html.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+  if (canon) meta.canonical = canon[1];
+  return meta;
+}
+
 export function slugify(s: string): string {
   return (
     s
