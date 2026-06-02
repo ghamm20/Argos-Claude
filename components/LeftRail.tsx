@@ -11,6 +11,7 @@ import {
   Database,
   Wrench,
   ListChecks,
+  Repeat,
   Settings,
 } from "lucide-react";
 
@@ -39,6 +40,8 @@ const NAV: NavItem[] = [
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools" },
   // Overnight Engine (2026-06-02) — task queue + runner + morning brief.
   { id: "tasks", label: "Tasks", icon: ListChecks, active: true, route: "/tasks" },
+  // Self-Evolving Loop Suite (2026-06-02) — 20 improvement loops + eval gates.
+  { id: "loops", label: "Loops", icon: Repeat, active: true, route: "/loops" },
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];
 

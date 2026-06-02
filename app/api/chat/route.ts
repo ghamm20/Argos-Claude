@@ -64,6 +64,10 @@ import { ensureHeartbeatStarted } from "@/lib/heartbeat";
 // Overnight Engine (2026-06-02) — boot the task scheduler (queue pump + morning
 // brief). Always-on; only acts when the operator drops a task. Idempotent.
 import { ensureTaskSchedulerStarted } from "@/lib/task-scheduler";
+// Self-Evolving Loop Suite (2026-06-02) — boot the loop scheduler (scheduled
+// improvement loops: nightly 2AM, Sunday 3AM, Friday 11PM, Saturday 2AM).
+// Autorun-gated; only fires in-window. Idempotent.
+import { ensureLoopSchedulerStarted } from "@/lib/loops/scheduler";
 import { afterReport } from "@/lib/research/afterReport";
 
 // Module-level init kicker — runs once per process lifetime when this
@@ -101,6 +105,13 @@ void ensureHeartbeatStarted().catch((e) => {
 void ensureTaskSchedulerStarted().catch((e) => {
   // eslint-disable-next-line no-console
   console.warn(`[chat] task scheduler boot failed: ${(e as Error).message}`);
+});
+
+// Self-Evolving Loop Suite — boot the loop scheduler. Dormant unless a
+// scheduled loop's window is hit (and ARGOS_LOOPS_AUTORUN is on). Idempotent.
+void ensureLoopSchedulerStarted().catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(`[chat] loop scheduler boot failed: ${(e as Error).message}`);
 });
 
 export const runtime = "nodejs";

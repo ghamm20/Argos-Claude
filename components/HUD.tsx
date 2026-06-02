@@ -121,6 +121,13 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     running: string | null;
     completedToday: number;
   } | null>(null);
+  // Self-Evolving Loop Suite — loops snapshot for the HUD LOOPS row.
+  const [loops, setLoops] = useState<{
+    total: number;
+    traces: number;
+    pending: number;
+    halted: number;
+  } | null>(null);
   // v1.1 Task 6: runtime argosRoot from /api/system/info — overrides the
   // server-prop value baked at build time (which is wrong on deployed
   // payload). null means "still using the server-prop"; populated value
@@ -198,12 +205,35 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     void fetchTasks();
     const tasksPoll = setInterval(() => void fetchTasks(), 5000);
 
+    // Self-Evolving Loop Suite — poll loop status (registry + trace stats).
+    const fetchLoops = async () => {
+      try {
+        const r = await fetch("/api/loops/status", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as {
+          loops?: unknown[];
+          stats?: { totalTraces?: number; pendingApproval?: number; halted?: number };
+        };
+        setLoops({
+          total: j.loops?.length ?? 0,
+          traces: j.stats?.totalTraces ?? 0,
+          pending: j.stats?.pendingApproval ?? 0,
+          halted: j.stats?.halted ?? 0,
+        });
+      } catch {
+        /* offline; keep prior */
+      }
+    };
+    void fetchLoops();
+    const loopsPoll = setInterval(() => void fetchLoops(), 8000);
+
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancel = true;
       clearInterval(tick);
       clearInterval(countPoll);
       clearInterval(tasksPoll);
+      clearInterval(loopsPoll);
     };
   }, [setVaultCounts]);
 
@@ -419,6 +449,21 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
               : tasks
                 ? `${tasks.queued} queued, ${tasks.completedToday} completed today`
                 : "task queue"
+          }
+        />
+        {/* Self-Evolving Loop Suite — loop suite snapshot. */}
+        <Row
+          label="Loops"
+          value={
+            loops
+              ? `${loops.total} · ${loops.traces} runs${loops.pending > 0 ? ` · ${loops.pending} pend` : ""}`
+              : "—"
+          }
+          accent={loops?.halted ? "#ef4444" : loops?.pending ? "#eab308" : undefined}
+          title={
+            loops
+              ? `${loops.total} loops, ${loops.traces} traces, ${loops.pending} awaiting approval, ${loops.halted} halted (gaming)`
+              : "self-evolving loop suite"
           }
         />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}
