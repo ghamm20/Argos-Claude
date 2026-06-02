@@ -90,7 +90,7 @@ export interface Persona {
 //
 // MODEL MAP (per Phase 2 Persona Completion directive, locked):
 //
-//   Bartimaeus → royhodge812/Orchestrator:lates              (9.6 GB)
+//   Bartimaeus → aratan/gemma-4-E4B-q8-it-heretic:latest     (8.1 GB)
 //   Juniper    → fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b
 //                                                            (6.5 GB)
 //   Sage       → alfaxad/wild-gemma4:e4b                     (6.3 GB)
@@ -135,12 +135,14 @@ const GUEST_SYSTEM_PROMPT = [
   "Do not address the user as Operator. Do not reference any prior conversation or stored memory. Do not invent details about the user.",
 ].join("\n\n");
 
-// Phase 2 Persona Completion (2026-05-28): Bart + Juniper no longer
-// share. Bart gets royhodge812/Orchestrator (an orchestration-tuned
-// model that fits his strategic-clarity register); Juniper keeps the
-// Qwen 9b uncensored (warm conversational counterpart). Note the
-// upstream Bart tag is ":lates" not ":latest" — exact string locked.
-const MODEL_BART = "royhodge812/Orchestrator:lates";
+// Bart model swap (owner-approved, 2026-06-02): royhodge812/Orchestrator:lates
+// → aratan/gemma-4-E4B-q8-it-heretic:latest. Orchestrator had a hardwired
+// conversational-memory-denial reflex that was not promptable (see
+// PILOT_FIXES_VALIDATION.md, Problem 2). The gemma-4 heretic build PASSED the
+// 2-turn memory test, reasoning, knowledge/citation, AND character fidelity
+// ("better Bart than Orchestrator was"), and at 8.1 GB fits the 8 GB rig
+// better than Orchestrator's 9.6 GB. Juniper keeps the Qwen 9b uncensored.
+const MODEL_BART = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 const MODEL_JUNIPER =
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
 const MODEL_SAGE = "alfaxad/wild-gemma4:e4b";
@@ -161,8 +163,10 @@ export const PERSONAS: Persona[] = [
     status: "live",
     model: MODEL_BART,
     intendedModel: "huihui_ai/gpt-oss-abliterated:20b", // Power Mode / 5090
-    // royhodge812/Orchestrator:lates — not a thinking model.
-    // think:false stays as the safe default for the registry.
+    // aratan/gemma-4-E4B is a gemma-4 model; gemma4-thinking emits all output
+    // via message.thinking (empty message.content) when think:true. think:false
+    // is REQUIRED here so Bart's text streams through message.content. Same
+    // reason Sage (wild-gemma4:e4b) uses think:false.
     think: false,
     // Phase 7-B (2026-05-26): Piper TTS — `en_US-ryan-high` is the
     // deep measured male voice from rhasspy/piper-voices. Filename

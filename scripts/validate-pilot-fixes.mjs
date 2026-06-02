@@ -16,7 +16,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
 const PORT = 7864;
 const ROOT = join(tmpdir(), `argos-pilot-fixes-${process.pid}`);
-const MODEL = "royhodge812/Orchestrator:lates";
+const MODEL = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 
 function chat(base, messages, persona = "bartimaeus", model = MODEL) {
   return new Promise((res) => {

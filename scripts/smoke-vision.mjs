@@ -35,7 +35,7 @@ const portArg = process.argv.indexOf("--port");
 const BASE_PORT = portArg >= 0 ? parseInt(process.argv[portArg + 1], 10) : 7822;
 
 const VISION_MODEL = "ssfdre38/gemma4-turbo:e4b";
-const PERSONA_MODEL = "royhodge812/Orchestrator:lates"; // Bart's text model
+const PERSONA_MODEL = "aratan/gemma-4-E4B-q8-it-heretic:latest"; // Bart's text model
 
 let pass = 0,
   fail = 0;

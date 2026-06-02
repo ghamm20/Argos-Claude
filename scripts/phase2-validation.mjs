@@ -47,7 +47,7 @@ const PERSONAS = [
   {
     id: "bartimaeus",
     name: "Bartimaeus",
-    model: "royhodge812/Orchestrator:lates",
+    model: "aratan/gemma-4-E4B-q8-it-heretic:latest",
   },
   {
     id: "juniper",

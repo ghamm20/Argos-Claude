@@ -43,7 +43,27 @@ shallow snippets … only use web_search for navigational queries."
 
 Verified: typecheck/lint/build clean; `smoke-h2 (chat)` green.
 
-## PROBLEM 2 — Bart denies having memory — ⚠️ INFRA FIXED, BLOCKED BY BART'S MODEL
+## PROBLEM 2 — Bart denies having memory — ✅ RESOLVED (model swap, v2.3.2)
+
+**UPDATE (2026-06-02, v2.3.2):** Owner-approved model swap fixed this. Bart's
+bound model changed from `royhodge812/Orchestrator:lates` →
+`aratan/gemma-4-E4B-q8-it-heretic:latest`. Live 2-turn gate
+(`scripts/validate-bart-memory.mjs`) now PASSES:
+- Turn 1: "My project is codenamed Asher" → *"Understood. Asher. A designation…
+  I shall file it under 'Current Obsession'"* (in character).
+- Turn 2: "What did I just tell you my project is codenamed?" → **"You told me
+  your project is codenamed Asher."** Contains "Asher", no memory denial. ✓
+The infra/prompt groundwork below was correct all along; it just needed a model
+that honors context. The new model also fits the 8 GB rig better (8.1 vs 9.6 GB).
+Honest note: the gemma-4 model is somewhat MORE verbose than Orchestrator (and
+occasionally emits markdown footnote syntax) — restraint character lands, brevity
+is looser. Accepted per the owner's evaluation ("better Bart than Orchestrator").
+
+The original diagnosis (kept for the record) follows.
+
+---
+
+### Original diagnosis — INFRA FIXED, BLOCKED BY MODEL (pre-swap)
 
 **Diagnosis (the important part).**
 
@@ -78,8 +98,6 @@ path is correct) and NOT a persona-logic bug (the prompt is correct and forceful
   already handle context correctly).
 - These take effect the moment Bart is bound to a context-respecting model.
 
-**OWNER DECISION NEEDED:** Bart's model (`royhodge812/Orchestrator:lates`) is
-locked per directive. To make Bart honor conversational memory, swap his bound
-model to one that respects context (Bobby's `notmythos-8b` demonstrably does, as
-do most modern instruct models). Until then, Bart will keep denying memory
-despite having full access to it.
+**OWNER DECISION (made, 2026-06-02):** swapped Bart's bound model to
+`aratan/gemma-4-E4B-q8-it-heretic:latest` — see the RESOLVED note at the top of
+this section. Memory now works.

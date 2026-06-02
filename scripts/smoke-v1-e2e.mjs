@@ -48,11 +48,10 @@ const PORT = portArgIdx >= 0 ? parseInt(args[portArgIdx + 1], 10) : 7791;
 const BASE = `http://127.0.0.1:${PORT}`;
 const agent = new http.Agent({ keepAlive: false });
 
-// Phase 2 Persona Completion (2026-05-28): Bart binds to
-// royhodge812/Orchestrator:lates. Exact upstream tag (note :lates,
-// not :latest). This constant must match lib/personas.ts
-// Bartimaeus.model — smoke is a contract check, not a tautology.
-const BART_MODEL = "royhodge812/Orchestrator:lates";
+// Bart model swap (2026-06-02): Bart binds to
+// aratan/gemma-4-E4B-q8-it-heretic:latest. This constant must match
+// lib/personas.ts Bartimaeus.model — smoke is a contract check.
+const BART_MODEL = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 
 let pass = 0;
 let fail = 0;

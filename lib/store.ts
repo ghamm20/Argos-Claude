@@ -94,12 +94,13 @@ const EMPTY_VAULT: VaultStatus = {
 // Phase 2 Persona Completion (2026-05-28): Bart no longer shares with
 // Juniper; Bart gets royhodge812/Orchestrator. DEFAULT_MODEL = Bart's
 // model (boot persona is Bartimaeus).
-const DEFAULT_MODEL = "royhodge812/Orchestrator:lates";
+const DEFAULT_MODEL = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 export const AVAILABLE_MODELS: readonly string[] = [
-  // Phase 2 Persona Completion (2026-05-28). Exact upstream tags;
-  // royhodge812/Orchestrator is :lates (no trailing 't') per the
-  // model author's tag — do NOT correct to :latest.
-  "royhodge812/Orchestrator:lates",                            // Bart
+  // Bart model swap (owner-approved, 2026-06-02): Orchestrator → gemma-4
+  // heretic (memory works; see PILOT_FIXES_VALIDATION.md). Old Orchestrator
+  // kept on the allowlist for back-compat / rollback.
+  "aratan/gemma-4-E4B-q8-it-heretic:latest",                   // Bart
+  "royhodge812/Orchestrator:lates",                            // Bart (former)
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b",   // Juniper
   "alfaxad/wild-gemma4:e4b",                                   // Sage
   "CyberCrew/notmythos-8b:latest",                             // Bobby

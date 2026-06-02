@@ -688,12 +688,12 @@ export async function POST(req: NextRequest) {
     systemParts.push(TRUTH_MODE_CLAUSE);
   }
   // Conversational-memory reminder, pushed LAST so it's the final system
-  // content immediately before the message thread — maximum recency. Bart's
-  // bound model (royhodge812/Orchestrator) reflexively denies having memory of
-  // the conversation; an instruction buried in his long persona prompt gets
-  // ignored. Only applied to a MULTI-TURN session (≥2 user turns) so it never
-  // fires on a fresh first message. Kept short + general (harmless to other
-  // personas, which already handle context correctly).
+  // content immediately before the message thread — maximum recency. Belt-and-
+  // braces: Bart's former model (royhodge812/Orchestrator) reflexively denied
+  // having memory; the gemma-4 swap (2026-06-02) fixed that, but this reminder
+  // stays as cheap defense-in-depth for any model. Only applied to a MULTI-TURN
+  // session (≥2 user turns) so it never fires on a fresh first message; short +
+  // general, harmless to personas that already handle context.
   {
     const userTurns = body.messages.filter((m) => m.role === "user").length;
     if (userTurns >= 2) {

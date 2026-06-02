@@ -93,10 +93,12 @@ export interface PersistedSettings {
 const DEFAULT_SETTINGS: PersistedSettings = {
   version: SETTINGS_VERSION,
   defaultPersona: "bartimaeus",
-  // Phase 2 Persona Completion (2026-05-28): Bart now binds to
-  // royhodge812/Orchestrator:lates (note :lates, not :latest). The
-  // boot model loads this so the first chat doesn't pay a cold-swap.
-  defaultModel: "royhodge812/Orchestrator:lates",
+  // Bart model swap (2026-06-02): Bart now binds to
+  // aratan/gemma-4-E4B-q8-it-heretic:latest (memory works; see
+  // PILOT_FIXES_VALIDATION.md). The boot model loads this so the first chat
+  // doesn't pay a cold-swap. (Existing deployments keep their settings.json
+  // defaultModel; the persona binding is what drives Bart's model.)
+  defaultModel: "aratan/gemma-4-E4B-q8-it-heretic:latest",
   updatedAt: 0,
   operatorPinHash: null,
   requirePin: false,
