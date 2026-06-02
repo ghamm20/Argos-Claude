@@ -208,7 +208,7 @@ try {
     const honest = await jreq(base, "/api/loops/evaluate", {
       method: "POST",
       body: {
-        result: { ...baseResult, benchmarkBefore: 0.6, benchmarkAfter: 0.7, evidence: [{ kind: "benchmark", ref: "math-1", before: 0.6, after: 0.7 }] },
+        result: { ...baseResult, benchmarkBefore: 0.6, benchmarkAfter: 0.7, evidence: [{ kind: "benchmark", ref: "reason-1", before: 0.6, after: 0.7 }] },
         context: { priorSpec: "answer correctly", currentSpec: "answer correctly", recentOutputs: ["a", "b", "c"], priorScore: 0.6, outputMatchesSpec: true },
       },
     });

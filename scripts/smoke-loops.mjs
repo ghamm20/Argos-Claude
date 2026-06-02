@@ -116,20 +116,17 @@ async function withServer(label, port, fn) {
   }
 }
 
-// A correct answer set for the fixed benchmark tasks (mirrors lib/loops/benchmark).
+// A correct answer set for the fixed benchmark tasks (mirrors lib/loops/benchmark v2).
 const CORRECT = {
-  "math-1": "391",
-  "math-2": "12",
-  "math-3": "1024",
-  "math-4": "40",
-  "geo-1": "Paris",
-  "geo-2": "Tokyo",
-  "sci-1": "Au",
-  "sci-2": "8",
-  "logic-1": "no",
-  "logic-2": "Sue",
-  "fmt-1": "ACKNOWLEDGED",
-  "reason-1": "5",
+  "reason-1": "391", "reason-2": "12", "reason-3": "1024", "reason-4": "40", "reason-5": "5",
+  "reason-6": "no", "reason-7": "Sue", "reason-8": "30", "reason-9": "32", "reason-10": "Thursday",
+  "ret-1": "Paris", "ret-2": "Tokyo", "ret-3": "Au", "ret-4": "8", "ret-5": "Jupiter",
+  "ret-6": "7", "ret-7": "Shakespeare", "ret-8": "water", "ret-9": "6", "ret-10": "1945",
+  "tc-1": "red, blue, yellow", "tc-2": "mercury, venus, earth", "tc-3": "north south east west",
+  "tc-4": "solid liquid gas", "tc-5": "heat water, add tea, then steep",
+  "char-1": "blue", "char-2": "four", "char-3": "water is a clear flowing liquid", "char-4": "yes", "char-5": "Rome",
+  "qual-1": "Gravity is a force.", "qual-2": "A firewall blocks traffic.", "qual-3": "cat on the mat",
+  "qual-4": "Backups prevent data loss.", "qual-5": "Sleep restores the body and mind.",
 };
 
 const loopsStateDir = join(repoRoot, "state", "loops");
@@ -151,7 +148,7 @@ try {
     check("all-correct grades 1.0", allRight.json?.graded?.score === 1, `(${allRight.json?.graded?.score})`);
     const empty = await jreq(base, "/api/loops/benchmark", { method: "POST", body: { answers: {} } });
     check("empty grades 0.0", empty.json?.graded?.score === 0, `(${empty.json?.graded?.score})`);
-    const partial = await jreq(base, "/api/loops/benchmark", { method: "POST", body: { answers: { "math-1": "391", "geo-1": "Paris" } } });
+    const partial = await jreq(base, "/api/loops/benchmark", { method: "POST", body: { answers: { "reason-1": "391", "ret-1": "Paris" } } });
     check("partial grades between 0 and 1", partial.json?.graded?.score > 0 && partial.json?.graded?.score < 1, `(${partial.json?.graded?.score?.toFixed(2)})`);
 
     // ===== 3. EVAL GATE — honest improvement =====
@@ -163,7 +160,7 @@ try {
           loopId: "benchmark", loopNumber: 19, ok: true, summary: "up",
           claimedImprovement: true, claimedScore: 0.8,
           benchmarkBefore: 0.6, benchmarkAfter: 0.8,
-          evidence: [{ kind: "benchmark", ref: "math-1", before: 0.6, after: 0.8 }],
+          evidence: [{ kind: "benchmark", ref: "reason-1", before: 0.6, after: 0.8 }],
           proposals: [],
         },
       },

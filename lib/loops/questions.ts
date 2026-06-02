@@ -61,10 +61,14 @@ export interface RecordQuestionResult {
   question: OpenQuestion | null;
 }
 
-/** Record a new question unless an equivalent one already exists. */
+/** Record a new question unless an equivalent one already exists OR there is
+ *  already an UNANSWERED question for the same gap (category). The latter is
+ *  what makes "never ask twice" hold even though the model phrases the question
+ *  differently each run — we dedup on the gap, not the wording. */
 export async function recordQuestion(question: string, category: string): Promise<RecordQuestionResult> {
   const all = await readQuestions();
-  if (alreadyAsked(question, all)) return { recorded: false, question: null };
+  const pendingSameCategory = all.some((q) => !q.answered && q.category === category);
+  if (pendingSameCategory || alreadyAsked(question, all)) return { recorded: false, question: null };
   const q: OpenQuestion = {
     id: randomUUID().slice(0, 8),
     question: question.trim().slice(0, 500),
