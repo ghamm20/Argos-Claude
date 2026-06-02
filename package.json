@@ -24,6 +24,7 @@
     "voice:f5-daemon": "node scripts/start-f5-daemon.mjs",
     "vision:smoke": "node scripts/smoke-vision.mjs",
     "memory:smoke": "node scripts/smoke-memory-extract.mjs",
+    "memory:smoke-audit": "node scripts/smoke-memory-audit.mjs",
     "tools:smoke": "node scripts/smoke-tools.mjs",
     "tasks:smoke": "node scripts/smoke-tasks.mjs",
     "loops:smoke": "node scripts/smoke-loops.mjs",

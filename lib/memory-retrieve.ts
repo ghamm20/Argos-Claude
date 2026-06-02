@@ -78,7 +78,11 @@ export async function retrieveMemories(userMessage: string): Promise<MemoryRecal
     const qtokens = new Set(tokenize(msg));
     if (qtokens.size === 0) return EMPTY;
 
-    const facts = await readFacts();
+    // Audit gate: only unreviewed / approved / edited facts are injected.
+    // Rejected and flagged-as-hallucination facts are excluded from prompts.
+    const facts = (await readFacts()).filter(
+      (f) => f.status !== "rejected" && f.status !== "flagged"
+    );
     if (facts.length === 0) return EMPTY;
 
     const scored = facts

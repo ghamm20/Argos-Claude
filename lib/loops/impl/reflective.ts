@@ -12,7 +12,7 @@ import { loopFail, type LoopResult } from "../types";
 import { readAllTraces, traceStats, readTraces } from "../trace-store";
 import { recordFailureLesson } from "../lessons";
 import { argosRoot } from "../../vault/paths";
-import { storeFacts } from "../../memory-extract";
+import { storeFacts, factId } from "../../memory-extract";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -209,14 +209,18 @@ export const traceAnalysis: LoopDefinition = {
       let memoryInjected = false;
       if (insight.trim() && insight.trim() !== "Not enough trace history to analyze yet.") {
         try {
+          const factText = `Loop trace analysis (${day}): ${insight.trim().slice(0, 240)}`;
+          const factTs = new Date().toISOString();
           await storeFacts([
             {
-              fact: `Loop trace analysis (${day}): ${insight.trim().slice(0, 240)}`,
+              id: factId({ timestamp: factTs, fact: factText, sessionId: null }),
+              fact: factText,
               category: "concern",
               confidence: 0.8,
-              timestamp: new Date().toISOString(),
+              timestamp: factTs,
               sessionId: null,
               persona: "bartimaeus",
+              status: "unreviewed",
             },
           ]);
           memoryInjected = true;

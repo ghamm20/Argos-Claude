@@ -1,21 +1,28 @@
 // lib/memory-extract.ts
 //
 // Memory Phase (2026-06-02) — semantic cross-session memory: EXTRACTION +
-// STORAGE.
+// STORAGE, with operator AUDIT (2026-06-02 update).
 //
 // After each assistant turn, Bobby (the fastest model) extracts memorable
 // facts the operator stated or implied. Facts are stored in two places:
-//   A) <ARGOS_ROOT>/data/memory/shared/operator_facts.jsonl  (append-only)
-//   B) <ARGOS_ROOT>/memory/MEMORY.md under a "## Recent context" section
-//      (atomic temp+rename; never overwrites existing content)
+//   A) <ARGOS_ROOT>/data/memory/shared/operator_facts.jsonl
+//   B) <ARGOS_ROOT>/memory/MEMORY.md under "## Recent context"
 //
-// Doctrine: extraction NEVER blocks the chat response (fire-and-forget) and
-// NEVER throws — every path degrades silently. Bobby is the extraction model.
+// AUDIT additions:
+//   - Every fact carries a stable `id` and a `status`
+//     (unreviewed/approved/rejected/edited/flagged) so the operator can review
+//     each one — the same discipline applied to Jenna.
+//   - Every extraction call is logged with full transparency (the exact prompt
+//     sent to Bobby + Bobby's raw response + parse result) to
+//     state/memory-extractions/<sessionId>.jsonl, so the audit page can show
+//     "what Bobby was told and what he actually said" for any fact.
 //
+// Doctrine: extraction NEVER blocks the chat response and NEVER throws.
 // Server-only (node fs + local Ollama).
 
 import { promises as fsp } from "node:fs";
 import path from "node:path";
+import { randomUUID, createHash } from "node:crypto";
 import { argosRoot } from "./vault/paths";
 import { getOllamaBase } from "./ollama-config";
 import { PERSONA_BY_ID } from "./personas";
@@ -27,13 +34,27 @@ export type FactCategory =
   | "concern"
   | "event";
 
+/** Operator review lifecycle for an extracted fact. */
+export type FactStatus =
+  | "unreviewed" // default for new extractions
+  | "approved" //   operator confirmed accurate
+  | "rejected" //   operator removed from injection
+  | "edited" //     operator modified the fact text
+  | "flagged"; //   suspected hallucination — kept for analysis, NOT injected
+
 export interface OperatorFact {
+  id: string;
   fact: string;
   category: FactCategory;
   confidence: number;
   timestamp: string;
   sessionId: string | null;
   persona: string;
+  status: FactStatus;
+  /** Set when status === "edited" — the model's original text, preserved. */
+  originalFact?: string;
+  /** When the operator last set the status. */
+  reviewedAt?: string;
 }
 
 const CATEGORIES = new Set<FactCategory>([
@@ -56,23 +77,40 @@ export function operatorFactsPath(): string {
 export function memoryMdPath(): string {
   return path.join(argosRoot(), "memory", "MEMORY.md");
 }
+/** Per-session extraction transparency logs. */
+export function extractionsDir(): string {
+  return path.join(argosRoot(), "state", "memory-extractions");
+}
+function extractionFile(sessionId: string | null): string {
+  const safe = (sessionId ?? "unsessioned").replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "unsessioned";
+  return path.join(extractionsDir(), `${safe}.jsonl`);
+}
 
-/** Bobby is the extraction model (fastest in the roster). Resolved from the
- *  static registry; falls back to the known tag if the registry shifts. */
+/** Bobby is the extraction model (fastest in the roster). */
 export function getExtractionModel(): string {
   return PERSONA_BY_ID.bobby?.model || "CyberCrew/notmythos-8b:latest";
 }
 
+/** Stable, deterministic id for a fact (so legacy facts get the SAME id on
+ *  every read until persisted). Content-addressed. */
+export function factId(f: { timestamp: string; fact: string; sessionId: string | null }): string {
+  return createHash("sha1").update(`${f.timestamp}|${f.fact}|${f.sessionId ?? ""}`).digest("hex").slice(0, 12);
+}
+
 // ---------- extraction ----------
 
+const EXTRACT_SYSTEM = "You are a fact-extraction tool. Output ONLY a JSON array, nothing else.";
 const EXTRACT_INSTRUCTION =
   "Extract memorable facts from this exchange. Return JSON array of " +
   "{fact, category, confidence} where category is one of: person, project, " +
   "preference, concern, event. Only extract facts the operator stated or " +
   "implied. Return empty array if nothing memorable.";
 
-/** Parse Bobby's output into validated facts. Lenient: pulls the JSON array
- *  out of any surrounding prose, filters by category + confidence, caps at 3. */
+function buildExtractUser(u: string, a: string): string {
+  return `${EXTRACT_INSTRUCTION}\n\nOperator: ${u}\nAssistant: ${a}`;
+}
+
+/** Parse Bobby's output into validated facts (with id + status). */
 function parseFacts(
   text: string,
   opts: { sessionId?: string | null; persona?: string }
@@ -99,13 +137,17 @@ function parseFacts(
     const confidence =
       typeof o.confidence === "number" ? o.confidence : Number(o.confidence);
     if (!Number.isFinite(confidence) || confidence < MIN_CONFIDENCE) continue;
+    const sessionId = opts.sessionId ?? null;
+    const clipped = fact.slice(0, 280);
     out.push({
-      fact: fact.slice(0, 280),
+      id: factId({ timestamp: now, fact: clipped, sessionId }),
+      fact: clipped,
       category,
       confidence: Math.min(1, Math.max(0, confidence)),
       timestamp: now,
-      sessionId: opts.sessionId ?? null,
+      sessionId,
       persona: opts.persona ?? "bartimaeus",
+      status: "unreviewed",
     });
     if (out.length >= MAX_FACTS_PER_TURN) break;
   }
@@ -113,8 +155,9 @@ function parseFacts(
 }
 
 /**
- * Extract memorable facts from a single exchange using Bobby. Returns [] on
- * any error (Ollama down, model missing, bad JSON, empty input). NEVER throws.
+ * Extract memorable facts from a single exchange using Bobby. Also logs the
+ * full extraction transparency record (prompt + raw response + parse result).
+ * Returns [] on any error. NEVER throws.
  */
 export async function extractFacts(
   userMessage: string,
@@ -124,39 +167,114 @@ export async function extractFacts(
   const u = (userMessage ?? "").slice(0, MAX_EXCHANGE_CHARS).trim();
   const a = (assistantMessage ?? "").slice(0, MAX_EXCHANGE_CHARS).trim();
   if (!u) return [];
+  const model = getExtractionModel();
+  const userPrompt = buildExtractUser(u, a);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), EXTRACT_TIMEOUT_MS);
+  let raw = "";
+  let facts: OperatorFact[] = [];
+  let transportOk = false;
   try {
     const res = await fetch(`${getOllamaBase()}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: getExtractionModel(),
+        model,
         stream: false,
         think: false,
         messages: [
-          {
-            role: "system",
-            content:
-              "You are a fact-extraction tool. Output ONLY a JSON array, nothing else.",
-          },
-          { role: "user", content: `${EXTRACT_INSTRUCTION}\n\nOperator: ${u}\nAssistant: ${a}` },
+          { role: "system", content: EXTRACT_SYSTEM },
+          { role: "user", content: userPrompt },
         ],
       }),
       signal: ctrl.signal,
     });
-    if (!res.ok) return [];
-    const j = (await res.json()) as { message?: { content?: string } };
-    return parseFacts(j.message?.content ?? "", opts);
+    if (res.ok) {
+      transportOk = true;
+      const j = (await res.json()) as { message?: { content?: string } };
+      raw = j.message?.content ?? "";
+      facts = parseFacts(raw, opts);
+    }
   } catch {
-    return [];
+    /* graceful */
   } finally {
     clearTimeout(timer);
   }
+
+  // Transparency: log what Bobby was told + what he actually said.
+  await writeExtractionRecord({
+    at: new Date().toISOString(),
+    sessionId: opts.sessionId ?? null,
+    persona: opts.persona ?? "bartimaeus",
+    model,
+    userMessage: u,
+    assistantMessage: a,
+    systemPrompt: EXTRACT_SYSTEM,
+    userPrompt,
+    rawResponse: raw,
+    transportOk,
+    parseOk: facts.length > 0,
+    factCount: facts.length,
+    factIds: facts.map((f) => f.id),
+  }).catch(() => {});
+
+  return facts;
+}
+
+// ---------- extraction transparency log ----------
+
+export interface ExtractionRecord {
+  at: string;
+  sessionId: string | null;
+  persona: string;
+  model: string;
+  userMessage: string;
+  assistantMessage: string;
+  systemPrompt: string;
+  userPrompt: string;
+  rawResponse: string;
+  transportOk: boolean;
+  parseOk: boolean;
+  factCount: number;
+  factIds: string[];
+}
+
+async function writeExtractionRecord(rec: ExtractionRecord): Promise<void> {
+  await fsp.mkdir(extractionsDir(), { recursive: true });
+  await fsp.appendFile(extractionFile(rec.sessionId), JSON.stringify(rec) + "\n", "utf8");
+}
+
+/** Read all extraction records for a session (most-recent first). */
+export async function readExtractions(sessionId: string | null): Promise<ExtractionRecord[]> {
+  try {
+    const raw = await fsp.readFile(extractionFile(sessionId), "utf8");
+    const out: ExtractionRecord[] = [];
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        out.push(JSON.parse(t) as ExtractionRecord);
+      } catch {
+        /* skip malformed */
+      }
+    }
+    return out.reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** Find the extraction record that produced a given fact id (scans the fact's
+ *  session log). Returns null if not found. */
+export async function findExtractionForFact(fact: OperatorFact): Promise<ExtractionRecord | null> {
+  const recs = await readExtractions(fact.sessionId);
+  return recs.find((r) => r.factIds.includes(fact.id)) ?? recs.find((r) => r.userMessage && fact.timestamp >= r.at) ?? null;
 }
 
 // ---------- storage ----------
 
+/** Read all facts, backfilling id + status for legacy entries (deterministic
+ *  id so the same legacy fact always resolves to the same id). Never throws. */
 export async function readFacts(): Promise<OperatorFact[]> {
   try {
     const raw = await fsp.readFile(operatorFactsPath(), "utf8");
@@ -165,8 +283,21 @@ export async function readFacts(): Promise<OperatorFact[]> {
       const t = line.trim();
       if (!t) continue;
       try {
-        const o = JSON.parse(t) as OperatorFact;
-        if (o && typeof o.fact === "string") out.push(o);
+        const o = JSON.parse(t) as Partial<OperatorFact>;
+        if (!o || typeof o.fact !== "string") continue;
+        const sessionId = o.sessionId ?? null;
+        out.push({
+          id: o.id || factId({ timestamp: o.timestamp ?? "", fact: o.fact, sessionId }),
+          fact: o.fact,
+          category: (o.category as FactCategory) ?? "event",
+          confidence: typeof o.confidence === "number" ? o.confidence : 0,
+          timestamp: o.timestamp ?? "",
+          sessionId,
+          persona: o.persona ?? "bartimaeus",
+          status: (o.status as FactStatus) ?? "unreviewed",
+          originalFact: o.originalFact,
+          reviewedAt: o.reviewedAt,
+        });
       } catch {
         /* skip malformed line */
       }
@@ -184,8 +315,18 @@ async function appendFactsJsonl(facts: OperatorFact[]): Promise<void> {
   await fsp.appendFile(p, lines, "utf8");
 }
 
-/** Append facts to MEMORY.md under "## Recent context". Atomic (temp+rename),
- *  append-only — existing content is preserved verbatim. */
+/** Atomically rewrite the whole fact store (used by status/edit/delete). The
+ *  jsonl is a MUTABLE working set — the append-only audit lives in the
+ *  hallucinations + extraction logs, not here. */
+export async function rewriteFacts(facts: OperatorFact[]): Promise<void> {
+  const p = operatorFactsPath();
+  await fsp.mkdir(path.dirname(p), { recursive: true });
+  const tmp = `${p}.${process.pid}.tmp`;
+  await fsp.writeFile(tmp, facts.map((f) => JSON.stringify(f)).join("\n") + (facts.length ? "\n" : ""), "utf8");
+  await fsp.rename(tmp, p);
+}
+
+/** Append facts to MEMORY.md under "## Recent context". Atomic, append-only. */
 async function appendToMemoryMd(facts: OperatorFact[]): Promise<void> {
   const p = memoryMdPath();
   let existing = "";
@@ -216,8 +357,8 @@ async function appendToMemoryMd(facts: OperatorFact[]): Promise<void> {
   await fsp.rename(tmp, p);
 }
 
-/** Store facts to BOTH the jsonl log and MEMORY.md. Each sink is independently
- *  guarded — a failure in one never blocks the other and never throws. */
+/** Store facts to BOTH the jsonl log and MEMORY.md. Each sink independently
+ *  guarded — never throws. */
 export async function storeFacts(facts: OperatorFact[]): Promise<void> {
   if (!facts || facts.length === 0) return;
   try {
@@ -234,14 +375,13 @@ export async function storeFacts(facts: OperatorFact[]): Promise<void> {
   }
 }
 
-/** Clear the extracted-facts log (operator_facts.jsonl). Does NOT touch
- *  MEMORY.md (the operator profile is sacred). Returns the count cleared. */
+/** Clear the extracted-facts log. Does NOT touch MEMORY.md. Returns count. */
 export async function clearFacts(): Promise<number> {
   const before = await readFacts();
   try {
     await fsp.writeFile(operatorFactsPath(), "", "utf8");
   } catch {
-    /* nothing to clear / dir missing — treat as 0 effect */
+    /* nothing to clear */
   }
   return before.length;
 }
@@ -274,8 +414,6 @@ export async function factsStatus(): Promise<FactsStatus> {
 
 // ---------- orchestration ----------
 
-/** Extract + store, awaiting the result. Used by the API/smoke. Returns the
- *  facts stored (possibly empty). Never throws. */
 export async function extractStoreAwait(
   userMessage: string,
   assistantMessage: string,
@@ -290,12 +428,15 @@ export async function extractStoreAwait(
   }
 }
 
-/** Fire-and-forget extraction + storage. Returns immediately; the chat
- *  response is never blocked or affected by memory work. */
 export function extractAndStore(
   userMessage: string,
   assistantMessage: string,
   opts: { sessionId?: string | null; persona?: string } = {}
 ): void {
   void extractStoreAwait(userMessage, assistantMessage, opts);
+}
+
+// Re-export randomUUID-based id for callers that mint explicit facts.
+export function newFactId(): string {
+  return randomUUID().slice(0, 12);
 }

@@ -1,32 +1,33 @@
 // app/api/memory/facts/route.ts
 //
-// Memory Phase (2026-06-02) — operator-facing surface for the semantic
+// Memory Phase + Audit (2026-06-02) — operator surface for the semantic
 // cross-session fact store (operator_facts.jsonl).
 //
-//   GET                  → { count, recent[5], memoryMdUpdated, memoryMdExists }
-//   GET ?recall=<msg>    → adds { recall: { factsFound, injected, block } }
-//   POST {userMessage, assistantMessage, sessionId?, persona?}
-//                        → { ok, facts, stored } (runs the real extract+store)
-//   DELETE               → { ok, cleared } (clears operator_facts.jsonl ONLY;
-//                          MEMORY.md is never touched)
-//
-// Always graceful — never 500s for an empty/missing store.
+//   GET                  → { count, recent[5], memoryMdUpdated, memoryMdExists,
+//                            facts[] (full, filtered, sorted), total, filtered,
+//                            summary }
+//   GET ?recall=<msg>    → adds { recall: {...} }
+//   GET ?category&persona&status&minConfidence&maxConfidence&from&to&search&sort&dir
+//                        → filtered + sorted audit list
+//   POST {userMessage, assistantMessage, ...}  → extract+store
+//   DELETE               → clear operator_facts.jsonl (MEMORY.md untouched)
 
 import { NextRequest, NextResponse } from "next/server";
-import {
-  factsStatus,
-  clearFacts,
-  extractStoreAwait,
-} from "@/lib/memory-extract";
+import { factsStatus, clearFacts, extractStoreAwait, readFacts } from "@/lib/memory-extract";
 import { retrieveMemories } from "@/lib/memory-retrieve";
+import { filterFacts, sortFacts, auditSummary, type SortKey } from "@/lib/memory-audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SORT_KEYS = new Set<SortKey>(["timestamp", "persona", "category", "confidence", "status", "fact"]);
+
 export async function GET(req: NextRequest) {
   try {
+    const sp = req.nextUrl.searchParams;
     const status = await factsStatus();
-    const recallQuery = req.nextUrl.searchParams.get("recall");
+
+    const recallQuery = sp.get("recall");
     if (recallQuery && recallQuery.trim()) {
       const r = await retrieveMemories(recallQuery);
       return NextResponse.json({
@@ -34,22 +35,45 @@ export async function GET(req: NextRequest) {
         recall: { factsFound: r.factsFound, injected: r.injected, block: r.block },
       });
     }
-    return NextResponse.json(status);
+
+    const all = await readFacts();
+    const num = (k: string): number | undefined => {
+      const v = sp.get(k);
+      if (v === null || v === "") return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const filtered = filterFacts(all, {
+      category: sp.get("category") ?? undefined,
+      persona: sp.get("persona") ?? undefined,
+      status: sp.get("status") ?? undefined,
+      minConfidence: num("minConfidence"),
+      maxConfidence: num("maxConfidence"),
+      from: sp.get("from") ?? undefined,
+      to: sp.get("to") ?? undefined,
+      search: sp.get("search") ?? undefined,
+    });
+    const sortKey = sp.get("sort") as SortKey | null;
+    const dir = sp.get("dir") === "asc" ? "asc" : "desc";
+    const sorted = sortFacts(filtered, sortKey && SORT_KEYS.has(sortKey) ? sortKey : "timestamp", dir);
+
+    return NextResponse.json({
+      ...status,
+      facts: sorted,
+      total: all.length,
+      filtered: sorted.length,
+      summary: await auditSummary(),
+    });
   } catch (e) {
     return NextResponse.json(
-      { count: 0, recent: [], memoryMdUpdated: null, memoryMdExists: false, error: String(e) },
+      { count: 0, recent: [], facts: [], memoryMdUpdated: null, memoryMdExists: false, error: String(e) },
       { status: 200 }
     );
   }
 }
 
 export async function POST(req: NextRequest) {
-  let body: {
-    userMessage?: string;
-    assistantMessage?: string;
-    sessionId?: string | null;
-    persona?: string;
-  };
+  let body: { userMessage?: string; assistantMessage?: string; sessionId?: string | null; persona?: string };
   try {
     body = await req.json();
   } catch {
