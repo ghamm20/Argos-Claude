@@ -40,6 +40,11 @@ import * as huggingface from "./huggingface";
 import * as crossref from "./crossref";
 import * as pubmed from "./pubmed";
 import * as gdelt from "./gdelt";
+// Web Capability TIER 2 (2026-06-02) — self-hosted search + GitHub + Q&A + SEC.
+import * as searxng from "./searxng";
+import * as github from "./github";
+import * as stackexchange from "./stackexchange";
+import * as secEdgar from "./sec-edgar";
 
 export const TOOLS: ToolDefinition[] = [
   // ---- web (all safe) ----
@@ -186,6 +191,51 @@ export const TOOLS: ToolDefinition[] = [
     dangerous: false,
     reversible: true,
     execute: gdelt.execute,
+  },
+  // ---- web search + dev + filings (TIER 2, all safe) ----
+  {
+    id: "searxng_search",
+    name: "SearXNG Search",
+    description: "Primary general web search (self-hosted SearXNG; DDG fallback).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: searxng.execute,
+  },
+  {
+    id: "github_search",
+    name: "GitHub",
+    description: "Search repos/code/issues + read a README (uses PAT if configured).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: github.execute,
+  },
+  {
+    id: "stackexchange_search",
+    name: "Stack Exchange",
+    description: "Search Stack Overflow + sister sites for Q&A with accepted answers.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: stackexchange.execute,
+  },
+  {
+    id: "sec_edgar",
+    name: "SEC EDGAR",
+    description: "Public company filings (10-K/Q, etc) by query or CIK.",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: secEdgar.execute,
   },
   // ---- documents ----
   {

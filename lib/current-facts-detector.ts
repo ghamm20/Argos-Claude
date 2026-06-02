@@ -254,7 +254,9 @@ const ROUTE_RULES: Array<{ re: RegExp; tools: string[] }> = [
   { re: /\b(model|dataset|checkpoint|weights|gguf|safetensors|hugging ?face)\b/i, tools: ["huggingface_hub"] },
   { re: /\b(disease|symptom|clinical|patient|cancer|drug|gene|protein|therap(y|eutic)|medical|biolog|vaccine|trial)\b/i, tools: ["pubmed_search"] },
   { re: /\b(doi|journal|citation|cited by|peer[- ]reviewed|publication)\b/i, tools: ["crossref_lookup", "openalex_search"] },
-  { re: /\b(news|breaking|headline|happening|protest|election|conflict|outbreak|event(s)? in)\b/i, tools: ["gdelt_events"] },
+  { re: /\b(news|breaking|headline|happening|protest|election|conflict|outbreak|event(s)? in)\b/i, tools: ["gdelt_events", "searxng_search"] },
+  { re: /\b(code|coding|function|library|api|error|exception|stack ?trace|bug|repo|repository|npm|pip|git ?hub|compile|typescript|python|rust|golang)\b/i, tools: ["github_search", "stackexchange_search"] },
+  { re: /\b(10[- ]?[kq]|sec filing|earnings|annual report|quarterly|insider trading|ticker|nasdaq|nyse|public company|ceo of)\b/i, tools: ["sec_edgar", "wikipedia_search"] },
   { re: /\bwho (is|was|are)\b|\bwhat (is|are)\b|\b(biography|born|founded|capital of|population of)\b/i, tools: ["wikipedia_search", "wikidata_query"] },
 ];
 
