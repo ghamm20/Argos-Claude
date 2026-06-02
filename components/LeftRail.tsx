@@ -30,7 +30,9 @@ const NAV: NavItem[] = [
   // file vision, screenshot). No longer a stub → no v2 label.
   { id: "vision", label: "Vision", icon: EyeIcon, active: true, route: "/vision" },
   { id: "voice", label: "Voice", icon: Mic, active: true, route: "/voice", stub: true },
-  { id: "memory", label: "Memory", icon: Database, active: true, route: "/memory", stub: true },
+  // Memory Phase (2026-06-02) — Memory is a real feature (Phase 9 store +
+  // semantic cross-session recall). No longer a stub → no v2 label.
+  { id: "memory", label: "Memory", icon: Database, active: true, route: "/memory" },
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools", stub: true },
   { id: "settings", label: "Settings", icon: Settings, active: true, route: "/settings" },
 ];

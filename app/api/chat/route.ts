@@ -15,6 +15,11 @@ import {
   resolveChatModel,
   stripDataUrl,
 } from "@/lib/vision";
+// Memory Phase (2026-06-02) — semantic cross-session memory. Recall is
+// prepended to the system prompt (additive); extraction runs fire-and-forget
+// after the stream closes (Bobby). Both degrade silently — chat never breaks.
+import { retrieveMemories } from "@/lib/memory-retrieve";
+import { extractAndStore } from "@/lib/memory-extract";
 // Phase 9 (router) — persona auto-routing suggestion. The chat path
 // uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
 // adds zero latency and never calls a model. Suggestion-only.
@@ -476,6 +481,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ---- Semantic cross-session recall (Memory Phase, graceful) ----
+  // Keyword/category match over operator_facts.jsonl + MEMORY.md tail. The
+  // resulting block is PREPENDED to the system prompt (before the persona
+  // prompt) so Bartimaeus carries forward what the operator told him in past
+  // sessions — naturally, without announcing it. Operator turns only.
+  let recall = { factsFound: 0, injected: false, block: "" };
+  if (isOperator && userText) {
+    try {
+      const r = await retrieveMemories(userText);
+      recall = { factsFound: r.factsFound, injected: r.injected, block: r.block };
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[chat] semantic recall failed, continuing without it: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  }
+
   // ---- Phase 10 research (graceful: never breaks chat) ----
   // Only fires for operator turns. Guest turns get no research
   // context — keeps the network-mode boundary clean (guest = local
@@ -524,7 +549,14 @@ export async function POST(req: NextRequest) {
   const baseSystemPrompt = isOperator
     ? persona.systemPrompt
     : persona.guestSystemPrompt;
-  const systemParts: string[] = [baseSystemPrompt];
+  // Memory Phase: semantic recall PREPENDS the persona prompt — additive,
+  // never a replacement. The block is short (≤300 chars) and tells the model
+  // to use the context naturally without announcing it.
+  const systemParts: string[] = [];
+  if (recall.injected && recall.block) {
+    systemParts.push(recall.block);
+  }
+  systemParts.push(baseSystemPrompt);
   if (memoryBlock.length > 0) {
     systemParts.push(memoryBlock);
   }
@@ -712,6 +744,14 @@ export async function POST(req: NextRequest) {
     personaModel: body.model,
   };
 
+  // Memory Phase — leading frame announcing how much cross-session context was
+  // recalled + injected for this turn. Drives the HUD "Memory" row.
+  const memoryEvent = {
+    type: "memory" as const,
+    factsFound: recall.factsFound,
+    injected: recall.injected,
+  };
+
   const reader = upstream.body.getReader();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -760,6 +800,10 @@ export async function POST(req: NextRequest) {
         // HUD can show the model used as soon as the turn starts.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(visionEvent)}\n`)
+        );
+        // Memory Phase — emit the recall frame in the same leading batch.
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(memoryEvent)}\n`)
         );
       } catch {
         /* hint frame is best-effort; ignore */
@@ -840,6 +884,15 @@ export async function POST(req: NextRequest) {
               );
             }
           })();
+
+          // Memory Phase — semantic cross-session extraction (Bobby). Pure
+          // fire-and-forget: returns immediately, never blocks the (already
+          // closed) stream, never throws. Stores to operator_facts.jsonl +
+          // MEMORY.md so Bartimaeus recalls it in future sessions.
+          extractAndStore(userText, finalAssistant, {
+            sessionId: null,
+            persona: body.personaId,
+          });
         }
       } catch (e) {
         clearTimeout(firstTokenTimer);

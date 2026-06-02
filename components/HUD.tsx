@@ -108,6 +108,8 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const modelStatusMessage = useArgos((s) => s.modelStatusMessage);
   // Vision Phase 1 — model used for the most recent image turn (else null).
   const lastVisionModel = useArgos((s) => s.lastVisionModel);
+  // Memory Phase — cross-session recall for the most recent turn.
+  const lastMemory = useArgos((s) => s.lastMemory);
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -356,6 +358,20 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         {/* Phase 11 (dispatcher) — last routed event + persona + count. */}
         <DispatcherIndicator />
         <Row label="Retrieval" value={retrievalLabel} accent={retrievalAccent} />
+        {/* Memory Phase — cross-session recall for the last turn. Shows the
+            number of facts brought forward; "—" when nothing recalled. */}
+        <Row
+          label="Memory"
+          value={
+            lastMemory && lastMemory.injected
+              ? `${lastMemory.factsFound} recalled`
+              : lastMemory
+                ? "0 recalled"
+                : "—"
+          }
+          accent={lastMemory?.injected ? eyeColor : undefined}
+          title="Facts recalled from past sessions and injected into this turn"
+        />
         <Row label="Vault" value={vaultLabel} accent={vaultAccent} />
         {/* v1.1 Task 1: audit chain event count. Updates via /api/audit/count poll. */}
         <Row

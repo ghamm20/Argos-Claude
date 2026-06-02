@@ -47,7 +47,10 @@ data/memory/
 !data/memory/SCHEMA_VERSION
 !data/memory/shared/
 !data/memory/shared/operator_profile.json
-memory/
-state/
+# Root-anchored: the runtime MEMORY.md + daily logs dir only. Was `memory/`
+# (unanchored), which wrongly also ignored source under app/api/memory/ —
+# fixed 2026-06-02 so new memory API routes are trackable.
+/memory/
+/state/
 _diag_*.json
 _diag_*.log

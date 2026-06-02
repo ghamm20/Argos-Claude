@@ -345,6 +345,10 @@ interface OllamaStreamLine {
   // handled this turn; `used` = whether image routing engaged.
   model?: string;
   used?: boolean;
+  // Memory Phase — memory event (leading frame). factsFound = relevant facts
+  // recalled this turn; injected = whether a recall block was added.
+  factsFound?: number;
+  injected?: boolean;
 }
 
 export function ChatPane() {
@@ -730,6 +734,15 @@ export function ChatPane() {
               useArgos
                 .getState()
                 .setVisionModel(data.used && data.model ? data.model : null);
+              continue;
+            }
+            if (data?.type === "memory") {
+              // Memory Phase — record how much cross-session context was
+              // recalled this turn for the HUD "Memory" row.
+              useArgos.getState().setMemory({
+                factsFound: data.factsFound ?? 0,
+                injected: data.injected === true,
+              });
               continue;
             }
             const chunk = data?.message?.content;

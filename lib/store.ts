@@ -201,6 +201,10 @@ interface ArgosState {
   /** Vision Phase 1 — model used for the most recent turn when an image was
    *  attached (else null). Drives the HUD "Vision" row. Reset on clearChat. */
   lastVisionModel: string | null;
+  /** Memory Phase — cross-session recall for the most recent turn (facts
+   *  found + whether injected). Drives the HUD "Memory" row. Reset on
+   *  clearChat. */
+  lastMemory: { factsFound: number; injected: boolean } | null;
 
   switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
@@ -220,6 +224,7 @@ interface ArgosState {
   setResearchState: (s: ResearchHudState) => void;
   setRoutingSuggestion: (s: RoutingHudState) => void;
   setVisionModel: (m: string | null) => void;
+  setMemory: (m: { factsFound: number; injected: boolean } | null) => void;
   setCurrentSessionId: (id: string | null) => void;
   /** Replace the entire in-memory chat with a loaded persisted session. */
   loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
@@ -248,6 +253,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   researchState: EMPTY_RESEARCH_STATE,
   routingSuggestion: EMPTY_ROUTING_STATE,
   lastVisionModel: null,
+  lastMemory: null,
 
   // Phase 2-RB: persona-bound model with visible swap state. Steps:
   //   1. If persona is not_configured, set modelStatus=not_configured
@@ -407,6 +413,8 @@ export const useArgos = create<ArgosState>((set, get) => ({
       routingSuggestion: EMPTY_ROUTING_STATE,
       // Vision Phase 1 — drop any stale vision-model indicator.
       lastVisionModel: null,
+      // Memory Phase — drop any stale recall indicator.
+      lastMemory: null,
     }),
 
   setVaultCounts: (docs, chunks) =>
@@ -418,6 +426,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   setResearchState: (s) => set({ researchState: s }),
   setRoutingSuggestion: (s) => set({ routingSuggestion: s }),
   setVisionModel: (m) => set({ lastVisionModel: m }),
+  setMemory: (m) => set({ lastMemory: m }),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   loadSession: (id, messages, personaId, model) =>

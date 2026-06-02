@@ -42,6 +42,22 @@ interface OperatorProfile {
   last_updated: string;
 }
 
+// Memory Phase (2026-06-02) — semantic cross-session facts (operator_facts.jsonl).
+interface OperatorFact {
+  fact: string;
+  category: string;
+  confidence: number;
+  timestamp: string;
+  sessionId: string | null;
+  persona: string;
+}
+interface FactsStatus {
+  count: number;
+  recent: OperatorFact[];
+  memoryMdUpdated: string | null;
+  memoryMdExists: boolean;
+}
+
 const PERSONAS: PersonaScope[] = [
   "bartimaeus",
   "juniper",
@@ -83,6 +99,11 @@ export default function MemoryPage() {
     }
   );
   const [reloading, setReloading] = useState(false);
+
+  // Memory Phase — semantic facts status.
+  const [facts, setFacts] = useState<FactsStatus | null>(null);
+  const [factsBusy, setFactsBusy] = useState(false);
+  const [factsMsg, setFactsMsg] = useState<string | null>(null);
 
   // Add-memory form state
   const [addPersona, setAddPersona] = useState<PersonaScope>("bartimaeus");
@@ -138,10 +159,45 @@ export default function MemoryPage() {
     }
   }, []);
 
+  const loadFacts = useCallback(async () => {
+    try {
+      const r = await fetch("/api/memory/facts", { cache: "no-store" });
+      if (r.ok) setFacts((await r.json()) as FactsStatus);
+    } catch {
+      /* offline — leave null */
+    }
+  }, []);
+
+  const clearFactsStore = useCallback(async () => {
+    if (
+      !window.confirm(
+        "Clear all extracted cross-session facts (operator_facts.jsonl)?\n\nThis does NOT touch MEMORY.md."
+      )
+    ) {
+      return;
+    }
+    setFactsBusy(true);
+    setFactsMsg(null);
+    try {
+      const r = await fetch("/api/memory/facts", { method: "DELETE" });
+      const j = (await r.json()) as { ok?: boolean; cleared?: number };
+      if (r.ok && j.ok) {
+        setFactsMsg(`cleared ${j.cleared ?? 0} fact(s).`);
+        await loadFacts();
+        window.setTimeout(() => setFactsMsg(null), 2500);
+      } else {
+        setFactsMsg(`clear failed: HTTP ${r.status}`);
+      }
+    } finally {
+      setFactsBusy(false);
+    }
+  }, [loadFacts]);
+
   useEffect(() => {
     void loadProfile();
     void loadMemories();
-  }, [loadProfile, loadMemories]);
+    void loadFacts();
+  }, [loadProfile, loadMemories, loadFacts]);
 
   const saveProfile = useCallback(async () => {
     if (!profileDraft) return;
@@ -236,10 +292,89 @@ export default function MemoryPage() {
         <header className="mb-6">
           <h1 className="text-[20px] font-medium tracking-tight">Memory</h1>
           <p className="text-[12px] text-neutral-500 mt-1">
-            Phase 9 — persistent operator profile + per-persona memories.
-            Pruned entries are tombstoned, not deleted; audit chain preserved.
+            Persistent operator profile, per-persona memories, and semantic
+            cross-session recall. Pruned entries are tombstoned, not deleted;
+            audit chain preserved.
           </p>
         </header>
+
+        {/* Memory Phase — semantic cross-session facts */}
+        <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-[14px] font-medium text-neutral-100">
+              Cross-session recall{" "}
+              <span className="text-neutral-500 text-[11px]">
+                (operator_facts.jsonl)
+              </span>
+            </h2>
+            <div className="flex items-center gap-3">
+              {factsMsg && (
+                <span className="text-[11px] text-neutral-400">{factsMsg}</span>
+              )}
+              <button
+                type="button"
+                onClick={() => void clearFactsStore()}
+                disabled={factsBusy || (facts?.count ?? 0) === 0}
+                className="text-[11px] px-2 py-1 rounded border border-red-800/60 text-red-300 hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Clears operator_facts.jsonl only — MEMORY.md is preserved"
+              >
+                {factsBusy ? "Clearing…" : "Clear memory"}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-3 text-[12px]">
+            <div className="rounded border border-neutral-800 bg-black/30 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
+                Facts stored
+              </div>
+              <div className="text-[18px] font-mono text-emerald-300 mt-0.5">
+                {facts ? facts.count : "—"}
+              </div>
+            </div>
+            <div className="rounded border border-neutral-800 bg-black/30 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
+                MEMORY.md updated
+              </div>
+              <div className="text-[12px] font-mono text-neutral-300 mt-1.5">
+                {facts?.memoryMdUpdated
+                  ? shortIso(facts.memoryMdUpdated)
+                  : facts?.memoryMdExists === false
+                    ? "not present"
+                    : "—"}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-500 mb-1.5">
+            Last 5 facts extracted
+          </div>
+          {!facts || facts.recent.length === 0 ? (
+            <div className="text-[11px] text-neutral-600 italic">
+              no cross-session facts yet — they accrue as you chat
+            </div>
+          ) : (
+            <ul className="space-y-1">
+              {facts.recent.map((f, i) => (
+                <li
+                  key={i}
+                  className="text-[12px] text-neutral-200 flex items-start gap-2"
+                >
+                  <span
+                    className="mt-0.5 text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-neutral-800 text-neutral-400 shrink-0"
+                    title={`confidence ${f.confidence?.toFixed?.(2) ?? f.confidence}`}
+                  >
+                    {f.category}
+                  </span>
+                  <span className="flex-1">{f.fact}</span>
+                  <span className="text-[10px] text-neutral-600 font-mono shrink-0">
+                    {shortIso(f.timestamp)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         {/* Operator profile */}
         <section className="mb-8 border border-neutral-800 rounded-lg p-4 bg-neutral-900/40">
