@@ -14,6 +14,7 @@ import { cacheGet, cacheSet, cacheKey } from "./cache";
 import { take, limitFor, type RateConfig } from "./rate-limiter";
 import { httpRequest, type HttpOptions } from "./http-client";
 import { appendWebAudit } from "./audit";
+import { isDisabled } from "./disabled";
 import { readSettings } from "../settings";
 import { decryptSecret } from "./secrets";
 
@@ -61,6 +62,16 @@ function sleep(ms: number): Promise<void> {
  */
 export async function webFetch(opts: WebFetchOptions): Promise<WebFetchResult> {
   const key = cacheKey(opts.url, { method: opts.method ?? "GET", body: opts.body ?? "" });
+
+  // 0) Operator kill switch — a disabled source never hits the network.
+  if (await isDisabled(opts.source)) {
+    await appendWebAudit({
+      source: opts.source, op: opts.op, query: opts.query ?? "", url: opts.url,
+      status: 0, ok: false, latencyMs: 0, cacheHit: false, cost: 0,
+      error: "source disabled by operator",
+    });
+    return { ok: false, status: 0, body: "", fromCache: false, latencyMs: 0, error: `source "${opts.source}" is disabled by the operator` };
+  }
 
   // 1) Cache hit?
   if (opts.ttlMs > 0) {

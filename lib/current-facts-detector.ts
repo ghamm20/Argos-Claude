@@ -260,11 +260,13 @@ const ROUTE_RULES: Array<{ re: RegExp; tools: string[] }> = [
   { re: /\bwho (is|was|are)\b|\bwhat (is|are)\b|\b(biography|born|founded|capital of|population of)\b/i, tools: ["wikipedia_search", "wikidata_query"] },
 ];
 
-/** Recommend specialized web tools for a query (best-first, deduped). */
+/** Recommend web tools for a query (best-first, deduped). chain_search_to_read
+ *  is the default first suggestion (it searches AND reads); specialized tools
+ *  follow when the query type is clear. */
 export function suggestSources(query: string): string[] {
   const q = (query ?? "").trim();
   if (!q) return [];
-  const out: string[] = [];
+  const out: string[] = ["chain_search_to_read"];
   for (const rule of ROUTE_RULES) {
     if (rule.re.test(q)) {
       for (const t of rule.tools) if (!out.includes(t)) out.push(t);

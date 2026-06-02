@@ -13,6 +13,7 @@ import {
   ListChecks,
   Repeat,
   Settings,
+  Globe,
 } from "lucide-react";
 
 interface NavItem {
@@ -38,6 +39,8 @@ const NAV: NavItem[] = [
   // Tools Phase (2026-06-02) — Tools is a real feature (research pipeline +
   // Bartimaeus's 18-tool governed suite). No longer a stub → no v2 label.
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools" },
+  // Web Capability (2026-06-02) — tool & source discovery dashboard (35 tools).
+  { id: "sources", label: "Sources", icon: Globe, active: true, route: "/tools/sources" },
   // Overnight Engine (2026-06-02) — task queue + runner + morning brief.
   { id: "tasks", label: "Tasks", icon: ListChecks, active: true, route: "/tasks" },
   // Self-Evolving Loop Suite (2026-06-02) — 20 improvement loops + eval gates.

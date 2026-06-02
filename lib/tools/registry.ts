@@ -45,6 +45,11 @@ import * as searxng from "./searxng";
 import * as github from "./github";
 import * as stackexchange from "./stackexchange";
 import * as secEdgar from "./sec-edgar";
+// Web Capability TIER 3 (2026-06-02) — ingestion + feeds + chain.
+import * as jinaReader from "./jina-reader";
+import * as rsshub from "./rsshub";
+import * as firecrawlAlt from "./firecrawl-alt";
+import * as chainSearchRead from "./chain-search-read";
 
 export const TOOLS: ToolDefinition[] = [
   // ---- web (all safe) ----
@@ -236,6 +241,51 @@ export const TOOLS: ToolDefinition[] = [
     dangerous: false,
     reversible: true,
     execute: secEdgar.execute,
+  },
+  // ---- ingestion + feeds + chain (TIER 3, all safe) ----
+  {
+    id: "chain_search_to_read",
+    name: "Chain Search→Read",
+    description: "DEFAULT for factual queries: searches, ranks, AND reads the top pages (not just snippets).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: chainSearchRead.execute,
+  },
+  {
+    id: "jina_reader",
+    name: "Jina Reader",
+    description: "Extract a URL's content as clean Markdown (primary page reader).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: jinaReader.execute,
+  },
+  {
+    id: "firecrawl_alt",
+    name: "Firecrawl-alt",
+    description: "Structured scrape: title/content/links/images/metadata (+ SPA detection).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: firecrawlAlt.execute,
+  },
+  {
+    id: "rsshub_feed",
+    name: "RSSHub Feed",
+    description: "Read a self-hosted RSSHub route (feeds for sites without native RSS).",
+    category: "web",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    execute: rsshub.execute,
   },
   // ---- documents ----
   {

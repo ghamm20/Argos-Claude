@@ -42,9 +42,13 @@ async function ensureDir(): Promise<void> {
   await fsp.mkdir(webCacheDir(), { recursive: true });
 }
 
+// Unique temp suffix per write so concurrent writers (e.g. parallel cache
+// stats bumps from the chain tool's fan-out) don't race on the same temp path.
+let tmpSeq = 0;
+
 async function atomicWrite(file: string, data: string): Promise<void> {
   await ensureDir();
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
   const fh = await fsp.open(tmp, "w");
   try {
     await fh.writeFile(data, "utf8");

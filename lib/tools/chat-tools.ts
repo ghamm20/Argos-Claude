@@ -69,8 +69,17 @@ export function buildToolAwarenessBlock(): string {
       "for current facts. If web_search returns a current president, that IS the current " +
       "president. Use it.",
     "",
+    "FACTUAL QUERIES — DEFAULT TO chain_search_to_read. For questions about current " +
+      "events, people, companies, or topics: use chain_search_to_read by default. It " +
+      "searches AND reads the top pages — snippets alone are not enough. If " +
+      "chain_search_to_read returns nothing useful, then try specialized tools " +
+      "(wikipedia_search for entities, arxiv_search for research, gdelt_events for events, " +
+      "sec_edgar for public companies).",
+    "",
     "WHEN TO USE WHICH SOURCE (web knowledge):",
-    "- General current events / facts → searxng_search (PRIMARY; aggregates many engines, DDG fallback).",
+    "- Most factual questions → chain_search_to_read (searches + reads; THE default).",
+    "- General current events / facts → searxng_search (aggregates many engines, DDG fallback).",
+    "- A specific page's content → jina_reader (clean markdown) or firecrawl_alt (structured).",
     "- Entities / people / places / concepts → wikipedia_search (prose) + wikidata_query (structured facts).",
     "- AI / ML / research papers → arxiv_search + papers_with_code; broaden with openalex_search.",
     "- Academic metadata / DOI → crossref_lookup. Medical / biology → pubmed_search.",

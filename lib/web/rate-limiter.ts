@@ -57,9 +57,14 @@ async function readState(): Promise<BucketState> {
   }
 }
 
+// Unique temp suffix per write — concurrent webFetch calls (e.g. the chain
+// tool's parallel reads) must not collide on the same temp path, or one
+// rename races ahead and the other hits ENOENT.
+let tmpSeq = 0;
+
 async function writeState(state: BucketState): Promise<void> {
   const final = rateLimitsPath();
-  const tmp = `${final}.${process.pid}.tmp`;
+  const tmp = `${final}.${process.pid}.${++tmpSeq}.tmp`;
   // Ensure the parent (state/) exists.
   await fsp.mkdir(path.dirname(final), { recursive: true });
   const fh = await fsp.open(tmp, "w");

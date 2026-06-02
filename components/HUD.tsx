@@ -10,6 +10,7 @@ import { ResearchIndicator } from "./research/ResearchIndicator";
 import { RoutingIndicator } from "./router/RoutingIndicator";
 import { HeartbeatIndicator } from "./heartbeat/HeartbeatIndicator";
 import { DispatcherIndicator } from "./dispatcher/DispatcherIndicator";
+import { WebHudSection } from "./web/WebHudSection";
 import type { HardwareProfile } from "@/lib/hardware";
 
 interface HUDProps {
@@ -555,6 +556,9 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
         <Row label="Build" value={`v${version}`} />
         <Row label="Uptime" value={fmtUptime(uptimeMs)} />
       </Section>
+
+      {/* Web Capability (2026-06-02) — external API call telemetry. */}
+      <WebHudSection />
 
       {/* Tools integration (post-Phase-1). Self-contained component that polls
           /api/tools/status every 15s and renders tool cards by category. Sits
