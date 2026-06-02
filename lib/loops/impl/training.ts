@@ -5,8 +5,15 @@
 import type { LoopDefinition, LoopContext } from "../loop";
 import { loopFail, type LoopResult } from "../types";
 import { readFacts } from "../../memory-extract";
-import { readAllTraces, readTraces } from "../trace-store";
+import { readAllTraces } from "../trace-store";
 import { runBenchmark, benchmarkTaskIds } from "../benchmark";
+import {
+  readBaseline,
+  saveBaseline,
+  saveBenchmarkRun,
+  detectCategoryRegression,
+  handleRegression,
+} from "../benchmark-baseline";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -83,38 +90,55 @@ export const selfTraining: LoopDefinition = {
 };
 
 // --- Loop19: Benchmark (GROUND TRUTH) ---------------------------------------
-// Run the fixed, deterministically-graded benchmark and record the score. Sets
-// benchmarkBefore from the previous benchmark trace so improvement is measured
-// against ground truth. This loop is the anchor every other loop is checked
-// against. It claims improvement ONLY when the score genuinely rose.
+// Run the fixed, deterministically-graded 35-task / 5-category benchmark. This
+// loop is BOTH the anti-gaming anchor (every improvement claim is checked
+// against it) AND the regression tripwire: if any category drops more than the
+// threshold vs the saved baseline, it auto-rolls-back the most recent applied
+// patch and alerts. Runs weekly (Sunday 5AM) and after any change via the API.
 export const benchmark: LoopDefinition = {
   id: "benchmark",
   loopNumber: 19,
   name: "Benchmark Harness",
-  description: "Ground-truth benchmark; the anti-gaming anchor for all loops.",
-  trigger: "manual",
+  description: "Ground-truth 5-category benchmark; anti-gaming anchor + regression tripwire.",
+  trigger: "scheduled",
+  schedule: { dayOfWeek: 0, hour: 5, minute: 0, label: "Sunday 5AM (weekly baseline)" },
   async run(ctx): Promise<LoopResult> {
     const start = Date.now();
     try {
-      const prior = await readTraces("benchmark", 1);
-      const before =
-        typeof prior[0]?.result?.benchmarkAfter === "number"
-          ? (prior[0].result.benchmarkAfter as number)
-          : null;
+      const baseline = await readBaseline();
+      const before = baseline?.score ?? null;
       const result = await runBenchmark({ model: inputStr(ctx, "model") || undefined });
       const after = result.score;
+      await saveBenchmarkRun(result);
+
+      // Regression tripwire — per-category, vs baseline.
+      let regression: Awaited<ReturnType<typeof handleRegression>> | null = null;
+      if (baseline) {
+        const regressed = detectCategoryRegression(result.byCategory, baseline.byCategory);
+        if (regressed.length > 0) regression = await handleRegression(regressed);
+      }
+
+      // Baseline maintenance: first run seeds it; later runs raise it only when
+      // not regressed and the aggregate held or improved (never ratchets down).
+      const regressedNow = (regression?.regressed.length ?? 0) > 0;
+      if (!baseline) {
+        await saveBaseline(result);
+      } else if (!regressedNow && before !== null && after >= before) {
+        await saveBaseline(result);
+      }
+
       const improved = before !== null && after > before;
       const failing = result.perTask.filter((t) => !t.passed).map((t) => t.id);
       const passing = result.perTask.filter((t) => t.passed).map((t) => t.id);
-      // Evidence cites REAL benchmark task ids (in the gate's known-refs set).
       const evidenceRefs = (improved ? passing : failing).slice(0, 3);
       return {
         loopId: "benchmark",
         loopNumber: 19,
         ok: true,
-        summary: `benchmark ${(after * 100).toFixed(0)}% (${result.passed}/${result.total})${
-          before !== null ? `, prev ${(before * 100).toFixed(0)}%` : ""
-        }`,
+        summary:
+          `benchmark ${(after * 100).toFixed(0)}% (${result.passed}/${result.total})` +
+          (before !== null ? `, baseline ${(before * 100).toFixed(0)}%` : " (baseline set)") +
+          (regressedNow ? " — REGRESSION auto-rolled-back" : ""),
         claimedImprovement: improved, // honest: only when ground truth rose
         claimedScore: after,
         benchmarkBefore: before,
@@ -126,7 +150,10 @@ export const benchmark: LoopDefinition = {
           after,
         })),
         proposals: [],
-        data: { ...result, taskIds: benchmarkTaskIds() },
+        // `spec` is stable across runs; if the task set ever changes the spec
+        // string must change too, which the gate's criteria-mutation heuristic
+        // will then flag if improvement is also claimed.
+        data: { ...result, taskIds: benchmarkTaskIds(), spec: "benchmark-v2-35task-5category", regression },
         error: null,
         durationMs: Date.now() - start,
       };

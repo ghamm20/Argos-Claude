@@ -4,12 +4,15 @@
 // Skill Acquisition (12), Active Learning (16). These read ARGOS's real state
 // (the operator fact store) and the ground-truth benchmark.
 
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import type { LoopDefinition, LoopContext } from "../loop";
 import { personaModel, loopModelCall } from "../loop";
 import { loopFail, type LoopResult } from "../types";
 import { readFacts } from "../../memory-extract";
 import { readAllTraces } from "../trace-store";
 import { runBenchmark } from "../benchmark";
+import { argosRoot } from "../../vault/paths";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -59,22 +62,43 @@ export const memoryConsolidation: LoopDefinition = {
           durationMs: Date.now() - start,
         };
       }
+      // Archive a snapshot of the current facts BEFORE consolidating (additive
+      // history under data/memory/archive/YYYY-MM/).
+      const month = new Date().toISOString().slice(0, 7);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      let archivePath: string | null = path.join(argosRoot(), "data", "memory", "archive", month, `facts-${stamp}.jsonl`);
+      try {
+        await fsp.mkdir(path.dirname(archivePath), { recursive: true });
+        await fsp.writeFile(archivePath, facts.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf8");
+      } catch {
+        archivePath = null;
+      }
+
       const list = facts
         .map((f) => `- [${f.category}] ${f.fact} (${f.confidence})`)
         .join("\n")
         .slice(0, 3500);
-      const consolidated = await loopModelCall(
+      const out = await loopModelCall(
         personaModel("bartimaeus"),
-        "You consolidate a memory store. Merge duplicates and near-duplicates, drop trivia, and keep the most durable, high-signal facts. Output a clean bulleted list, one fact per line. No preamble.",
+        "You consolidate a memory store. (1) Merge duplicates/near-duplicates, drop trivia, keep durable high-signal facts as a clean bulleted list. (2) Then on a new line output '---CONTRADICTIONS---' followed by any pairs of facts that contradict each other (one per line), or 'none'. No other prose.",
         `FACTS (${facts.length}):\n${list}`,
-        { numPredict: 600, temperature: 0.2 }
+        { numPredict: 700, temperature: 0.2 }
       );
-      const lines = consolidated.split("\n").filter((l) => l.trim().startsWith("-"));
+      const [consPart, contraPart = ""] = out.split(/---\s*CONTRADICTIONS\s*---/i);
+      const lines = consPart.split("\n").filter((l) => l.trim().startsWith("-"));
+      const contradictions = contraPart
+        .split("\n")
+        .map((l) => l.replace(/^[-*]\s*/, "").trim())
+        .filter((l) => l && !/^none$/i.test(l) && l.length > 3);
+      // Quality score: fraction retained, penalized by contradictions found.
+      const retained = facts.length > 0 ? Math.min(1, lines.length / facts.length) : 0;
+      const quality = Math.max(0, Math.min(1, retained - contradictions.length * 0.1));
+
       return {
         loopId: "memory_consolidation",
         loopNumber: 11,
         ok: true,
-        summary: `consolidated ${facts.length} facts → ${lines.length} kept`,
+        summary: `consolidated ${facts.length}→${lines.length}, ${contradictions.length} contradiction(s), quality ${quality.toFixed(2)}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
@@ -84,10 +108,18 @@ export const memoryConsolidation: LoopDefinition = {
           {
             kind: "memory",
             description: `Replace ${facts.length} facts with ${lines.length} consolidated facts (operator applies).`,
-            payload: consolidated.trim(),
+            payload: consPart.trim(),
           },
         ],
-        data: { before: facts.length, kept: lines.length, consolidated: consolidated.trim() },
+        data: {
+          before: facts.length,
+          kept: lines.length,
+          consolidated: consPart.trim(),
+          output: consPart.trim(),
+          contradictions,
+          quality,
+          archivePath,
+        },
         error: null,
         durationMs: Date.now() - start,
       };
@@ -136,11 +168,54 @@ export const ouroborosRag: LoopDefinition = {
         .split("\n")[0]
         .trim();
       const hitsAfter = recall(reformulated || query);
+
+      // Live retrieval-config tuning. Maintain a recommended similarity
+      // threshold that a future vault read can honor: poor recall → loosen,
+      // saturated recall → tighten. Report every 100 queries.
+      const cfgPath = path.join(argosRoot(), "state", "loops", "rag-config.json");
+      let cfg: {
+        threshold: number;
+        queryCount: number;
+        lastReportAt: string | null;
+        adjustments: Array<{ at: string; from: number; to: number; reason: string }>;
+      } = { threshold: 0.3, queryCount: 0, lastReportAt: null, adjustments: [] };
+      try {
+        cfg = { ...cfg, ...JSON.parse(await fsp.readFile(cfgPath, "utf8")) };
+      } catch {
+        /* first run → defaults */
+      }
+      const from = cfg.threshold;
+      const hitRate = corpus.length > 0 ? hitsAfter / corpus.length : 0;
+      if (hitsAfter === 0 && corpus.length > 0) {
+        cfg.threshold = Math.max(0.05, +(cfg.threshold - 0.02).toFixed(3));
+      } else if (hitRate > 0.5) {
+        cfg.threshold = Math.min(0.9, +(cfg.threshold + 0.02).toFixed(3));
+      }
+      if (cfg.threshold !== from) {
+        cfg.adjustments.push({ at: new Date().toISOString(), from, to: cfg.threshold, reason: `hitRate ${hitRate.toFixed(2)}` });
+        cfg.adjustments = cfg.adjustments.slice(-50);
+      }
+      cfg.queryCount += 1;
+      const due = cfg.queryCount % 100 === 0;
+      let report: string | null = null;
+      if (due) {
+        report = `Ouroboros RAG report @ ${cfg.queryCount} queries: threshold ${cfg.threshold}, ${cfg.adjustments.length} recent adjustments.`;
+        cfg.lastReportAt = new Date().toISOString();
+      }
+      try {
+        await fsp.mkdir(path.dirname(cfgPath), { recursive: true });
+        const tmp = `${cfgPath}.${process.pid}.tmp`;
+        await fsp.writeFile(tmp, JSON.stringify(cfg, null, 2), "utf8");
+        await fsp.rename(tmp, cfgPath);
+      } catch {
+        /* config persist best-effort */
+      }
+
       return {
         loopId: "ouroboros_rag",
         loopNumber: 9,
         ok: true,
-        summary: `recall ${hitsBefore} → ${hitsAfter} over ${corpus.length} facts ("${reformulated}")`,
+        summary: `recall ${hitsBefore} → ${hitsAfter}/${corpus.length}; threshold ${from}→${cfg.threshold}${due ? " (100-query report)" : ""}`,
         claimedImprovement: false, // reported as data; gate does not need to trust it
         claimedScore: null,
         benchmarkBefore: null,
@@ -150,10 +225,14 @@ export const ouroborosRag: LoopDefinition = {
         data: {
           query,
           reformulated,
+          output: reformulated,
           hitsBefore,
           hitsAfter,
           corpusSize: corpus.length,
           improvedRecall: hitsAfter > hitsBefore,
+          threshold: cfg.threshold,
+          queryCount: cfg.queryCount,
+          report,
         },
         error: null,
         durationMs: Date.now() - start,

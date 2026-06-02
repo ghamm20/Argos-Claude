@@ -4,10 +4,15 @@
 // Meta-Optimizer (20). These produce insight/artifacts; none claim a
 // benchmark improvement, so the eval gate accepts a clean run.
 
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import type { LoopDefinition, LoopContext } from "../loop";
 import { personaModel, loopModelCall } from "../loop";
 import { loopFail, type LoopResult } from "../types";
 import { readAllTraces, traceStats, readTraces } from "../trace-store";
+import { recordFailureLesson } from "../lessons";
+import { argosRoot } from "../../vault/paths";
+import { storeFacts } from "../../memory-extract";
 
 function inputStr(ctx: LoopContext, key: string, fallback = ""): string {
   const v = ctx.input?.[key];
@@ -38,11 +43,15 @@ export const reflexion: LoopDefinition = {
         { numPredict: 200, temperature: 0.3 }
       );
       const clean = lesson.trim();
+      // Record the lesson + track whether this failure has recurred. The store
+      // pages the operator if the SAME failure crosses 3× despite the lesson.
+      const rec = clean ? await recordFailureLesson(clean, failure) : null;
+      const recurNote = rec?.recurred ? ` (recurred ${rec.failureCount}×${rec.alerted ? ", PAGED" : ""})` : "";
       return {
         loopId: "reflexion",
         loopNumber: 7,
         ok: clean.length > 0,
-        summary: clean ? `lesson: ${clean.slice(0, 120)}` : "no lesson produced",
+        summary: clean ? `lesson: ${clean.slice(0, 110)}${recurNote}` : "no lesson produced",
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
@@ -57,7 +66,15 @@ export const reflexion: LoopDefinition = {
               },
             ]
           : [],
-        data: { lesson: clean, source: failure.slice(0, 400) },
+        data: {
+          lesson: clean,
+          output: clean,
+          source: failure.slice(0, 400),
+          lessonId: rec?.lesson.id ?? null,
+          recurred: rec?.recurred ?? false,
+          failureCount: rec?.failureCount ?? 0,
+          alerted: rec?.alerted ?? false,
+        },
         error: null,
         durationMs: Date.now() - start,
       };
@@ -155,18 +172,81 @@ export const traceAnalysis: LoopDefinition = {
           { numPredict: 220, temperature: 0.3 }
         ).catch(() => insight);
       }
+      // Group failures (error/rejected/halted) by loop for the report.
+      const failures = recent.filter(
+        (t) => t.outcome === "error" || t.outcome === "rejected" || t.outcome === "halted"
+      );
+      const byLoop: Record<string, string[]> = {};
+      for (const f of failures) {
+        (byLoop[f.loopId] = byLoop[f.loopId] ?? []).push(
+          `${f.at.slice(0, 16)} [${f.outcome}] ${f.result.summary || f.evaluation.gamingReasons[0] || ""}`.slice(0, 200)
+        );
+      }
+      const day = new Date().toISOString().slice(0, 10);
+      const reportLines = [
+        `# ARGOS failure report — ${day}`,
+        "",
+        `Analyzed ${recent.length} recent traces; ${failures.length} failures across ${Object.keys(byLoop).length} loop(s).`,
+        "",
+        `## Top insight`,
+        insight.trim() || "(none)",
+        "",
+        `## Failures by loop`,
+      ];
+      for (const [loop, items] of Object.entries(byLoop)) {
+        reportLines.push("", `### ${loop} (${items.length})`, ...items.map((i) => `- ${i}`));
+      }
+      const reportPath = path.join(argosRoot(), "state", "loops", `failure-report-${day}.md`);
+      try {
+        await fsp.mkdir(path.dirname(reportPath), { recursive: true });
+        await fsp.writeFile(reportPath, reportLines.join("\n") + "\n", "utf8");
+      } catch {
+        /* report write best-effort */
+      }
+
+      // Auto-apply the PROMPT fix as a low-risk memory injection (a lesson the
+      // personas will see next turn). Code fixes are left to codebase-rewrite.
+      let memoryInjected = false;
+      if (insight.trim() && insight.trim() !== "Not enough trace history to analyze yet.") {
+        try {
+          await storeFacts([
+            {
+              fact: `Loop trace analysis (${day}): ${insight.trim().slice(0, 240)}`,
+              category: "concern",
+              confidence: 0.8,
+              timestamp: new Date().toISOString(),
+              sessionId: null,
+              persona: "bartimaeus",
+            },
+          ]);
+          memoryInjected = true;
+        } catch {
+          /* memory injection best-effort */
+        }
+      }
+
       return {
         loopId: "trace_analysis",
         loopNumber: 4,
         ok: true,
-        summary: `${stats.totalTraces} trace(s); halted ${stats.halted}, pending ${stats.pendingApproval}`,
+        summary: `${stats.totalTraces} traces; ${failures.length} failures; report ${day}${memoryInjected ? " + memory injected" : ""}`,
         claimedImprovement: false,
         claimedScore: null,
         benchmarkBefore: null,
         benchmarkAfter: null,
         evidence: [],
-        proposals: [],
-        data: { stats, insight: insight.trim(), analyzed: recent.length },
+        proposals: insight.trim()
+          ? [{ kind: "memory", description: "Inject the trace-analysis insight as a lesson.", payload: insight.trim() }]
+          : [],
+        data: {
+          stats,
+          insight: insight.trim(),
+          output: insight.trim(),
+          analyzed: recent.length,
+          failures: failures.length,
+          reportPath,
+          memoryInjected,
+        },
         error: null,
         durationMs: Date.now() - start,
       };

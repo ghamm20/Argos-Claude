@@ -20,11 +20,36 @@
 import { getOllamaBase } from "../ollama-config";
 import { PERSONA_BY_ID } from "../personas";
 
-export type Matcher = "numeric" | "exact_ci" | "contains_ci" | "contains_all";
+export type Matcher =
+  | "numeric"
+  | "exact_ci"
+  | "contains_ci"
+  | "contains_all"
+  | "word_count_max" // answer's word count <= Number(expected)
+  | "not_contains" // answer must NOT contain expected
+  | "sentence_count_max"; // answer's sentence count <= Number(expected)
+
+/**
+ * Benchmark categories. reasoning + retrieval are knowledge/recall tasks;
+ * tool_chain + character + quality are gradable PROXIES — deterministic format
+ * / constraint checks that stand in for the harder-to-grade real thing (an
+ * honest approximation, not a full evaluation). Every task is deterministically
+ * graded so the harness stays un-gameable ground truth.
+ */
+export type BenchmarkCategory =
+  | "reasoning"
+  | "retrieval"
+  | "tool_chain"
+  | "character"
+  | "quality"
+  | "math"
+  | "factual"
+  | "logic"
+  | "format";
 
 export interface BenchmarkTask {
   id: string;
-  category: "math" | "factual" | "logic" | "format" | "reasoning";
+  category: BenchmarkCategory;
   prompt: string;
   expected: string;
   match: Matcher;
@@ -32,21 +57,49 @@ export interface BenchmarkTask {
   weight?: number;
 }
 
-// The fixed ground-truth set. Known answers, deterministically checkable.
-// Keep prompts terse + answer-constrained so grading is unambiguous.
+// The fixed ground-truth set: 35 tasks across 5 categories, every one
+// deterministically graded. Known answers, terse + answer-constrained prompts.
 export const BENCHMARK_TASKS: BenchmarkTask[] = [
-  { id: "math-1", category: "math", prompt: "Compute 17 * 23. Reply with only the number.", expected: "391", match: "numeric" },
-  { id: "math-2", category: "math", prompt: "What is 144 divided by 12? Reply with only the number.", expected: "12", match: "numeric" },
-  { id: "math-3", category: "math", prompt: "What is 2 to the power of 10? Reply with only the number.", expected: "1024", match: "numeric" },
-  { id: "math-4", category: "math", prompt: "A train travels 60 miles in 1.5 hours. What is its average speed in mph? Reply with only the number.", expected: "40", match: "numeric" },
-  { id: "geo-1", category: "factual", prompt: "What is the capital of France? Reply with one word.", expected: "Paris", match: "contains_ci" },
-  { id: "geo-2", category: "factual", prompt: "What is the capital of Japan? Reply with one word.", expected: "Tokyo", match: "contains_ci" },
-  { id: "sci-1", category: "factual", prompt: "What is the chemical symbol for gold? Reply with the symbol only.", expected: "Au", match: "exact_ci" },
-  { id: "sci-2", category: "factual", prompt: "How many planets are in our solar system? Reply with only the number.", expected: "8", match: "numeric" },
-  { id: "logic-1", category: "logic", prompt: "If all roses are flowers and some flowers fade quickly, can we conclude all roses fade quickly? Answer yes or no.", expected: "no", match: "contains_ci" },
-  { id: "logic-2", category: "logic", prompt: "Mary is older than Tom. Tom is older than Sue. Who is youngest? Reply with the name.", expected: "Sue", match: "contains_ci" },
-  { id: "fmt-1", category: "format", prompt: "Reply with exactly the word ACKNOWLEDGED and nothing else.", expected: "ACKNOWLEDGED", match: "contains_ci" },
-  { id: "reason-1", category: "reasoning", prompt: "A bat and a ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost in cents? Reply with only the number.", expected: "5", match: "numeric" },
+  // ----- reasoning (10): math + logic, exact answers -----
+  { id: "reason-1", category: "reasoning", prompt: "Compute 17 * 23. Reply with only the number.", expected: "391", match: "numeric" },
+  { id: "reason-2", category: "reasoning", prompt: "What is 144 divided by 12? Reply with only the number.", expected: "12", match: "numeric" },
+  { id: "reason-3", category: "reasoning", prompt: "What is 2 to the power of 10? Reply with only the number.", expected: "1024", match: "numeric" },
+  { id: "reason-4", category: "reasoning", prompt: "A train travels 60 miles in 1.5 hours. Average speed in mph? Reply with only the number.", expected: "40", match: "numeric" },
+  { id: "reason-5", category: "reasoning", prompt: "A bat and ball cost $1.10. The bat costs $1.00 more than the ball. Ball cost in cents? Reply with only the number.", expected: "5", match: "numeric" },
+  { id: "reason-6", category: "reasoning", prompt: "If all roses are flowers and some flowers fade quickly, can we conclude all roses fade quickly? Answer yes or no.", expected: "no", match: "contains_ci" },
+  { id: "reason-7", category: "reasoning", prompt: "Mary is older than Tom. Tom is older than Sue. Who is youngest? Reply with the name.", expected: "Sue", match: "contains_ci" },
+  { id: "reason-8", category: "reasoning", prompt: "What is 15% of 200? Reply with only the number.", expected: "30", match: "numeric" },
+  { id: "reason-9", category: "reasoning", prompt: "What is the next number in the sequence 2, 4, 8, 16? Reply with only the number.", expected: "32", match: "numeric" },
+  { id: "reason-10", category: "reasoning", prompt: "If today is Monday, what day is it 3 days later? Reply with the day.", expected: "Thursday", match: "contains_ci" },
+  // ----- retrieval (10): known-answer recall -----
+  { id: "ret-1", category: "retrieval", prompt: "What is the capital of France? One word.", expected: "Paris", match: "contains_ci" },
+  { id: "ret-2", category: "retrieval", prompt: "What is the capital of Japan? One word.", expected: "Tokyo", match: "contains_ci" },
+  { id: "ret-3", category: "retrieval", prompt: "Chemical symbol for gold? Symbol only.", expected: "Au", match: "exact_ci" },
+  { id: "ret-4", category: "retrieval", prompt: "How many planets are in our solar system? Number only.", expected: "8", match: "numeric" },
+  { id: "ret-5", category: "retrieval", prompt: "What is the largest planet in our solar system? One word.", expected: "Jupiter", match: "contains_ci" },
+  { id: "ret-6", category: "retrieval", prompt: "How many continents are there on Earth? Number only.", expected: "7", match: "numeric" },
+  { id: "ret-7", category: "retrieval", prompt: "Who wrote Romeo and Juliet? Last name only.", expected: "Shakespeare", match: "contains_ci" },
+  { id: "ret-8", category: "retrieval", prompt: "What is the common name for H2O? One word.", expected: "water", match: "contains_ci" },
+  { id: "ret-9", category: "retrieval", prompt: "How many sides does a hexagon have? Number only.", expected: "6", match: "numeric" },
+  { id: "ret-10", category: "retrieval", prompt: "In what year did World War II end? Year only.", expected: "1945", match: "numeric" },
+  // ----- tool_chain (5): ordered/procedural multi-part output (proxy) -----
+  { id: "tc-1", category: "tool_chain", prompt: "List the 3 primary colors, comma separated.", expected: "red|blue|yellow", match: "contains_all" },
+  { id: "tc-2", category: "tool_chain", prompt: "Name the first 3 planets from the sun in order, comma separated.", expected: "mercury|venus|earth", match: "contains_all" },
+  { id: "tc-3", category: "tool_chain", prompt: "List all 4 cardinal directions.", expected: "north|south|east|west", match: "contains_all" },
+  { id: "tc-4", category: "tool_chain", prompt: "List the 3 classic states of matter.", expected: "solid|liquid|gas", match: "contains_all" },
+  { id: "tc-5", category: "tool_chain", prompt: "Give the 3 steps to make tea (heat water, add tea, steep). List them.", expected: "water|tea|steep", match: "contains_all" },
+  // ----- character (5): constraint-following (proxy for consistency) -----
+  { id: "char-1", category: "character", prompt: "Reply with exactly one word: the color of a clear daytime sky.", expected: "2", match: "word_count_max" },
+  { id: "char-2", category: "character", prompt: "Answer in 5 words or fewer: what is 2 + 2?", expected: "5", match: "word_count_max" },
+  { id: "char-3", category: "character", prompt: "Describe water in one sentence WITHOUT using the word 'wet'.", expected: "wet", match: "not_contains" },
+  { id: "char-4", category: "character", prompt: "Reply with only YES or NO: is the sun a star?", expected: "3", match: "word_count_max" },
+  { id: "char-5", category: "character", prompt: "Reply in at most 3 words: the capital of Italy.", expected: "3", match: "word_count_max" },
+  // ----- quality (5): conciseness / format adherence (proxy) -----
+  { id: "qual-1", category: "quality", prompt: "Answer in exactly one sentence: what is gravity?", expected: "1", match: "sentence_count_max" },
+  { id: "qual-2", category: "quality", prompt: "In one sentence, define a firewall.", expected: "1", match: "sentence_count_max" },
+  { id: "qual-3", category: "quality", prompt: "Summarize 'the cat sat on the mat' in 5 words or fewer.", expected: "5", match: "word_count_max" },
+  { id: "qual-4", category: "quality", prompt: "Give a one-sentence reason to back up your data.", expected: "1", match: "sentence_count_max" },
+  { id: "qual-5", category: "quality", prompt: "In under 20 words, why is sleep important?", expected: "20", match: "word_count_max" },
 ];
 
 const TASK_INDEX: Record<string, BenchmarkTask> = Object.fromEntries(
@@ -85,6 +138,19 @@ export function gradeTask(task: BenchmarkTask, answer: string): boolean {
       return task.expected
         .split("|")
         .every((part) => norm(a).includes(norm(part)));
+    case "word_count_max": {
+      const max = Number(task.expected);
+      const words = a.split(/\s+/).filter(Boolean).length;
+      return Number.isFinite(max) && words <= max && words > 0;
+    }
+    case "not_contains":
+      return !norm(a).includes(norm(task.expected));
+    case "sentence_count_max": {
+      const max = Number(task.expected);
+      const enders = (a.match(/[.!?]+/g) ?? []).length;
+      const sentences = enders === 0 ? 1 : enders;
+      return Number.isFinite(max) && sentences <= max;
+    }
     default:
       return false;
   }
@@ -98,13 +164,28 @@ export interface BenchmarkPerTask {
   answer: string;
 }
 
+export type ByCategory = Record<string, { pass: number; total: number; score: number }>;
+
 export interface BenchmarkScore {
   score: number; // weighted fraction in [0,1]
   passed: number;
   total: number;
   perTask: BenchmarkPerTask[];
+  byCategory: ByCategory;
   model: string | null;
   at: string;
+}
+
+/** Per-category pass rates — used by active-learning + the regression gate. */
+export function computeByCategory(perTask: BenchmarkPerTask[]): ByCategory {
+  const out: ByCategory = {};
+  for (const t of perTask) {
+    out[t.category] = out[t.category] ?? { pass: 0, total: 0, score: 0 };
+    out[t.category].total += 1;
+    if (t.passed) out[t.category].pass += 1;
+  }
+  for (const c of Object.values(out)) c.score = c.total > 0 ? c.pass / c.total : 0;
+  return out;
 }
 
 /**
@@ -141,6 +222,7 @@ export function scoreAnswers(
     passed,
     total: BENCHMARK_TASKS.length,
     perTask,
+    byCategory: computeByCategory(perTask),
     model: opts.model ?? null,
     at: new Date().toISOString(),
   };
@@ -225,6 +307,7 @@ export async function runBenchmark(
       passed: pass,
       total: tasks.length,
       perTask,
+      byCategory: computeByCategory(perTask),
       model,
       at: new Date().toISOString(),
     };
