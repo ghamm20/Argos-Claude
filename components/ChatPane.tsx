@@ -17,6 +17,11 @@ import { CodeProposalGate, extractCodeBlocks } from "./chat/CodeProposalGate";
 // operator mode otherwise.
 import { getSessionToken } from "@/lib/auth-client";
 import { Paperclip, ChevronDown, ChevronRight } from "lucide-react";
+// Vision Phase 1 (2026-06-02) — image drop, screenshot, preview strip.
+import { ImageDropButton } from "./vision/ImageDropButton";
+import { ScreenshotButton } from "./vision/ScreenshotButton";
+import { ImagePreviewStrip } from "./vision/ImagePreviewStrip";
+import { MAX_IMAGES, type AttachedImage } from "@/lib/vision-client";
 import {
   useArgos,
   type ChatMessage,
@@ -183,6 +188,20 @@ function MessageBubble({
     return (
       <div className="flex justify-end my-3">
         <div className="max-w-[78%] rounded-lg bg-neutral-800/70 border border-neutral-700/60 px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-100 whitespace-pre-wrap">
+          {/* Vision Phase 1 — image thumbnails attached to this user turn. */}
+          {msg.images && msg.images.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {msg.images.map((src, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={src}
+                  alt={`attachment ${i + 1}`}
+                  className="h-20 w-20 object-cover rounded-md border border-neutral-600/60"
+                />
+              ))}
+            </div>
+          )}
           {msg.content}
         </div>
       </div>
@@ -322,6 +341,10 @@ interface OllamaStreamLine {
   currentPersona?: string | null;
   complexity?: "low" | "high";
   surface?: boolean;
+  // Vision Phase 1 — vision event (leading frame). `model` = the model that
+  // handled this turn; `used` = whether image routing engaged.
+  model?: string;
+  used?: boolean;
 }
 
 export function ChatPane() {
@@ -381,6 +404,10 @@ export function ChatPane() {
 
   const [draft, setDraft] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  // Vision Phase 1 — images staged for the next message + transient attach
+  // errors (oversize/unsupported/over-cap). attachError auto-clears.
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Holds the in-flight stream's AbortController so the operator can
@@ -392,6 +419,28 @@ export function ChatPane() {
     if (!c) return;
     c.abort();
     abortRef.current = null;
+  }, []);
+
+  // Vision Phase 1 — image attach/screenshot/remove handlers. Cap at
+  // MAX_IMAGES; surface validation errors transiently.
+  const flashAttachError = useCallback((msg: string) => {
+    setAttachError(msg);
+    window.setTimeout(() => setAttachError(null), 5000);
+  }, []);
+  const addImages = useCallback(
+    (imgs: AttachedImage[]) => {
+      setAttachedImages((prev) => {
+        const next = [...prev, ...imgs].slice(0, MAX_IMAGES);
+        if (prev.length + imgs.length > MAX_IMAGES) {
+          flashAttachError(`Only ${MAX_IMAGES} images per message.`);
+        }
+        return next;
+      });
+    },
+    [flashAttachError]
+  );
+  const removeImage = useCallback((id: string) => {
+    setAttachedImages((prev) => prev.filter((i) => i.id !== id));
   }, []);
 
   // Hydrate vault counts on mount so retrieval is enabled even if the user
@@ -507,8 +556,17 @@ export function ChatPane() {
   // user-side turn without first stuffing it into the textarea. When
   // omitted, send() uses the current draft (original behavior).
   const send = useCallback(async (overrideText?: string) => {
-    const text = (overrideText ?? draft).trim();
-    if (!text || isStreaming) return;
+    // Vision Phase 1 — images only ride on textarea-driven sends, never on
+    // programmatic ones (Bobby's Reject). Captured before the early-return so
+    // an image-only message (no text) can still go.
+    const imagesAtSend =
+      overrideText === undefined ? attachedImages.map((a) => a.dataUrl) : [];
+    const typed = (overrideText ?? draft).trim();
+    if ((!typed && imagesAtSend.length === 0) || isStreaming) return;
+    // Give an image-only message a sensible default prompt so the model has
+    // something to answer; still shown verbatim in the transcript.
+    const text =
+      typed || (imagesAtSend.length > 0 ? "What's in this image?" : "");
 
     const snapshot = useArgos.getState().messages;
     const personaIdAtSend = useArgos.getState().currentPersonaId;
@@ -520,6 +578,7 @@ export function ChatPane() {
       role: "user",
       content: text,
       timestamp: Date.now(),
+      images: imagesAtSend.length > 0 ? imagesAtSend : undefined,
     };
     const assistantMsg: ChatMessage = {
       id: makeId(),
@@ -534,13 +593,21 @@ export function ChatPane() {
     // Only clear the textarea draft when the send was driven from the
     // textarea — programmatic sends (e.g. Reject) must not clobber a
     // draft the operator may have been mid-typing.
-    if (overrideText === undefined) setDraft("");
+    if (overrideText === undefined) {
+      setDraft("");
+      setAttachedImages([]);
+      setAttachError(null);
+    }
     setStreaming(true);
 
-    const wireHistory = [...snapshot, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Wire history: prior turns are text-only (bound payload); only the
+    // current user turn carries images, in Ollama's native `images` field.
+    const wireHistory = [
+      ...snapshot.map((m) => ({ role: m.role, content: m.content })),
+      imagesAtSend.length > 0
+        ? { role: userMsg.role, content: text, images: imagesAtSend }
+        : { role: userMsg.role, content: text },
+    ];
 
     const startedAt = performance.now();
     let firstTokenAt: number | null = null;
@@ -657,6 +724,14 @@ export function ChatPane() {
               });
               continue;
             }
+            if (data?.type === "vision") {
+              // Vision Phase 1 — record the model that handled this turn so
+              // the HUD shows it. null when the turn was text-only.
+              useArgos
+                .getState()
+                .setVisionModel(data.used && data.model ? data.model : null);
+              continue;
+            }
             const chunk = data?.message?.content;
             if (chunk) {
               if (firstTokenAt === null) {
@@ -732,6 +807,7 @@ export function ChatPane() {
               retrievalHits: m.retrievalHits,
               retrievalError: m.retrievalError,
               errored: m.errored,
+              images: m.images,
             })),
           };
           const r = await fetch("/api/chat/sessions", {
@@ -751,6 +827,7 @@ export function ChatPane() {
     }
   }, [
     draft,
+    attachedImages,
     isStreaming,
     appendMessage,
     appendToLastMessage,
@@ -900,6 +977,14 @@ export function ChatPane() {
             />
           </button>
         )}
+        {/* Vision Phase 1 — screenshot capture (getDisplayMedia). Self-hides
+            where unsupported; capture appears as a composer image preview. */}
+        <ScreenshotButton
+          onCapture={(img) => addImages([img])}
+          onError={(msg) => flashAttachError(msg)}
+          disabled={isStreaming}
+          atCapacity={attachedImages.length >= MAX_IMAGES}
+        />
         {!empty && (
           <>
             <button
@@ -978,6 +1063,17 @@ export function ChatPane() {
               </span>
             </div>
           )}
+          {/* Vision Phase 1 — staged image previews + transient attach error. */}
+          <ImagePreviewStrip
+            images={attachedImages}
+            onRemove={removeImage}
+            accent={accent}
+          />
+          {attachError && (
+            <div className="mb-2 text-[11px] text-amber-400" role="alert">
+              {attachError}
+            </div>
+          )}
           <div className="relative">
             <textarea
               ref={textareaRef}
@@ -1009,6 +1105,14 @@ export function ChatPane() {
                 setDraft((d) => (d.trim() ? `${d.trimEnd()} ${text}` : text))
               }
             />
+            {/* Vision Phase 1 — image attach (left of the mic). */}
+            <ImageDropButton
+              accent={accent}
+              disabled={isStreaming || conversation.active}
+              currentCount={attachedImages.length}
+              onAttach={addImages}
+              onError={(errs) => flashAttachError(errs.join(" "))}
+            />
             {isStreaming ? (
               <button
                 onClick={stop}
@@ -1027,13 +1131,15 @@ export function ChatPane() {
             ) : (
               <button
                 onClick={() => void send()}
-                disabled={draft.trim().length === 0}
+                disabled={draft.trim().length === 0 && attachedImages.length === 0}
                 className="absolute right-1.5 bottom-1.5 rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
                 style={{
                   borderWidth: 1,
                   borderStyle: "solid",
-                  borderColor: !draft.trim() ? "#404040" : accent,
-                  color: !draft.trim() ? "#737373" : accent,
+                  borderColor:
+                    !draft.trim() && attachedImages.length === 0 ? "#404040" : accent,
+                  color:
+                    !draft.trim() && attachedImages.length === 0 ? "#737373" : accent,
                   background: "rgba(0,0,0,0.4)",
                 }}
               >

@@ -4,6 +4,9 @@ import path from "node:path";
 import { tmpUploadDir } from "@/lib/vault/paths";
 import { ingest } from "@/lib/vault/store";
 import { UnsupportedFileType } from "@/lib/vault/extract";
+// Vision Phase 1 (2026-06-02) — file vision: images get a gemma4-turbo
+// description that becomes the doc's searchable text via the RAG pipeline.
+import { isImageFilename, describeImage, getVisionModel } from "@/lib/vision";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +17,23 @@ export const dynamic = "force-dynamic";
 // what most vault workflows ship in production.
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
+// Vision: only inline a thumbnail data-URL for small images. Without an
+// image-resize dependency (none allowed), we don't downscale — large images
+// store thumb=null and rely on the stored original. Small images (≤256 KB)
+// inline their own bytes as the thumb.
+const THUMB_MAX_BYTES = 256 * 1024;
+
 function safeFilename(name: string): string {
   const base = path.basename(name);
   return base.replace(/[^a-zA-Z0-9._\- ]+/g, "_");
+}
+
+function imageMime(name: string): string {
+  const ext = path.extname(name).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".webp") return "image/webp";
+  return "image/jpeg";
 }
 
 export async function POST(req: NextRequest) {
@@ -59,10 +76,41 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
       };
       try {
-        const result = await ingest(tmpPath, {
-          originalFilename: filename,
-          onProgress: (p) => emit(p),
-        });
+        let result;
+        if (isImageFilename(filename)) {
+          // ---- File vision: image → description → searchable text ----
+          emit({ stage: "extracting" });
+          const b64 = buf.toString("base64");
+          let description: string;
+          try {
+            description = await describeImage(b64);
+          } catch (visErr) {
+            // Graceful, honest failure — clear message, no crash. The
+            // original image is still cleaned up in finally.
+            emit({
+              stage: "error",
+              error: `vision description failed (${
+                visErr instanceof Error ? visErr.message : String(visErr)
+              }). Is Ollama running with ${getVisionModel()} pulled?`,
+            });
+            return;
+          }
+          const thumb =
+            buf.length <= THUMB_MAX_BYTES
+              ? `data:${imageMime(filename)};base64,${b64}`
+              : null;
+          result = await ingest(tmpPath, {
+            originalFilename: filename,
+            onProgress: (p) => emit(p),
+            precomputedText: description,
+            extraMeta: { kind: "image", description, thumb },
+          });
+        } else {
+          result = await ingest(tmpPath, {
+            originalFilename: filename,
+            onProgress: (p) => emit(p),
+          });
+        }
         emit({ stage: "done", result });
       } catch (e) {
         if (e instanceof UnsupportedFileType) {

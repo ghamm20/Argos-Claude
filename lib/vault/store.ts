@@ -78,6 +78,13 @@ export function cosine(a: number[], b: number[]): number {
 export interface IngestOpts {
   onProgress?: (p: IngestProgress) => void;
   originalFilename?: string;
+  /** Vision Phase 1 — when set, skip text extraction and chunk/embed this
+   *  text instead. Used by file-vision: the image's vision description IS
+   *  the searchable text. The original image bytes are still stored. */
+  precomputedText?: string;
+  /** Vision Phase 1 — extra DocumentMeta fields (kind/description/thumb)
+   *  merged into the manifest entry. */
+  extraMeta?: Pick<DocumentMeta, "kind" | "description" | "thumb">;
 }
 
 export async function ingest(
@@ -93,7 +100,13 @@ export async function ingest(
   const filename = opts.originalFilename ?? path.basename(filepath);
 
   opts.onProgress?.({ stage: "extracting" });
-  const text = await extractText(filepath);
+  // Vision Phase 1: file-vision passes the image's vision description as
+  // precomputedText so we skip extractText (which rejects image types) and
+  // make the description searchable through the normal chunk/embed pipeline.
+  const text =
+    opts.precomputedText !== undefined
+      ? opts.precomputedText
+      : await extractText(filepath);
 
   opts.onProgress?.({ stage: "chunking" });
   // Vault long-form fix (2026-05-28): big PDFs (≥500KB) get the
@@ -151,6 +164,8 @@ export async function ingest(
     chunkCount: chunks.length,
     sha256,
     byteSize: buf.length,
+    // Vision Phase 1 — image docs carry kind/description/thumb.
+    ...(opts.extraMeta ?? {}),
   };
   const manifest = await readManifest();
   manifest.documents = manifest.documents.filter((d) => d.id !== docId);

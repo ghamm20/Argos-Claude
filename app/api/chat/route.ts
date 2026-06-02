@@ -6,6 +6,15 @@ import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase } from "@/lib/ollama-config";
+// Vision Phase 1 (2026-06-02) — image turns route to the multimodal model
+// (gemma4-turbo) regardless of persona; text turns stay on the persona model.
+// The persona system prompt is still injected, so the reply stays in
+// character — only the MODEL changes.
+import {
+  messagesHaveImages,
+  resolveChatModel,
+  stripDataUrl,
+} from "@/lib/vision";
 // Phase 9 (router) — persona auto-routing suggestion. The chat path
 // uses ONLY the keyword classifier (pure CPU, sub-millisecond) so it
 // adds zero latency and never calls a model. Suggestion-only.
@@ -88,7 +97,14 @@ type WireRole = "user" | "assistant" | "system";
 interface WireMessage {
   role: WireRole;
   content: string;
+  /** Vision Phase 1 — base64 (data-URL or raw) images on a user turn. */
+  images?: string[];
 }
+
+// Vision bounds — images are large; keep them off the 100 KB content cap but
+// still bounded so a stuck client can't OOM the daemon.
+const MAX_IMAGES_PER_MESSAGE = 3;
+const MAX_IMAGE_CHARS = 15 * 1024 * 1024; // ~11 MB binary as base64
 
 interface ChatRequestBody {
   messages: WireMessage[];
@@ -289,6 +305,30 @@ export async function POST(req: NextRequest) {
         `messages[${i}].content exceeds ${MAX_CONTENT_LENGTH} chars (got ${m.content.length})`
       );
     }
+    // Vision Phase 1 — validate optional images array (defensive bounds).
+    if (m.images !== undefined) {
+      if (!Array.isArray(m.images)) {
+        return abort(400, `messages[${i}].images must be an array of base64 strings`);
+      }
+      if (m.images.length > MAX_IMAGES_PER_MESSAGE) {
+        return abort(
+          400,
+          `messages[${i}].images exceeds ${MAX_IMAGES_PER_MESSAGE} images (got ${m.images.length})`
+        );
+      }
+      for (let j = 0; j < m.images.length; j++) {
+        const img = m.images[j];
+        if (typeof img !== "string" || img.length === 0) {
+          return abort(400, `messages[${i}].images[${j}] must be a non-empty base64 string`);
+        }
+        if (img.length > MAX_IMAGE_CHARS) {
+          return abort(
+            400,
+            `messages[${i}].images[${j}] exceeds the ${(MAX_IMAGE_CHARS / 1024 / 1024).toFixed(0)} MB image limit`
+          );
+        }
+      }
+    }
   }
   if (typeof body.model !== "string" || !body.model.trim()) {
     return abort(400, "model is required");
@@ -330,6 +370,22 @@ export async function POST(req: NextRequest) {
           ? `Install ${persona.intendedModel} into Ollama and re-bind in lib/personas.ts, or pick a different persona.`
           : `No intended model recorded. Pick a different persona.`,
       }
+    );
+  }
+
+  // ---- Vision routing (2026-06-02) ----
+  // If any message carries an image, route this turn to the multimodal model
+  // (gemma4-turbo) instead of the persona's text model. The persona system
+  // prompt is still injected below, so the analysis returns in-character —
+  // only the MODEL changes. Text-only turns are unaffected.
+  const hasImages = messagesHaveImages(body.messages);
+  const { model: effectiveModel, vision: visionTurn } = resolveChatModel({
+    hasImages,
+    personaModel: body.model,
+  });
+  if (visionTurn) {
+    console.info(
+      `[chat] vision turn — routing to ${effectiveModel} (persona ${body.personaId} stays in voice)`
     );
   }
 
@@ -425,7 +481,9 @@ export async function POST(req: NextRequest) {
   // context — keeps the network-mode boundary clean (guest = local
   // only). Failures degrade to "no research block" silently.
   let researchReport: ResearchReport | null = null;
-  if (isOperator && userText) {
+  // Vision turns skip research — the intent is "analyze this image", not a
+  // web-research query; running the research planner on it wastes latency.
+  if (isOperator && userText && !visionTurn) {
     try {
       researchReport = await runResearch(userText, body.personaId);
       if (researchReport) {
@@ -481,9 +539,24 @@ export async function POST(req: NextRequest) {
   }
   const systemPrompt = systemParts.join("\n\n");
 
-  const ollamaMessages: WireMessage[] = [
+  // Build the Ollama message list. Vision Phase 1: when a user turn carries
+  // images, attach them as Ollama's native `images: [base64]` field (data-URL
+  // prefixes stripped). Text turns are unchanged.
+  const ollamaMessages: Array<{
+    role: WireRole;
+    content: string;
+    images?: string[];
+  }> = [
     { role: "system", content: systemPrompt },
-    ...body.messages.map((m) => ({ role: m.role, content: m.content })),
+    ...body.messages.map((m) =>
+      m.images && m.images.length > 0
+        ? {
+            role: m.role,
+            content: m.content,
+            images: m.images.map(stripDataUrl),
+          }
+        : { role: m.role, content: m.content }
+    ),
   ];
 
   // ---- Open Ollama stream ----
@@ -501,12 +574,15 @@ export async function POST(req: NextRequest) {
     // message.content when think:true). Each persona sets this
     // explicitly in lib/personas.ts; see MODELS.md for which models
     // require which.
-    const personaThink = persona.think === true;
+    // Vision Phase 1: force think:false on vision turns — gemma4-turbo is a
+    // gemma4 model that emits ALL output via message.thinking (and nothing
+    // into message.content) when think:true. Text turns keep the persona flag.
+    const personaThink = !visionTurn && persona.think === true;
     upstream = await fetch(OLLAMA_CHAT, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: body.model,
+        model: effectiveModel,
         messages: ollamaMessages,
         stream: true,
         think: personaThink,
@@ -532,8 +608,10 @@ export async function POST(req: NextRequest) {
     clearTimeout(firstTokenTimer);
     const errBody = await upstream.text();
     if (upstream.status === 404 || /not found|no such model/i.test(errBody)) {
-      return abort(404, `model not found: ${body.model}`, {
-        hint: `Run: ollama pull ${body.model}`,
+      return abort(404, `model not found: ${effectiveModel}`, {
+        hint: visionTurn
+          ? `Vision model missing. Run: ollama pull ${effectiveModel}`
+          : `Run: ollama pull ${effectiveModel}`,
         ollamaBody: errBody,
       });
     }
@@ -625,6 +703,15 @@ export async function POST(req: NextRequest) {
     };
   }
 
+  // Vision Phase 1 — leading frame announcing which model handled this turn
+  // and whether image routing engaged. The client records it for the HUD.
+  const visionEvent = {
+    type: "vision" as const,
+    model: effectiveModel,
+    used: visionTurn,
+    personaModel: body.model,
+  };
+
   const reader = upstream.body.getReader();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -668,6 +755,11 @@ export async function POST(req: NextRequest) {
       try {
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(routingEvent)}\n`)
+        );
+        // Vision Phase 1 — emit the vision frame alongside routing so the
+        // HUD can show the model used as soon as the turn starts.
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(visionEvent)}\n`)
         );
       } catch {
         /* hint frame is best-effort; ignore */
@@ -775,6 +867,10 @@ export async function POST(req: NextRequest) {
       "content-type": "application/x-ndjson; charset=utf-8",
       "cache-control": "no-store, no-transform",
       "x-content-type-options": "nosniff",
+      // Vision Phase 1 — header mirror of the vision frame so non-streaming
+      // clients / smokes can read the routing decision from headers alone.
+      "x-vision-model": effectiveModel,
+      "x-vision-used": visionTurn ? "true" : "false",
     },
   });
 }

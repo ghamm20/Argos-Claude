@@ -27,14 +27,16 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // fetch and must NOT be held to stub-honesty rules.
 //
 // 2026-06-01: Voice (app/voice/page.tsx) REMOVED for the same reason —
-// Phase 7-D shipped live voice I/O (F5-TTS speak button, Web Speech API
-// mic, conversation mode), and the Voice page now renders real live status
-// via the VoiceStatusPanel client component (useState/useEffect to detect
-// browser capability). It is no longer a deferred placeholder. Vision PAGE
-// remains a genuine stub.
-const STUBS = [
-  { name: "Vision", path: "app/vision/page.tsx", weekPattern: /Week\s*8/i },
-];
+// Phase 7-D shipped live voice I/O.
+//
+// 2026-06-02: Vision (app/vision/page.tsx) REMOVED — Vision Phase 1 shipped
+// image drop, file vision, and screenshot awareness (gemma4-turbo routing).
+// The Vision page now renders real live status via the VisionStatusPanel
+// client component (useState/useEffect + fetch /api/vision/status), so it is
+// no longer a deferred placeholder. No stub pages remain; this audit now only
+// enforces the workspace-switcher honesty (below). The array is kept (empty)
+// so the harness stays in place for any future deferred page.
+const STUBS = [];
 
 const REQUIRED_PHRASES = [
   { id: "v2-label", needle: /\bv2\b/i },

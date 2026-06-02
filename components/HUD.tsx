@@ -106,6 +106,8 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   // not_configured / idle). Drives the "Status" row in the Model section.
   const modelStatus = useArgos((s) => s.modelStatus);
   const modelStatusMessage = useArgos((s) => s.modelStatusMessage);
+  // Vision Phase 1 — model used for the most recent image turn (else null).
+  const lastVisionModel = useArgos((s) => s.lastVisionModel);
 
   const [hw, setHw] = useState<HardwareProfile | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -317,6 +319,16 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
           value={reasonShort}
           title={hw?.reason}
         />
+        {/* Vision Phase 1 — shows the multimodal model when the last turn
+            carried an image. Self-hides on text-only turns. */}
+        {lastVisionModel && (
+          <Row
+            label="Vision"
+            value={lastVisionModel}
+            accent="#10b981"
+            title={`Last image turn routed to ${lastVisionModel}`}
+          />
+        )}
       </Section>
 
       <Section title="Inference">

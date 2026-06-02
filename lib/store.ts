@@ -26,6 +26,9 @@ export interface ChatMessage {
   retrievalError?: string | null;
   isStreaming?: boolean;
   errored?: boolean;
+  /** Vision Phase 1 — data-URL images attached to a user turn. Rendered as
+   *  thumbnails in the chat history and sent to the multimodal model. */
+  images?: string[];
 }
 
 export interface HudMetrics {
@@ -95,6 +98,10 @@ export const AVAILABLE_MODELS: readonly string[] = [
   // overrides.json without touching source. Not bound to a persona
   // by default in Phase 2 Persona Completion.
   "second_constantine/deepseek-coder-v2:16b",
+  // Vision Phase 1 (2026-06-02): multimodal model. Not bound to a persona —
+  // /api/chat routes image turns to it automatically (see lib/vision.ts).
+  // Allowlisted so the server-side vision override passes validation.
+  "ssfdre38/gemma4-turbo:e4b",
 ] as const;
 export function isAvailableModel(m: string): boolean {
   return AVAILABLE_MODELS.includes(m);
@@ -191,6 +198,9 @@ interface ArgosState {
   /** Phase 9 (router) — most-recent routing suggestion from the chat
    *  stream. Reset on persona switch + clearChat. Suggestion-only. */
   routingSuggestion: RoutingHudState;
+  /** Vision Phase 1 — model used for the most recent turn when an image was
+   *  attached (else null). Drives the HUD "Vision" row. Reset on clearChat. */
+  lastVisionModel: string | null;
 
   switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
@@ -209,6 +219,7 @@ interface ArgosState {
   setTruthMode: (b: boolean) => void;
   setResearchState: (s: ResearchHudState) => void;
   setRoutingSuggestion: (s: RoutingHudState) => void;
+  setVisionModel: (m: string | null) => void;
   setCurrentSessionId: (id: string | null) => void;
   /** Replace the entire in-memory chat with a loaded persisted session. */
   loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
@@ -236,6 +247,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   modelStatusMessage: null,
   researchState: EMPTY_RESEARCH_STATE,
   routingSuggestion: EMPTY_ROUTING_STATE,
+  lastVisionModel: null,
 
   // Phase 2-RB: persona-bound model with visible swap state. Steps:
   //   1. If persona is not_configured, set modelStatus=not_configured
@@ -393,6 +405,8 @@ export const useArgos = create<ArgosState>((set, get) => ({
       currentSessionId: null,
       // Phase 9 (router) — drop any stale routing hint.
       routingSuggestion: EMPTY_ROUTING_STATE,
+      // Vision Phase 1 — drop any stale vision-model indicator.
+      lastVisionModel: null,
     }),
 
   setVaultCounts: (docs, chunks) =>
@@ -403,6 +417,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   setTruthMode: (b) => set({ truthMode: b }),
   setResearchState: (s) => set({ researchState: s }),
   setRoutingSuggestion: (s) => set({ routingSuggestion: s }),
+  setVisionModel: (m) => set({ lastVisionModel: m }),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   loadSession: (id, messages, personaId, model) =>

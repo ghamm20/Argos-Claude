@@ -26,7 +26,9 @@ interface NavItem {
 const NAV: NavItem[] = [
   { id: "chat", label: "Chat", icon: MessageSquare, active: true, tab: "chat" },
   { id: "vault", label: "Vault", icon: FolderArchive, active: true, tab: "vault" },
-  { id: "vision", label: "Vision", icon: EyeIcon, active: true, route: "/vision", stub: true },
+  // Vision Phase 1 (2026-06-02) — Vision is now a real feature (image drop,
+  // file vision, screenshot). No longer a stub → no v2 label.
+  { id: "vision", label: "Vision", icon: EyeIcon, active: true, route: "/vision" },
   { id: "voice", label: "Voice", icon: Mic, active: true, route: "/voice", stub: true },
   { id: "memory", label: "Memory", icon: Database, active: true, route: "/memory", stub: true },
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools", stub: true },

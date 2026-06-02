@@ -5,6 +5,16 @@ export interface DocumentMeta {
   chunkCount: number;
   sha256: string;
   byteSize: number;
+  // Vision Phase 1 (2026-06-02) — file-vision fields. Optional + back-compat:
+  // existing text documents simply omit them (kind defaults to "text").
+  /** "text" (default) or "image" (ingested via vision description). */
+  kind?: "text" | "image";
+  /** For images: the gemma4-turbo vision description that was chunked +
+   *  embedded as this doc's searchable text. */
+  description?: string;
+  /** For images: a small data-URL thumbnail for display. Null when the
+   *  original is too large to inline without a resize dependency. */
+  thumb?: string | null;
 }
 
 export interface ChunkMetadata {
