@@ -6,7 +6,7 @@
 
 import { promises as fsp } from "node:fs";
 import path from "node:path";
-import { getOllamaBase } from "../ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "../ollama-config";
 import { outputDir } from "./paths";
 
 export const TOOL_UA =
@@ -265,6 +265,9 @@ export async function callModel(
         model,
         stream: false,
         think: false,
+        // Background tool analysis (factcheck/report) — release VRAM fast
+        // (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

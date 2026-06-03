@@ -32,7 +32,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
 import { readSettings } from "./settings";
-import { getOllamaBase } from "./ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "./ollama-config";
 import { isInFlight } from "./chat/inflight";
 // Phase 11 Dispatcher — an actionable heartbeat item is passed to the
 // dispatcher (classify → route → memory → alert) instead of alerting
@@ -256,6 +256,8 @@ async function triageWithModel(
         ],
         stream: false,
         think: false,
+        // Background triage — release VRAM fast (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         options: { temperature: 0, num_predict: 256 },
       }),
       signal: controller.signal,

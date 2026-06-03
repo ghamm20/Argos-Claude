@@ -43,6 +43,7 @@
 //     opt-in (routePersona({ useModel: true })).
 
 import { type PersonaId } from "./personas";
+import { KEEP_ALIVE_BACKGROUND } from "./ollama-config";
 
 export const PERSONA_IDS: PersonaId[] = [
   "bartimaeus",
@@ -364,6 +365,9 @@ export async function routePersona(
           prompt: CLASSIFY_PROMPT(query),
           stream: false,
           think: false,
+          // Background routing classifier — release VRAM fast so it can't hold
+          // the conversational persona's slot (keep-alive coordination).
+          keep_alive: KEEP_ALIVE_BACKGROUND,
           options: { temperature: 0, num_predict: 8 },
         }),
         signal: opts.signal ?? controller.signal,

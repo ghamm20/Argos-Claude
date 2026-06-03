@@ -17,6 +17,18 @@
 
 const DEFAULT_BASE = "http://127.0.0.1:11434";
 
+// Keep-alive coordination (2026-06-03). On an 8GB card the conversational
+// persona (e.g. Bart, 8.1GB) and the background extractor (Bobby, 2.8GB) cannot
+// coexist, so a long-lived background model evicts the one the operator is
+// talking to — Bart then cold-loads (~25s TTFT) on the next message. Scope the
+// Ollama `keep_alive` per call ROLE, never uniformly:
+//   - CONVERSATIONAL: the persona the operator is actively talking to. Stay
+//     warm so the next message is instant.
+//   - BACKGROUND: extractor / triage / loops / vision / embeddings / router.
+//     Release VRAM almost immediately so it never holds the persona's slot.
+export const KEEP_ALIVE_CONVERSATIONAL = "60m";
+export const KEEP_ALIVE_BACKGROUND = "5s";
+
 /**
  * Translate a daemon BIND address into a client CONNECT address.
  *

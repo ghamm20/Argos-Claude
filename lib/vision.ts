@@ -14,7 +14,7 @@
 // Server-only (uses node fetch against the local Ollama daemon). No external
 // network — Ollama is 127.0.0.1 by Seven-Rules doctrine.
 
-import { getOllamaBase } from "./ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "./ollama-config";
 
 /**
  * The multimodal model. gemma4-turbo:e4b (~5.7 GB) is already pulled on the
@@ -154,6 +154,9 @@ export async function describeImage(
         model,
         stream: false,
         think: false,
+        // Background vision describe — a one-off utility model; release VRAM
+        // fast so it can't hold the conversational persona's slot.
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         messages: [
           {
             role: "user",

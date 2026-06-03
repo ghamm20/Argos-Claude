@@ -5,7 +5,7 @@
 // a LoopResult; it NEVER applies its own changes and NEVER throws out (the
 // orchestrator wraps it, but loops should still catch + return loopFail).
 
-import { getOllamaBase } from "../ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "../ollama-config";
 import { PERSONA_BY_ID, type PersonaId } from "../personas";
 import type { LoopId, LoopResult, LoopTrigger } from "./types";
 
@@ -67,6 +67,8 @@ export async function loopModelCall(
         model,
         stream: false,
         think: false,
+        // Background loop runner — release VRAM fast (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

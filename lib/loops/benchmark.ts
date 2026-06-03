@@ -17,7 +17,7 @@
 //     Sequential (one model loaded at a time on the 8GB rig). Graceful: a
 //     failed task scores 0, never throws.
 
-import { getOllamaBase } from "../ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "../ollama-config";
 import { PERSONA_BY_ID } from "../personas";
 
 export type Matcher =
@@ -242,6 +242,8 @@ async function askModel(model: string, prompt: string): Promise<string> {
         model,
         stream: false,
         think: false,
+        // Background benchmark — release VRAM fast (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         messages: [
           {
             role: "system",

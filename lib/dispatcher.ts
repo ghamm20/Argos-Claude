@@ -26,7 +26,7 @@
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
-import { getOllamaBase } from "./ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "./ollama-config";
 import { PERSONA_BY_ID, type PersonaId } from "./personas";
 import { classifyByKeyword } from "./persona-router";
 import { pushoverSend } from "./research/alerts";
@@ -327,6 +327,9 @@ async function actWithPersona(
         ],
         stream: false,
         think: false,
+        // Background triage — release VRAM fast so it can't evict the
+        // conversational persona (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         options: { temperature: 0, num_predict: 256 },
       }),
       signal: controller.signal,

@@ -18,7 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAvailableModel, AVAILABLE_MODELS } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
-import { getOllamaBase } from "@/lib/ollama-config";
+import { getOllamaBase, KEEP_ALIVE_CONVERSATIONAL } from "@/lib/ollama-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +69,9 @@ export async function POST(req: NextRequest) {
         model,
         prompt: "",
         stream: false,
-        keep_alive: "60m",
+        // Warming a persona the operator is about to talk to — keep it warm
+        // (same value as the conversational chat path).
+        keep_alive: KEEP_ALIVE_CONVERSATIONAL,
       }),
       signal: AbortSignal.timeout(120_000),
     });

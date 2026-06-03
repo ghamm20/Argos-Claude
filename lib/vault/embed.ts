@@ -1,4 +1,4 @@
-import { getOllamaBase } from "../ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "../ollama-config";
 
 const OLLAMA_BASE = getOllamaBase();
 export const EMBED_MODEL = "nomic-embed-text";
@@ -23,7 +23,9 @@ export async function embedText(text: string): Promise<number[]> {
     res = await fetch(`${OLLAMA_BASE}/api/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
+      // Background embedding — release VRAM fast so the tiny embed model never
+      // holds the conversational persona's slot (keep-alive coordination).
+      body: JSON.stringify({ model: EMBED_MODEL, prompt: text, keep_alive: KEEP_ALIVE_BACKGROUND }),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

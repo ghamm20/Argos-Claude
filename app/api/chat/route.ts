@@ -5,7 +5,7 @@ import { retrieve } from "@/lib/vault/store";
 import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
-import { getOllamaBase } from "@/lib/ollama-config";
+import { getOllamaBase, KEEP_ALIVE_CONVERSATIONAL } from "@/lib/ollama-config";
 // Vision Phase 1 (2026-06-02) — image turns route to the multimodal model
 // (gemma4-turbo) regardless of persona; text turns stay on the persona model.
 // The persona system prompt is still injected, so the reply stays in
@@ -793,6 +793,10 @@ export async function POST(req: NextRequest) {
         messages: ollamaMessages,
         stream: true,
         think: personaThink,
+        // The operator is mid-conversation with this persona — keep it warm so
+        // the next message doesn't cold-load. Background calls (extractor, etc.)
+        // use a short keep_alive so they can't evict it (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_CONVERSATIONAL,
         // Ollama's num_predict is the response token cap. Brief by default for
         // Bartimaeus; /deep lifts it to 2000; null = uncapped (Sage, vision).
         options: {
@@ -1068,6 +1072,7 @@ export async function POST(req: NextRequest) {
                       ],
                       stream: true,
                       think: false,
+                      keep_alive: KEEP_ALIVE_CONVERSATIONAL,
                       options: { think: false, num_predict: maxTokens ?? 250 },
                     }),
                   });

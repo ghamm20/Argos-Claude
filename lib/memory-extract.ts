@@ -24,7 +24,7 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { argosRoot } from "./vault/paths";
-import { getOllamaBase } from "./ollama-config";
+import { getOllamaBase, KEEP_ALIVE_BACKGROUND } from "./ollama-config";
 import { PERSONA_BY_ID } from "./personas";
 
 export type FactCategory =
@@ -182,6 +182,9 @@ export async function extractFacts(
         model,
         stream: false,
         think: false,
+        // Background extractor (Bobby). Release VRAM almost immediately so it
+        // can't evict the conversational persona (keep-alive coordination).
+        keep_alive: KEEP_ALIVE_BACKGROUND,
         messages: [
           { role: "system", content: EXTRACT_SYSTEM },
           { role: "user", content: userPrompt },
