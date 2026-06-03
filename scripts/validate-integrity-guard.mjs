@@ -80,6 +80,19 @@ try {
   check("claim WITH a real tool run → no violation", neg4?.verdict?.violation === false);
   const counterUnchanged = await probe(base, "noop");
   check("counter unchanged by non-violations (only the 1 logged)", (counterUnchanged?.integrityViolations ?? 0) === baseline + 1, `count=${counterUnchanged?.integrityViolations}`);
+
+  console.log("\n=== v2.3.9 MISREPRESENTATION: negative result softened as pending ===");
+  // A tool RAN and returned a clear negative; the response frames the completed
+  // call as still-pending. The misrepresentation guard (Layer 2c) must flag it
+  // — distinct from fabrication (which needs NO tool to have run).
+  const NEG = [{ toolId: "mirofish_integration", ok: true, summary: "MiroFish not running. Start it on port 3001 to enable.", data: { connected: false } }];
+  const mis = await probe(base, "The tool call was emitted and the task has begun. I await the result.", { toolResults: NEG });
+  check("negative-state result detected (connected:false)", (mis?.misrepresentation?.negativeCount ?? 0) === 1, JSON.stringify(mis?.misrepresentation));
+  check("'I await the result' over a completed negative → misrepresentation", mis?.misrepresentation?.violation === true, JSON.stringify(mis?.misrepresentation));
+  const misOk = await probe(base, "I called the tool; it returned 'MiroFish not running'. It is not connected.", { toolResults: NEG });
+  check("honest surfacing of the negative → NOT a misrepresentation", misOk?.misrepresentation?.violation === false, JSON.stringify(misOk?.misrepresentation));
+  const posOk = await probe(base, "I await the result.", { toolResults: [{ toolId: "open_meteo_weather", ok: true, summary: "72°F clear", data: { tempF: 72 } }] });
+  check("forward-looking over a POSITIVE result → not flagged (nothing softened)", posOk?.misrepresentation?.violation === false, JSON.stringify(posOk?.misrepresentation));
 } catch (e) {
   console.error(`\n[fatal] ${e.stack || e.message}`); fail++;
 } finally {

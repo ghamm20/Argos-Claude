@@ -178,6 +178,115 @@ export function buildIntegrityWarning(): string {
   ].join("\n");
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Layer 2c — MISREPRESENTATION guard (v2.3.9). v2.3.8 catches fabrication
+// (a claim with no tool call). This catches the adjacent shape: a tool RAN,
+// returned a clear NEGATIVE ("MiroFish not running"), and the model framed the
+// completed call as pending ("I await the result") instead of surfacing the
+// outcome. Truth is unconditional — a negative result is reported faithfully.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface ToolResultLike {
+  toolId?: string;
+  ok?: boolean;
+  summary?: string | null;
+  data?: unknown;
+  error?: string | null;
+}
+
+const NEGATIVE_SUMMARY_RE =
+  /\b(not\s+running|not\s+connected|not\s+available|not\s+reachable|not\s+found|no\s+results?\b|0\s+results|unavailable|unreachable|offline|is\s+down\b|went\s+down|404|timeout|timed\s+out|could\s+not|couldn'?t|failed|errored?|error\b|refused|no\s+such|disabled|empty\s+result)\b/i;
+
+/** A tool return that is a clear negative/empty/error state. ok:true with
+ *  connected:false still counts (the MiroFish case). */
+export function isNegativeStateResult(r: ToolResultLike | null | undefined): boolean {
+  if (!r) return false;
+  if (r.ok === false) return true;
+  if (r.error) return true;
+  const d = (r.data ?? {}) as Record<string, unknown>;
+  if (d.connected === false) return true;
+  if (typeof d.status === "string" && /^(error|failed|not_found|down|offline|unavailable)$/i.test(d.status)) return true;
+  if (Array.isArray((d as { results?: unknown[] }).results) && ((d as { results: unknown[] }).results.length === 0)) return true;
+  const note = typeof d.note === "string" ? d.note : "";
+  return NEGATIVE_SUMMARY_RE.test(`${r.summary ?? ""} ${note}`);
+}
+
+// Forward-looking framing of a COMPLETED call as still pending.
+const FORWARD_LOOKING_RE =
+  /\b(i\s+await|awaiting|await\s+(the\s+)?(result|response|output|return)|task\s+has\s+(begun|started|commenced)|(still\s+)?in[\s-]progress|i'?m\s+(now\s+)?(running|querying|processing)|currently\s+(running|querying|processing|executing)|is\s+(now\s+)?(running|processing|underway)|being\s+(processed|retrieved|prepared|generated|computed|fetched|compiled|gathered)|available\s+for\s+reporting|waiting\s+(for|on)|should\s+return|will\s+report\s+(back\s+)?(when|once)|once\s+(it|the\s+\w+)\s+(returns|completes|finishes)|pending\b|underway|stand\s+by|i\s+will\s+(update|report|let\s+you\s+know)\s+(you\s+)?(when|once|shortly)|results?\s+(are\s+)?(pending|forthcoming|incoming))\b/i;
+
+// Honest surfacing of the negative outcome (so it is NOT a misrepresentation).
+const SURFACES_NEGATIVE_RE =
+  /\b(not\s+(currently\s+)?(running|connected|available|reachable|found|responding)|is\s?n'?t\s+(running|connected|available|reachable|responding)|was\s?n'?t\s+(running|connected|able|reachable)|no\s+result|0\s+results|unavailable|unreachable|offline|is\s+down|went\s+down|failed|errored?|error\b|could\s?n'?t|could\s+not|was(n'?t| not)\s+able|returned\s+(an?\s+)?(error|nothing|empty|negative)|came\s+back\s+(empty|negative)|is\s+(not\s+(currently\s+)?(running|available|connected)|down|offline)|did\s?n'?t\s+(connect|respond|return)|did\s+not\s+(connect|respond|return))\b/i;
+
+// False-SUCCESS / false-availability framing of a call whose real result is
+// negative: claims it ran successfully, retrieved the data, or that a result is
+// now available — none of which is true when the actual return is "not running"
+// / empty / error. Only ever evaluated when a NEGATIVE result is in context and
+// the response does NOT surface it, so the negative-in-context precondition is
+// what bounds false positives.
+const FALSE_SUCCESS_RE =
+  /\b(successfully\s+(invoked|ran|executed|called|completed|queried|retrieved|fetched|processed|connected)|invoked\s+[`'"\w.-]+\s+to\s+(retrieve|get|fetch|query|list|obtain|pull)|(i\s+have|i'?ve|now\s+have)\s+(the|its|your|retrieved|obtained|gathered)\s*\w*\s*(state|data|results?|status|answer|information|entities|list|snapshot)|results?\s+(is|are)\s+(now\s+)?(available|ready|here|in\s+context)|retrieved\s+the\s+(state|data|status|results?|list|snapshot)|the\s+\w+\s+(returned|provided|gave|yielded)\s+(the|its|a)\s+(state|data|results?|status)|available\s+(in\s+context\s+)?for\s+(immediate\s+)?reporting)\b/i;
+
+export interface MisrepVerdict {
+  violation: boolean;
+  /** The negative summary that should have been surfaced. */
+  summary: string | null;
+  toolId: string | null;
+}
+
+/**
+ * Detect misrepresentation: a NEGATIVE tool result is in context, and the
+ * response either frames the completed call as still-pending (forward-looking)
+ * OR claims false success/availability — in BOTH cases WITHOUT surfacing the
+ * negative outcome. `negatives` are the negative-state results from this turn
+ * AND the most recent prior turn in the session.
+ */
+export function detectMisrepresentation(content: string, negatives: ToolResultLike[]): MisrepVerdict {
+  if (!content || !negatives || negatives.length === 0) return { violation: false, summary: null, toolId: null };
+  // If the response honestly surfaces ANY negative outcome, it's not a
+  // misrepresentation (it reported the result and may be awaiting a NEXT step).
+  if (SURFACES_NEGATIVE_RE.test(content)) return { violation: false, summary: null, toolId: null };
+  const neg = negatives[0];
+  const summaryText = (neg.summary ?? "").trim();
+  // Quoting the actual summary also counts as surfacing.
+  if (summaryText.length > 8 && content.includes(summaryText.slice(0, Math.min(28, summaryText.length)))) {
+    return { violation: false, summary: null, toolId: null };
+  }
+  // Two misrepresentation shapes: "still pending" OR "false success/available".
+  const misrepresents = FORWARD_LOOKING_RE.test(content) || FALSE_SUCCESS_RE.test(content);
+  if (!misrepresents) return { violation: false, summary: null, toolId: null };
+  return { violation: true, summary: summaryText || "a negative result", toolId: neg.toolId ?? null };
+}
+
+/** Operator-visible note for a misrepresented negative result (Layer 2c §4). */
+export function buildMisrepresentationWarning(summary: string): string {
+  return [
+    "",
+    "",
+    `⚠️ MISREPRESENTATION — A tool returned a negative result ("${summary}") which is not surfaced in this response.`,
+    "The tool call is not in-progress; it has completed with the above outcome.",
+  ].join("\n");
+}
+
+/** Compact, model-facing record of the most recent tool results, so the model
+ *  HAS the outcome in its context and cannot honestly claim to be "awaiting" it.
+ *  Root-cause complement to the guard. */
+export function buildRecentToolResultsBlock(results: ToolResultLike[]): string {
+  const lines = results.slice(0, 4).map((r) => {
+    const neg = isNegativeStateResult(r);
+    const sum = (r.summary ?? (r.error ? `error: ${r.error}` : "(no summary)")).toString().slice(0, 300);
+    return `- ${r.toolId ?? "tool"} → COMPLETED${neg ? " (NEGATIVE/empty)" : ""}. Result: "${sum}"`;
+  });
+  return [
+    "RECENT TOOL ACTIVITY — these calls have ALREADY COMPLETED this conversation.",
+    "Their results are below. Report them faithfully. Do NOT describe any of these",
+    "as pending, in-progress, or 'awaiting a result' — they are finished. If a result",
+    "is negative ('not running', 'no results', an error), say so plainly.",
+    ...lines,
+  ].join("\n");
+}
+
 // ── Next-turn corrective system injections (Layer 1 §5 + Layer 2 §4) ──
 
 /** Injected when the PRIOR turn emitted a tool-shaped output the parser could
@@ -199,3 +308,14 @@ export const FABRICATION_SYSTEM_NOTE = [
   "no result, say so. If you do not know something, say so. Correct the record now — do not defend",
   "the prior claim. Fabricating execution is the worst possible failure for an operator AI.",
 ].join("\n");
+
+/** Injected when the PRIOR turn misrepresented a completed (negative) tool
+ *  result as pending (Layer 2c §7). */
+export function buildMisrepCorrectionNote(summary: string): string {
+  return [
+    "SYSTEM — MISREPRESENTATION (previous turn):",
+    `Your previous response framed a completed tool call as pending. The tool returned "${summary}".`,
+    "Always surface negative tool results faithfully. Do not soften outcomes by framing completed",
+    "calls as in-progress or 'awaiting a result'. State the actual result now.",
+  ].join("\n");
+}

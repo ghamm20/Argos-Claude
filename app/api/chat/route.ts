@@ -42,6 +42,13 @@ import {
   isExplicitToolRequest,
   PARSE_FAILURE_SYSTEM_NOTE,
   FABRICATION_SYSTEM_NOTE,
+  // v2.3.9 misrepresentation guard
+  type ToolResultLike,
+  isNegativeStateResult,
+  detectMisrepresentation,
+  buildMisrepresentationWarning,
+  buildRecentToolResultsBlock,
+  buildMisrepCorrectionNote,
 } from "@/lib/tool-integrity";
 import { appendIntegrityViolation } from "@/lib/integrity-log";
 
@@ -159,6 +166,11 @@ interface WireMessage {
   content: string;
   /** Vision Phase 1 — base64 (data-URL or raw) images on a user turn. */
   images?: string[];
+  /** v2.3.9 — tool results the client already received on an assistant turn.
+   *  Used to surface prior tool outcomes to the model + drive the
+   *  misrepresentation guard. NOT forwarded to Ollama (ollamaMessages maps
+   *  only role/content/images). */
+  toolResults?: Array<{ toolId?: string; ok?: boolean; summary?: string | null; data?: unknown; error?: string | null }>;
 }
 
 // Vision bounds — images are large; keep them off the 100 KB content cap but
@@ -645,9 +657,30 @@ export async function POST(req: NextRequest) {
   // never get tools). Other personas don't carry the tool block, so they won't
   // emit tool tags. Skipped on vision turns (the model is gemma4 there).
   const toolsEnabled = isOperator && body.personaId === "bartimaeus" && !visionTurn;
+  // v2.3.9 — tool results the operator already saw on the most recent assistant
+  // turn. The /api/chat wire history now carries them (ChatPane). They are used
+  // two ways: surfaced to the model so it HAS the outcome in context (root cause
+  // of "I await the result" was that it never did), and fed to the
+  // misrepresentation guard after generation (backstop).
+  const priorToolResults: ToolResultLike[] = (() => {
+    const prevAssistant = [...body.messages].reverse().find((m) => m.role === "assistant");
+    const trs = (prevAssistant as WireMessage | undefined)?.toolResults;
+    return Array.isArray(trs) ? (trs as ToolResultLike[]) : [];
+  })();
+  const priorNegatives = priorToolResults.filter(isNegativeStateResult);
+  // Tool results computed THIS turn (model-initiated or forced). Also fed to the
+  // misrepresentation guard so a same-turn continuation can't soften them.
+  const turnToolResults: ToolResultLike[] = [];
   if (toolsEnabled) {
     systemParts.push(buildToolAwarenessBlock());
-    // Next-turn corrective injection (v2.3.8 doctrine, Layer 1 §5 + Layer 2 §4).
+    // v2.3.9 — surface the most recent COMPLETED tool results so the model
+    // reports them faithfully and cannot honestly claim to be "awaiting" a
+    // result that is already in its context.
+    if (priorToolResults.length > 0) {
+      systemParts.push(buildRecentToolResultsBlock(priorToolResults));
+    }
+    // Next-turn corrective injection (v2.3.8 doctrine, Layer 1 §5 + Layer 2 §4;
+    // v2.3.9 §7 adds the misrepresentation correction).
     // If the PRIOR assistant turn emitted a tool call the parser could not
     // execute, OR was flagged as an integrity violation, tell the model plainly
     // so it does not claim — or defend — a phantom result this turn.
@@ -659,7 +692,12 @@ export async function POST(req: NextRequest) {
         if (priorParse.calls.length === 0 && priorParse.failures.length > 0) {
           systemParts.push(PARSE_FAILURE_SYSTEM_NOTE);
         }
-        if (/INTEGRITY VIOLATION|INTEGRITY WARNING/i.test(priorAssistant)) {
+        if (/MISREPRESENTATION/i.test(priorAssistant)) {
+          // The prior turn softened a completed negative result. Correct it with
+          // the actual outcome (from the results the operator saw).
+          const sum = (priorNegatives[0]?.summary ?? "a negative result").toString();
+          systemParts.push(buildMisrepCorrectionNote(sum));
+        } else if (/INTEGRITY VIOLATION|INTEGRITY WARNING/i.test(priorAssistant)) {
           systemParts.push(FABRICATION_SYSTEM_NOTE);
         }
       }
@@ -1110,6 +1148,9 @@ export async function POST(req: NextRequest) {
                 );
               } else {
                 const r = outcome.result;
+                // v2.3.9 — record for the misrepresentation guard so a same-turn
+                // continuation cannot soften a negative result.
+                turnToolResults.push({ toolId: r.toolId, ok: r.ok, summary: r.summary, data: r.data ?? null, error: r.error ?? null });
                 controllerInner.enqueue(
                   encoder.encode(
                     `${JSON.stringify({
@@ -1193,6 +1234,7 @@ export async function POST(req: NextRequest) {
             );
             // Forensic record → state/integrity-violations.jsonl (HUD counter).
             await appendIntegrityViolation({
+              type: "fabrication",
               persona: body.personaId ?? null,
               patterns: verdict.patterns,
               missingTool: inferMissingTool(assistantBuf, KNOWN_TOOL_IDS),
@@ -1201,6 +1243,40 @@ export async function POST(req: NextRequest) {
           }
         } catch {
           /* integrity guard must never break the chat stream */
+        }
+
+        // ---- Misrepresentation guard (v2.3.9 doctrine, Layer 2c) ----
+        // v2.3.8 catches fabrication (a claim with no tool). This catches the
+        // adjacent shape: a tool RAN, returned a clear negative ("MiroFish not
+        // running"), and the response frames the completed call as pending
+        // ("I await the result") instead of surfacing the outcome. The negative
+        // result may be from THIS turn (a continuation) or the most recent prior
+        // turn (the forensic case — the operator asks "did you call it" the next
+        // turn). Truth is unconditional; a negative result is reported faithfully.
+        try {
+          const negatives = [...turnToolResults, ...priorNegatives].filter(isNegativeStateResult);
+          const misrep = detectMisrepresentation(assistantBuf, negatives);
+          if (misrep.violation && misrep.summary) {
+            const warning = buildMisrepresentationWarning(misrep.summary);
+            assistantBuf += warning; // persisted + visible next turn
+            controllerInner.enqueue(
+              encoder.encode(`${JSON.stringify({ message: { content: warning } })}\n`)
+            );
+            controllerInner.enqueue(
+              encoder.encode(
+                `${JSON.stringify({ type: "integrity_warning", reason: "misrepresentation", patterns: [`framed completed call as pending; result was: ${misrep.summary}`] })}\n`
+              )
+            );
+            await appendIntegrityViolation({
+              type: "misrepresentation",
+              persona: body.personaId ?? null,
+              patterns: [`framed completed tool call as pending; actual result: ${misrep.summary}`],
+              missingTool: misrep.toolId,
+              content: assistantBuf,
+            });
+          }
+        } catch {
+          /* misrepresentation guard must never break the chat stream */
         }
 
         // Tail the stream with our retrieval set so the client can render pills.

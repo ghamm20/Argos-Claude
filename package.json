@@ -34,6 +34,7 @@
     "tool-parser:validate": "node scripts/validate-tool-parser.mjs",
     "integrity-guard:validate": "node scripts/validate-integrity-guard.mjs",
     "no-fabrication:validate": "node scripts/validate-bart-no-fabrication.mjs",
+    "misrepresentation:validate": "node scripts/validate-misrepresentation.mjs",
     "web:smoke-infra": "node scripts/smoke-web-infra.mjs",
     "web:smoke-t1": "node scripts/smoke-tier1-tools.mjs",
     "web:smoke-t2": "node scripts/smoke-tier2-tools.mjs",

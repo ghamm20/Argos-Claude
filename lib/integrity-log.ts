@@ -10,8 +10,11 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
 
+export type IntegrityViolationType = "fabrication" | "misrepresentation";
+
 export interface IntegrityViolation {
   at: string; // ISO timestamp
+  type: IntegrityViolationType; // v2.3.9 — fabrication (no tool) vs misrepresentation (negative result softened)
   persona: string | null;
   patterns: string[]; // the claim phrases that triggered
   missingTool: string | null; // the tool falsely claimed, if identifiable
@@ -25,6 +28,7 @@ export function integrityLogPath(): string {
 /** Append one violation. Best-effort — never throws (logging failure must not
  *  break the chat stream). */
 export async function appendIntegrityViolation(v: {
+  type?: IntegrityViolationType;
   persona: string | null;
   patterns: string[];
   missingTool: string | null;
@@ -33,6 +37,7 @@ export async function appendIntegrityViolation(v: {
   try {
     const entry: IntegrityViolation = {
       at: new Date().toISOString(),
+      type: v.type ?? "fabrication",
       persona: v.persona,
       patterns: v.patterns,
       missingTool: v.missingTool,

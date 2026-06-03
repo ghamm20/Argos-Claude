@@ -796,8 +796,26 @@ export function ChatPane() {
 
     // Wire history: prior turns are text-only (bound payload); only the
     // current user turn carries images, in Ollama's native `images` field.
+    // v2.3.9 — assistant turns also carry the tool results the operator saw, so
+    // the route can surface them to the model (root-cause of "I await the
+    // result") and run the misrepresentation guard. Compact: toolId/ok/summary/
+    // error/data only (NOT sources). NOT forwarded to Ollama by the route.
     const wireHistory = [
-      ...snapshot.map((m) => ({ role: m.role, content: m.content })),
+      ...snapshot.map((m) =>
+        m.role === "assistant" && Array.isArray(m.toolResults) && m.toolResults.length > 0
+          ? {
+              role: m.role,
+              content: m.content,
+              toolResults: m.toolResults.map((t) => ({
+                toolId: t.toolId,
+                ok: t.ok,
+                summary: t.summary,
+                error: t.error ?? null,
+                data: t.data ?? null,
+              })),
+            }
+          : { role: m.role, content: m.content }
+      ),
       imagesAtSend.length > 0
         ? { role: userMsg.role, content: text, images: imagesAtSend }
         : { role: userMsg.role, content: text },
