@@ -147,6 +147,27 @@ export function settingsPath(): string {
   return path.join(configDir(), "settings.json");
 }
 
+// Retired default-model pointers (2026-06-03). When a persona's bound model is
+// swapped (Bart: royhodge812/Orchestrator → aratan/gemma-4-E4B-q8-it-heretic in
+// v2.3.2), the CODE default is updated but an EXISTING settings.json keeps the
+// old value and silently overrides it (parsed.defaultModel ?? default). Every
+// defaultModel consumer — smoke-retrieval, background tasks resolving the boot
+// model — then calls the dead model, which surfaced as the "1-token answer"
+// retrieval flake (mis-attributed to libuv/task #161). Self-heal: a persisted
+// defaultModel in this set normalizes to the current default. Orchestrator is
+// still allow-listed (AVAILABLE_MODELS) for /api/chat + persona-overrides
+// rollback — this only retires it from the DEFAULT slot, which it was swapped
+// out of precisely because of its hardwired identity.
+const RETIRED_DEFAULT_MODELS = new Set<string>([
+  "royhodge812/Orchestrator:lates",
+  "royhodge812/Orchestrator:latest",
+]);
+
+function normalizeDefaultModel(persisted: string | undefined): string {
+  const m = persisted ?? DEFAULT_SETTINGS.defaultModel;
+  return RETIRED_DEFAULT_MODELS.has(m) ? DEFAULT_SETTINGS.defaultModel : m;
+}
+
 export async function readSettings(): Promise<PersistedSettings> {
   try {
     const raw = await fsp.readFile(settingsPath(), "utf8");
@@ -154,7 +175,7 @@ export async function readSettings(): Promise<PersistedSettings> {
     return {
       version: SETTINGS_VERSION,
       defaultPersona: parsed.defaultPersona ?? DEFAULT_SETTINGS.defaultPersona,
-      defaultModel: parsed.defaultModel ?? DEFAULT_SETTINGS.defaultModel,
+      defaultModel: normalizeDefaultModel(parsed.defaultModel),
       updatedAt: parsed.updatedAt ?? DEFAULT_SETTINGS.updatedAt,
       // Forward-compat: missing → default. Older settings.json files
       // pre-dating the Operator Auth field still load cleanly.
