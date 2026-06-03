@@ -131,6 +131,19 @@ try {
     check("historical 'who was the first president' does NOT fire", (await get(base, "who was the first president of the united states")).detection.requiresTool === false);
     check("general knowledge does NOT fire", (await get(base, "explain how photosynthesis works")).detection.requiresTool === false);
     check("plain math does NOT fire", (await get(base, "what is 17 times 23")).detection.requiresTool === false);
+
+    // ===== weather false-positives (2026-06-03 fix): temperature words/units
+    // in physics/cooking/medical STATEMENTS must NOT trigger a weather fetch.
+    console.log("\n=== weather false-positives (units ≠ weather) ===");
+    const boil = (await get(base, "water boils at 100 degrees Celsius at sea level")).detection;
+    check("'100 degrees Celsius' physics fact does NOT fire", boil.requiresTool === false, JSON.stringify(boil));
+    check("oven '350 degrees Fahrenheit' does NOT fire", (await get(base, "set the oven to 350 degrees Fahrenheit")).detection.requiresTool === false);
+    check("'body temperature is 98.6 degrees' does NOT fire", (await get(base, "normal body temperature is 98.6 degrees")).detection.requiresTool === false);
+    check("'convert 100 celsius to fahrenheit' does NOT fire", (await get(base, "convert 100 celsius to fahrenheit")).detection.requiresTool === false);
+    check("'the angle is 90 degrees' does NOT fire", (await get(base, "the angle is 90 degrees")).detection.requiresTool === false);
+    // …but a temperature word WITH weather context still fires.
+    check("'how many degrees outside' still fires", (await get(base, "how many degrees is it outside right now")).detection.category === "weather");
+    check("'temperature in Orlando' still fires", (await get(base, "what is the temperature in Orlando")).detection.category === "weather");
   });
 } catch (e) {
   console.error(`\n[fatal] ${e.stack || e.message}`);

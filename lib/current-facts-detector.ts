@@ -61,9 +61,48 @@ const HISTORICAL_RE =
 const EXPLICIT_CURRENT_RE =
   /\b(current(ly)?|right now|as of (today|now|this)|today|tonight|this (year|month|week|morning)|these days|nowadays|at the moment|latest|most recent|up[- ]to[- ]date)\b/i;
 
-// Explicit weather triggers (incl. "temp", common forecast misspellings).
-const WEATHER_RE =
-  /\b(weather|forecast|forcast|forxast|forecst|temp|temperature|how (hot|cold|warm)|(is it )?(raining|snowing|sunny|rainy|humid|windy)|degrees|fahrenheit|celsius)\b/i;
+// Weather detection is two-tier to avoid false positives on physics/cooking/
+// medical statements (2026-06-03). Bare unit words ("degrees", "celsius",
+// "fahrenheit") and "temp(erature)" are NOT standalone weather triggers — they
+// appear in "water boils at 100 degrees Celsius", "set the oven to 350°F",
+// "normal body temperature is 98.6 degrees". See weatherSignal() below.
+
+// Tier 1 — unambiguous weather terms that fire on their own.
+const WEATHER_STRONG_RE =
+  /\b(weather|forecast|forcast|forxast|forecst|how (hot|cold|warm)|(is it )?(raining|snowing|sunny|rainy|humid|windy))\b/i;
+
+// Tier 2 — ambiguous temperature words. Only count as weather with context.
+const TEMP_WORD_RE = /\b(temp|temperature|degrees?|fahrenheit|celsius)\b/i;
+
+// A STATED numeric temperature value ("100 degrees Celsius", "350°F",
+// "98.6 degrees", "100 c") — a declarative fact, not a weather question.
+const TEMP_VALUE_RE =
+  /\b\d+(?:\.\d+)?\s*(?:°\s*)?(?:deg(?:rees?)?|°|fahrenheit|celsius|kelvin|[cf])\b/i;
+
+// Explicit weather framing — "is it cold OUTSIDE", "temp TODAY", "weather".
+const WEATHER_CTX_STRONG_RE =
+  /\b(outside|out there|out here|weather|today|tonight|right now|currently|this (morning|afternoon|evening)|where i (am|live))\b/i;
+
+// A place after a locative preposition — "temp IN Orlando", "temperature AT".
+const WEATHER_CTX_PLACE_RE = /\b(in|at|near|around|for)\s+[a-z]/i;
+
+/**
+ * Decide whether a query is weather-related. Strong terms fire alone. A
+ * temperature word counts only when (a) explicitly weather-framed, or (b) it
+ * names a place AND is not merely stating a numeric value. This keeps real
+ * weather queries ("what's the temp in Orlando", "how many degrees outside")
+ * while rejecting physics/cooking statements ("water boils at 100°C at sea
+ * level", "set the oven to 350 degrees").
+ */
+function weatherSignal(q: string): boolean {
+  if (WEATHER_STRONG_RE.test(q) || fuzzyWeather(q)) return true;
+  if (!TEMP_WORD_RE.test(q)) return false;
+  if (WEATHER_CTX_STRONG_RE.test(q)) return true;
+  // Temp word, no explicit weather framing: a stated value is a fact, not a
+  // forecast request. (Strong framing above already overrides this.)
+  if (TEMP_VALUE_RE.test(q)) return false;
+  return WEATHER_CTX_PLACE_RE.test(q);
+}
 
 // Explicit "go research this" commands. These fire a forced search whose QUERY
 // is the IMMEDIATE PRIOR user message (the thing to look up), not this command.
@@ -78,13 +117,11 @@ interface Pattern {
   conf: number;
 }
 
+// NOTE: weather is NOT a PATTERNS entry — it is detected via weatherSignal()
+// in detectCurrentFacts() so the two-tier (strong term vs guarded temperature)
+// logic applies. A plain regex here would re-introduce the "100 degrees
+// Celsius" false positive.
 const PATTERNS: Pattern[] = [
-  {
-    category: "weather",
-    re: WEATHER_RE,
-    reason: "asks about current weather / temperature / forecast",
-    conf: 0.9,
-  },
   {
     category: "office-holder",
     re: /\bwho('?s| is| are)\b[^?]*\b(president|vice[- ]president|prime minister|pm|chancellor|premier|monarch|king|queen|pope|ceo|chief executive|governor|mayor|senator|secretary of|head of state|leader|chair(man|woman|person)?)\b/i,
@@ -159,14 +196,21 @@ function editDistance(a: string, b: string): number {
   return dp[n];
 }
 
-const WEATHER_VOCAB = ["weather", "forecast", "temperature", "raining", "snowing", "humidity", "sunny"];
+// Misspellable STRONG weather words only. "temperature" is deliberately NOT
+// here — it is an ambiguous tier-2 word (see weatherSignal); including it made
+// fuzzyWeather fire on any sentence containing "temperature" ("normal body
+// temperature is 98.6 degrees").
+const WEATHER_VOCAB = ["weather", "forecast", "raining", "snowing", "humidity"];
 
-/** Fuzzy weather match — catches misspellings like "forxast" → "forecast". */
+/** Fuzzy weather match — catches misspellings like "forxast" → "forecast".
+ *  Guards (2026-06-03): a real typo barely changes a word's length, so we
+ *  require the length gap ≤ 1. Without it, "water" sits at edit-distance 2 from
+ *  "weather" and every "water …" sentence false-triggered a weather fetch. */
 function fuzzyWeather(q: string): boolean {
   const tokens = q.toLowerCase().replace(/[^a-z]/g, " ").split(/\s+/).filter((w) => w.length >= 5);
   for (const tok of tokens) {
     for (const w of WEATHER_VOCAB) {
-      if (editDistance(tok, w) <= 2) return true;
+      if (Math.abs(tok.length - w.length) <= 1 && editDistance(tok, w) <= 2) return true;
     }
   }
   return false;
@@ -246,9 +290,10 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
     if (p.category !== "time-relative" && historical && !explicitCurrent) continue;
     matches.push(p);
   }
-  // Typo-tolerant weather fallback (e.g. "forxast" the regex missed).
-  if (!matches.some((m) => m.category === "weather") && fuzzyWeather(q) && (!historical || explicitCurrent)) {
-    matches.push({ category: "weather", re: WEATHER_RE, reason: "weather term (fuzzy/misspelled)", conf: 0.85 });
+  // Weather — two-tier signal (strong term, or temperature word with a weather
+  // context that is NOT just a stated numeric value). Keeps the historical guard.
+  if (weatherSignal(q) && (!historical || explicitCurrent)) {
+    matches.push({ category: "weather", re: WEATHER_STRONG_RE, reason: "asks about current weather / temperature / forecast", conf: 0.9 });
   }
 
   if (matches.length === 0) {
