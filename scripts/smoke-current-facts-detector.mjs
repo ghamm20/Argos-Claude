@@ -144,6 +144,26 @@ try {
     // …but a temperature word WITH weather context still fires.
     check("'how many degrees outside' still fires", (await get(base, "how many degrees is it outside right now")).detection.category === "weather");
     check("'temperature in Orlando' still fires", (await get(base, "what is the temperature in Orlando")).detection.category === "weather");
+
+    // ===== social-intent guard (2026-06-03 fix): a sentiment must NEVER force a
+    // tool, even with a temporal marker ("today"). =====
+    console.log("\n=== social-intent guard (sentiment ≠ tool) ===");
+    const thx = (await get(base, "thank you for your help today")).detection;
+    check("'thank you ... today' does NOT fire", thx.requiresTool === false && thx.reason === "social", JSON.stringify(thx));
+    check("'thanks!' does NOT fire", (await get(base, "thanks!")).detection.requiresTool === false);
+    check("'good morning' does NOT fire", (await get(base, "good morning")).detection.requiresTool === false);
+    check("'good night, see you tomorrow' does NOT fire", (await get(base, "good night, see you tomorrow")).detection.requiresTool === false);
+    check("'I appreciate the work today' does NOT fire", (await get(base, "I appreciate the work you did today")).detection.requiresTool === false);
+    check("'sorry for the confusion earlier' does NOT fire", (await get(base, "sorry for the confusion earlier today")).detection.requiresTool === false);
+    check("'noted' does NOT fire", (await get(base, "noted")).detection.requiresTool === false);
+    check("'ok' does NOT fire", (await get(base, "ok")).detection.requiresTool === false);
+    check("'you're right' does NOT fire", (await get(base, "you're right")).detection.requiresTool === false);
+    check("'love you, bart' does NOT fire", (await get(base, "love you, bart")).detection.requiresTool === false);
+    // …but a greeting + a real request STILL fires, and a courtesy-prefixed
+    // QUESTION still fires (social guard must not swallow genuine queries).
+    check("'hey what's the weather in Miami today' STILL fires", (await get(base, "hey what's the weather in Miami today")).detection.category === "weather");
+    check("'thanks, but who is the CEO of Levi Strauss?' STILL fires", (await get(base, "thanks, but who is the CEO of Levi Strauss?")).detection.requiresTool === true);
+    check("'good morning — who is the president in 2026?' STILL fires", (await get(base, "good morning — who is the president in 2026?")).detection.requiresTool === true);
   });
 } catch (e) {
   console.error(`\n[fatal] ${e.stack || e.message}`);

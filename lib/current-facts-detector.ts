@@ -109,6 +109,59 @@ function weatherSignal(q: string): boolean {
 const RESEARCH_REQUEST_RE =
   /\b(go look|look (it|that|this)\s*up|look up|search (for|the web|online|again|it|that)|find out|google (it|that|this)|(look|check)\s+(it\s+)?(on|in)\s+the\s+(internet|web)|on the (internet|web)|do a (web )?search|search again|check online)\b/i;
 
+// Social-intent guard (2026-06-03). A sentiment / pleasantry must NEVER force a
+// tool call, even when it carries a temporal marker — "thank you for your help
+// today" was tripping the time-relative path on "today" and force-firing a web
+// search, so Bart summarized injected results instead of receiving the thanks.
+// This runs FIRST in detectCurrentFacts and short-circuits all detection.
+
+// THANKS / APOLOGY / CONGRATS — the sentiment IS the message, so it is social
+// at any length ("thank you for your help today"). An optional leading filler
+// ("ok thanks…") is tolerated. Anchored to the start.
+const SOCIAL_SENTIMENT_RE =
+  /^[\s,.!–—-]*(?:(?:ok|okay|alright|well|so|yeah|yep|yes|hmm|oh|aw|aww|hey|i|i'?m|i'?d|we|we'?re|just|really|truly|much|do|big)[\s,.!]+)*(thank you|thanks|thank|thx|ty|appreciate|appreciated|grateful|sorry|apologies|apology|my bad|congrats|congratulations|well done|nice work|good work|great work|good job)\b/i;
+
+// GREETINGS / FAREWELLS — attention-getters, NOT the message intent. Social
+// only when the message is essentially JUST the greeting (+ an optional name /
+// address / farewell tail), so "hey what's the weather" still routes to weather.
+const SOCIAL_GREETING_ONLY_RE =
+  /^[\s,.!–—-]*(hi+|hello+|hey+|yo|howdy|greetings|good (morning|afternoon|evening)|good ?night|morning|evening|goodbye|good ?bye|bye+|farewell|see (you|ya)|later|ttyl|cya)\b[\s,.!]*(there|bart(imaeus)?|friend|buddy|pal|mate|sir|folks|everyone|all|team|y'?all|again|later|soon|now|for now|tomorrow)?[\s,.!]*$/i;
+
+// Affectionate phrases anywhere in the message.
+const SOCIAL_AFFECTION_RE = /\b(love (you|ya)|miss (you|ya)|proud of you)\b/i;
+
+// Pure acknowledgments — only when they are essentially the WHOLE message.
+const SOCIAL_ACK_RE =
+  /^(ok|okay|kk?|k|got it|gotcha|understood|noted|cool|nice|great|sweet|awesome|sounds good|makes sense|will do|word|roger|copy that)$/i;
+
+// Bare affirmations — only when they are essentially the WHOLE message.
+const SOCIAL_AFFIRM_RE =
+  /^(you'?re right|that'?s right|that'?s true|exactly|agreed|agree|fair point|fair enough|good point|well said|true that|right on|so true)$/i;
+
+/** True when the message is PRIMARILY social/conversational and must not force
+ *  a tool. A real question ("?") or an explicit "look it up" is never treated
+ *  as social, even when it opens with a courtesy ("thanks, but who runs X?"). */
+function isSocialIntent(q: string): boolean {
+  const s = q.trim();
+  if (!s) return false;
+  // Never suppress a genuine question or an explicit research command.
+  if (s.includes("?") || RESEARCH_REQUEST_RE.test(s)) return false;
+
+  if (SOCIAL_SENTIMENT_RE.test(s) || SOCIAL_GREETING_ONLY_RE.test(s) || SOCIAL_AFFECTION_RE.test(s)) return true;
+
+  // Acknowledgment / affirmation only when the message is short and the whole
+  // of it is the token (strip surrounding punctuation, collapse whitespace).
+  const norm = s
+    .toLowerCase()
+    .replace(/[\s,.!?…"')(]+$/g, "")
+    .replace(/[\s,.!?…"')(]+/g, " ")
+    .trim();
+  if (norm.length < 20 && SOCIAL_ACK_RE.test(norm)) return true;
+  if (norm.length < 30 && SOCIAL_AFFIRM_RE.test(norm)) return true;
+
+  return false;
+}
+
 interface Pattern {
   category: CurrentFactsCategory;
   re: RegExp;
@@ -261,6 +314,13 @@ export function detectCurrentFacts(query: string): CurrentFactsDetection {
   const q = (query ?? "").trim();
   if (!q) {
     return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "empty", suggestedQuery: "", suggestedTool: null, location: null, usePriorMessage: false };
+  }
+
+  // Social-intent guard — runs FIRST, short-circuits all temporal/pattern
+  // matching. A sentiment ("thank you for your help today", "good morning",
+  // "noted") must never force a tool call, even with a temporal marker present.
+  if (isSocialIntent(q)) {
+    return { isCurrentFacts: false, requiresTool: false, confidence: 0, category: null, reason: "social", suggestedQuery: cleanQuery(q), suggestedTool: null, location: null, usePriorMessage: false };
   }
 
   // Explicit "go look it up" command → force a chain search whose QUERY is the
