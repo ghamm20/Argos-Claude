@@ -60,3 +60,8 @@ data/memory/
 /tasks/
 _diag_*.json
 _diag_*.log
+
+# Voice reference audio (stored outside repo)
+tools/voice/bart-reference/*.wav
+tools/voice/bart-reference/*.mp3
+tools/voice/bart-reference/*.flac
