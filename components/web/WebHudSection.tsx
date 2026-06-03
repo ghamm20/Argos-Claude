@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 interface Stats {
   audit?: { callsToday?: number; cacheHitRate?: number; errors24h?: number };
   cache?: { entries?: number };
+  integrityViolations?: number;
 }
 
 export function WebHudSection() {
@@ -36,6 +37,7 @@ export function WebHudSection() {
   const calls = s?.audit?.callsToday ?? 0;
   const hit = Math.round((s?.audit?.cacheHitRate ?? 0) * 100);
   const errs = s?.audit?.errors24h ?? 0;
+  const integrity = s?.integrityViolations ?? 0;
 
   return (
     <div className="mb-4">
@@ -49,9 +51,15 @@ export function WebHudSection() {
           <span className="uppercase tracking-[0.16em] text-neutral-500">Cache hit</span>
           <span className="font-mono text-[11px]" style={{ color: hit >= 30 ? "#10b981" : "#a3a3a3" }}>{hit}%</span>
         </div>
-        <div className="flex items-center justify-between text-[11px] py-1.5">
+        <div className="flex items-center justify-between text-[11px] py-1.5 border-b border-neutral-800/50">
           <span className="uppercase tracking-[0.16em] text-neutral-500">Errors 24h</span>
           <span className="font-mono text-[11px]" style={{ color: errs > 0 ? "#ef4444" : "#a3a3a3" }}>{errs}</span>
+        </div>
+        {/* v2.3.8 doctrine — a non-zero count means the model claimed tool use
+            that did not occur. Red + bold; this is operator-critical. */}
+        <div className="flex items-center justify-between text-[11px] py-1.5">
+          <span className="uppercase tracking-[0.16em]" style={{ color: integrity > 0 ? "#ef4444" : "#737373" }}>Integrity violations</span>
+          <span className="font-mono text-[11px] font-bold" style={{ color: integrity > 0 ? "#ef4444" : "#a3a3a3" }}>{integrity}</span>
         </div>
       </div>
     </div>

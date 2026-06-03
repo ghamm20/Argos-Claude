@@ -31,9 +31,22 @@ import {
 } from "@/lib/tools/chat-tools";
 import { requestTool } from "@/lib/tools/executor";
 import { appendParseFailureAudit } from "@/lib/tools/audit";
+import { toolSummaries } from "@/lib/tools/registry";
 // Model-integrity guard (v2.3.8) — flags a turn that CLAIMS tool execution
 // when no tool actually ran. The doctrine backstop against fake success.
-import { shouldFlagFabricatedToolUse, buildIntegrityWarning, INTEGRITY_WARNING_REASON } from "@/lib/tool-integrity";
+import {
+  evaluateIntegrity,
+  buildIntegrityWarning,
+  INTEGRITY_WARNING_REASON,
+  inferMissingTool,
+  isExplicitToolRequest,
+  PARSE_FAILURE_SYSTEM_NOTE,
+  FABRICATION_SYSTEM_NOTE,
+} from "@/lib/tool-integrity";
+import { appendIntegrityViolation } from "@/lib/integrity-log";
+
+// Tool ids for inferMissingTool (which tool the model falsely claimed).
+const KNOWN_TOOL_IDS = toolSummaries().map((t) => t.id);
 // Forced current-facts grounding (2026-06-02) — time-sensitive queries get a
 // live web_search injected as authoritative context so Bart can't answer
 // office-holders / "current X" / 2026 facts from stale training data.
@@ -634,6 +647,25 @@ export async function POST(req: NextRequest) {
   const toolsEnabled = isOperator && body.personaId === "bartimaeus" && !visionTurn;
   if (toolsEnabled) {
     systemParts.push(buildToolAwarenessBlock());
+    // Next-turn corrective injection (v2.3.8 doctrine, Layer 1 §5 + Layer 2 §4).
+    // If the PRIOR assistant turn emitted a tool call the parser could not
+    // execute, OR was flagged as an integrity violation, tell the model plainly
+    // so it does not claim — or defend — a phantom result this turn.
+    try {
+      const priorAssistant =
+        [...body.messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+      if (priorAssistant) {
+        const priorParse = parseToolCalls(priorAssistant);
+        if (priorParse.calls.length === 0 && priorParse.failures.length > 0) {
+          systemParts.push(PARSE_FAILURE_SYSTEM_NOTE);
+        }
+        if (/INTEGRITY VIOLATION|INTEGRITY WARNING/i.test(priorAssistant)) {
+          systemParts.push(FABRICATION_SYSTEM_NOTE);
+        }
+      }
+    } catch {
+      /* corrective injection is best-effort */
+    }
   }
   // FORCED current-facts grounding. For time-sensitive queries we don't trust
   // Bart to choose to call web_search — we run it server-side now and inject
@@ -1135,17 +1167,37 @@ export async function POST(req: NextRequest) {
         // the proximate cause. The operator caught it once; the system catches
         // it now.
         try {
-          if (shouldFlagFabricatedToolUse(assistantBuf, toolRanThisTurn)) {
+          // A claim is only a violation when NOTHING real backed it. STRONG
+          // tool-execution claims need a real tool; SOFT retrieval claims are
+          // also satisfied by vault retrieval / memory recall / research.
+          const hadGrounding =
+            (retrievalEvent.hits?.length ?? 0) > 0 ||
+            memoryEvent.injected === true ||
+            researchEventState === "LIVE" ||
+            researchEventState === "CACHED";
+          const verdict = evaluateIntegrity(assistantBuf, {
+            toolRan: toolRanThisTurn,
+            hadGrounding,
+            explicitToolRequest: toolsEnabled && isExplicitToolRequest(userText, KNOWN_TOOL_IDS),
+          });
+          if (verdict.violation) {
             const warning = buildIntegrityWarning();
-            assistantBuf += warning; // persisted + memory-extracted consistently
+            assistantBuf += warning; // persisted + memory-extracted + visible next turn
             controllerInner.enqueue(
               encoder.encode(`${JSON.stringify({ message: { content: warning } })}\n`)
             );
             controllerInner.enqueue(
               encoder.encode(
-                `${JSON.stringify({ type: "integrity_warning", reason: INTEGRITY_WARNING_REASON })}\n`
+                `${JSON.stringify({ type: "integrity_warning", reason: INTEGRITY_WARNING_REASON, patterns: verdict.patterns })}\n`
               )
             );
+            // Forensic record → state/integrity-violations.jsonl (HUD counter).
+            await appendIntegrityViolation({
+              persona: body.personaId ?? null,
+              patterns: verdict.patterns,
+              missingTool: inferMissingTool(assistantBuf, KNOWN_TOOL_IDS),
+              content: assistantBuf,
+            });
           }
         } catch {
           /* integrity guard must never break the chat stream */
