@@ -22,6 +22,33 @@ export async function appendToolAudit(entry: ToolAuditEntry): Promise<void> {
   }
 }
 
+/** Audit a tool-call the parser could NOT execute (malformed JSON, unknown
+ *  tool id, orphan tag). v2.3.8 doctrine: a tool-call ATTEMPT is never silently
+ *  lost — every parse failure lands in the same append-only log as executions,
+ *  tagged event:"parse_failed" with the raw text the model emitted. Best-effort. */
+export async function appendParseFailureAudit(args: {
+  raw: string;
+  reason: string;
+  toolId: string | null;
+  sessionId: string | null;
+  persona: string | null;
+}): Promise<void> {
+  await appendToolAudit({
+    at: new Date().toISOString(),
+    toolId: args.toolId ?? "(unparsed)",
+    approved: null,
+    ok: false,
+    summary: "tool-call PARSE FAILED — model emitted a tool call the parser could not execute",
+    error: args.reason,
+    restorePointId: null,
+    sessionId: args.sessionId,
+    persona: args.persona,
+    durationMs: 0,
+    event: "parse_failed",
+    rawText: args.raw.slice(0, 2000),
+  });
+}
+
 export async function readToolAudit(): Promise<ToolAuditEntry[]> {
   try {
     const raw = await fsp.readFile(toolAuditPath(), "utf8");
@@ -52,6 +79,9 @@ export async function toolStats(): Promise<Record<string, ToolStat>> {
   const entries = await readToolAudit();
   const stats: Record<string, ToolStat> = {};
   for (const e of entries) {
+    // Parse-failure entries are not executions — keep them out of per-tool
+    // exec counts (they're still in the raw log for forensic review).
+    if (e.event === "parse_failed") continue;
     const s = stats[e.toolId] ?? { count: 0, lastAt: null, lastOk: null };
     s.count += 1;
     // entries are appended chronologically; the last one wins.

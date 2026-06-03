@@ -30,6 +30,10 @@ import {
   continuationPrompt,
 } from "@/lib/tools/chat-tools";
 import { requestTool } from "@/lib/tools/executor";
+import { appendParseFailureAudit } from "@/lib/tools/audit";
+// Model-integrity guard (v2.3.8) — flags a turn that CLAIMS tool execution
+// when no tool actually ran. The doctrine backstop against fake success.
+import { shouldFlagFabricatedToolUse, buildIntegrityWarning, INTEGRITY_WARNING_REASON } from "@/lib/tool-integrity";
 // Forced current-facts grounding (2026-06-02) — time-sensitive queries get a
 // live web_search injected as authoritative context so Bart can't answer
 // office-holders / "current X" / 2026 facts from stale training data.
@@ -635,6 +639,10 @@ export async function POST(req: NextRequest) {
   // Bart to choose to call web_search — we run it server-side now and inject
   // the fresh results as authoritative context, overriding stale training data.
   // Graceful: a failed/empty search just skips the block (normal flow resumes).
+  // Did ANY tool run/route this turn (forced current-facts tool OR a model-
+  // initiated, parsed call)? The integrity guard uses this to decide whether a
+  // tool-use claim in the final answer is backed by a real execution.
+  let toolRanThisTurn = false;
   if (toolsEnabled && userText) {
     const cf = detectCurrentFacts(userText);
     if (cf.isCurrentFacts) {
@@ -658,6 +666,7 @@ export async function POST(req: NextRequest) {
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildWeatherBlock(outcome.result));
             grounded = true;
+            toolRanThisTurn = true; // a forced tool ran this turn
           }
         } else if (cf.suggestedTool === "chain_search_to_read") {
           // Entity / company / events → chain searches AND reads the pages,
@@ -666,6 +675,7 @@ export async function POST(req: NextRequest) {
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildChainBlock(cf, outcome.result));
             grounded = true;
+            toolRanThisTurn = true; // a forced tool ran this turn
           }
         } else {
           const outcome = await requestTool(
@@ -676,6 +686,7 @@ export async function POST(req: NextRequest) {
           if (outcome.kind === "result" && outcome.result.ok) {
             systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
             grounded = true;
+            toolRanThisTurn = true; // a forced tool ran this turn
           }
         }
         if (!grounded) {
@@ -1020,8 +1031,31 @@ export async function POST(req: NextRequest) {
         // so a tool failure can NEVER break the chat stream.
         if (toolsEnabled) {
           try {
-            const calls = parseToolCalls(assistantBuf);
+            const { calls, failures } = parseToolCalls(assistantBuf);
+            // DOCTRINE (v2.3.8): a tool-call ATTEMPT is never silently lost.
+            // Audit every parse failure (malformed JSON / unknown tool / orphan
+            // tag) with the raw text the model emitted, and surface it.
+            for (const f of failures) {
+              await appendParseFailureAudit({
+                raw: f.raw,
+                reason: f.reason,
+                toolId: f.toolId,
+                sessionId: null,
+                persona: body.personaId,
+              });
+              controllerInner.enqueue(
+                encoder.encode(
+                  `${JSON.stringify({
+                    type: "tool_parse_failed",
+                    toolId: f.toolId,
+                    reason: f.reason,
+                    raw: f.raw.slice(0, 400),
+                  })}\n`
+                )
+              );
+            }
             if (calls.length > 0) {
+              toolRanThisTurn = true; // a model-initiated tool call was recognized + routed
               const call = calls[0];
               const outcome = await requestTool(call.id, call.params, {
                 sessionId: null,
@@ -1092,6 +1126,29 @@ export async function POST(req: NextRequest) {
           } catch {
             /* tool processing must never break the chat stream */
           }
+        }
+
+        // ---- Model-integrity guard (v2.3.8): flag fabricated tool use ----
+        // If the finished answer CLAIMS tool execution but NO tool ran this turn
+        // (no result, no audit entry), append an operator-visible warning. The
+        // doctrine backstop — ARGOS surfaces fake success even when the model is
+        // the proximate cause. The operator caught it once; the system catches
+        // it now.
+        try {
+          if (shouldFlagFabricatedToolUse(assistantBuf, toolRanThisTurn)) {
+            const warning = buildIntegrityWarning();
+            assistantBuf += warning; // persisted + memory-extracted consistently
+            controllerInner.enqueue(
+              encoder.encode(`${JSON.stringify({ message: { content: warning } })}\n`)
+            );
+            controllerInner.enqueue(
+              encoder.encode(
+                `${JSON.stringify({ type: "integrity_warning", reason: INTEGRITY_WARNING_REASON })}\n`
+              )
+            );
+          }
+        } catch {
+          /* integrity guard must never break the chat stream */
         }
 
         // Tail the stream with our retrieval set so the client can render pills.

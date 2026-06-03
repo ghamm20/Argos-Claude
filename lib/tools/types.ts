@@ -101,6 +101,12 @@ export interface ToolAuditEntry {
   sessionId: string | null;
   persona: string | null;
   durationMs: number;
+  // v2.3.8: distinguishes a real execution from a PARSE FAILURE — a tool-call
+  // the model emitted that the parser could not execute. Logged so a tool-call
+  // attempt is never silently lost. Optional for back-compat (older entries are
+  // executions). `rawText` carries what the model actually emitted.
+  event?: "execution" | "parse_failed";
+  rawText?: string | null;
 }
 
 /** A small, consistent helper for tool authors. */

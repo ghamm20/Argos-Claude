@@ -9,7 +9,7 @@
 // (for safe tools) feeds the result back so Bart can continue. The tool-
 // awareness block is injected into Bart's system prompt at the route level.
 
-import { toolListForPrompt } from "./registry";
+import { toolListForPrompt, getTool } from "./registry";
 import type { ToolResult } from "./types";
 // Single source of truth for display stripping — the hardened version also
 // catches unclosed / orphan tool tags (see lib/chat-render.ts). Re-exported
@@ -24,25 +24,135 @@ export interface ParsedToolCall {
   raw: string;
 }
 
-const TOOL_TAG_RE = /<tool>\s*([\s\S]*?)\s*<\/tool>/gi;
+/** A model output that LOOKED like a tool call but could not be executed —
+ *  malformed JSON, unknown tool id, or an orphan tool tag with no JSON. These
+ *  are AUDITED as parse_failed by the chat route so a tool-call attempt can
+ *  never be silently lost (the v2.3.8 doctrine bug). */
+export interface ToolParseFailure {
+  raw: string;
+  reason: string;
+  toolId: string | null;
+}
 
-/** Parse all <tool>{json}</tool> calls from a model reply. Malformed JSON is
- *  skipped (never throws). */
-export function parseToolCalls(text: string): ParsedToolCall[] {
-  const calls: ParsedToolCall[] = [];
-  let m: RegExpExecArray | null;
-  TOOL_TAG_RE.lastIndex = 0;
-  while ((m = TOOL_TAG_RE.exec(text)) !== null) {
-    try {
-      const obj = JSON.parse(m[1]) as { id?: string; params?: Record<string, unknown> };
-      if (obj && typeof obj.id === "string") {
-        calls.push({ id: obj.id, params: obj.params ?? {}, raw: m[0] });
-      }
-    } catch {
-      /* not valid JSON — skip */
+export interface ToolParseResult {
+  calls: ParsedToolCall[];
+  failures: ToolParseFailure[];
+}
+
+/** Extract the complete JSON object beginning at text[start] === "{".
+ *  String- and brace-aware so braces inside string values (and nested objects
+ *  like `"params":{...}`) don't truncate it. Returns [json, endExclusive] or
+ *  null if the braces never balance. */
+function extractJsonObject(text: string, start: number): [string, number] | null {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true;
+    } else if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) return [text.slice(start, i + 1), i + 1];
     }
   }
-  return calls;
+  return null;
+}
+
+/**
+ * Parse tool calls from a model reply — HARDENED (v2.3.8).
+ *
+ * The old parser required a literal `<tool>...</tool>` wrapper. Models routinely
+ * emit DEGRADED openers: `>{json}</tool>`, or a bare `{json}</tool>` with no
+ * opener at all. The old regex silently rejected those → the call was lost, no
+ * result injected, and on later turns the model fabricated success. THE
+ * DOCTRINE BUG: fake success.
+ *
+ * This parser scans for JSON objects directly (brace-aware), independent of any
+ * wrapper, and treats `{"id":"<KNOWN_TOOL>","params":...}` as a call wherever it
+ * appears. Anything that looks like a tool-call attempt but isn't executable
+ * (bad JSON, unknown tool, orphan tag) is returned as a FAILURE so the caller
+ * can audit it. Never throws.
+ */
+export function parseToolCalls(text: string): ToolParseResult {
+  const calls: ParsedToolCall[] = [];
+  const failures: ToolParseFailure[] = [];
+  if (!text) return { calls, failures };
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    const ext = extractJsonObject(text, i);
+    if (!ext) continue;
+    const [jsonStr, end] = ext;
+    // Only consider objects shaped like a tool call (have an "id" key).
+    if (!/"id"\s*:/.test(jsonStr)) continue;
+
+    // Is this object adjacent to a tool-tag marker? (<tool> before, a bare ">"
+    // opener before, or </tool> after). Used only to decide whether a
+    // NON-executable blob is a tool-call ATTEMPT worth flagging.
+    const before = text.slice(Math.max(0, i - 16), i);
+    const after = text.slice(end, end + 16);
+    const tagged =
+      /<tool\b[^>]*>\s*$/i.test(before) ||
+      /(^|[^<])>\s*$/.test(before) ||
+      /^\s*<\/tool>/i.test(after);
+
+    let obj: { id?: unknown; params?: unknown } | null = null;
+    try {
+      obj = JSON.parse(jsonStr) as { id?: unknown; params?: unknown };
+    } catch {
+      obj = null;
+    }
+
+    if (obj && typeof obj.id === "string" && getTool(obj.id)) {
+      // A real, registered tool — execute it regardless of how it was wrapped.
+      calls.push({
+        id: obj.id,
+        params: obj.params && typeof obj.params === "object" ? (obj.params as Record<string, unknown>) : {},
+        raw: jsonStr,
+      });
+      i = end - 1;
+      continue;
+    }
+
+    // Not an executable call. Flag as an ATTEMPT only when it's clearly a
+    // tool-call try (tagged, or carries a "params" key) — so legitimate JSON
+    // the model merely discusses isn't logged as a failure.
+    if (tagged || /"params"\s*:/.test(jsonStr)) {
+      const reason =
+        obj == null
+          ? "invalid JSON in tool call"
+          : typeof obj.id !== "string"
+            ? "tool call missing string id"
+            : `unknown tool id: ${String(obj.id)}`;
+      failures.push({
+        raw: jsonStr.slice(0, 2000),
+        reason,
+        toolId: obj && typeof obj.id === "string" ? obj.id : null,
+      });
+      i = end - 1;
+    }
+  }
+
+  // Orphan tag markers with no parseable JSON anywhere (e.g. a lone "</tool>"
+  // or "<tool>" the model emitted around text it never closed) — still an
+  // attempt the system must not lose silently.
+  if (calls.length === 0 && failures.length === 0 && /<\/?tool\b/i.test(text)) {
+    const around = text.match(/[\s\S]{0,40}<\/?tool\b[^>]*>[\s\S]{0,40}/i);
+    failures.push({
+      raw: (around ? around[0] : text).slice(0, 2000).trim(),
+      reason: "tool tag present but no parseable JSON tool call",
+      toolId: null,
+    });
+  }
+
+  return { calls, failures };
 }
 
 /** The tool-awareness block prepended/added to Bartimaeus's system prompt. */
