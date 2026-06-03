@@ -433,7 +433,7 @@ export const TOOLS: ToolDefinition[] = [
   {
     id: "mirofish_integration",
     name: "MiroFish",
-    description: "Query the MiroFish simulation status + entities (port 3001).",
+    description: "Query the live MiroFish-Offline backend (Flask API on :5001). Call with NO params (or just a `query` string) to get the full status snapshot: simulations, projects, and graph entities. Advanced (optional): `graphId` to target one graph's entities, or `endpoint` set to a real path like /api/simulation/list for a raw passthrough.",
     category: "security",
     requiresApproval: true,
     requiresRestore: false,
