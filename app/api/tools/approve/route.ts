@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { approveAndRun } from "@/lib/tools/executor";
+import { requireValidSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

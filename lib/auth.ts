@@ -15,6 +15,7 @@
 // the same PIN.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { readSettings } from "./settings";
 
 /** Lifetime of a single operator session token. 12 hours per directive.
  *  Tokens are also invalidated on server restart (Set is in-memory). */
@@ -114,13 +115,13 @@ export function isTokenValid(token: string | null | undefined): boolean {
 }
 
 /** Invalidate a single token (used by the lock-session UI). Silent
- *  no-op if the token isn't known. */
+ * no-op if the token isn't known. */
 export function revokeToken(token: string): void {
   activeTokens.delete(token);
 }
 
 /** Wipe every token in the store — used by tests and never in normal
- *  operation. Exported so the auth smoke can reset between cases. */
+ * operation. Exported so the auth smoke can reset between cases. */
 export function _resetTokenStore(): void {
   activeTokens.clear();
 }
@@ -134,4 +135,39 @@ export function parseBearer(authHeader: string | null | undefined): string | nul
   if (!authHeader || typeof authHeader !== "string") return null;
   const m = authHeader.trim().match(/^Bearer\s+([A-Za-z0-9_-]+)$/i);
   return m ? m[1] : null;
+}
+
+export type AuthFailure = { ok: false; status: number; error: string };
+
+/** Reusable gate for mutating operator endpoints.
+ *
+ * Returns `null` when the request is authorized.
+ * When unauthorized/misconfigured, returns an `AuthFailure` shaped
+ * so the caller can return it directly:
+ *
+ *   const auth = await requireValidSession(req);
+ *   if (auth) return NextResponse.json(auth.body, { status: auth.status });
+ */
+export async function requireValidSession(req: NextRequest): Promise<AuthFailure | null> {
+  const settings = await readSettings().catch(() => null);
+  const requirePin = settings?.requirePin === true;
+
+  if (!requirePin) {
+    return {
+      ok: false,
+      status: 503,
+      error: "operator auth is disabled (requirePin=false); enable operator authentication before mutating state",
+    };
+  }
+
+  const bearer = parseBearer(req.headers.get("authorization"));
+  if (!isTokenValid(bearer)) {
+    return {
+      ok: false,
+      status: 401,
+      error: "ACCESS DENIED",
+    };
+  }
+
+  return null;
 }

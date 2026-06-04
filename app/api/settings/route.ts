@@ -3,6 +3,7 @@ import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { AVAILABLE_MODELS } from "@/lib/store";
 import { readSettings, writeSettings, type SettingsPatch } from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
+import { requireValidSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,9 @@ interface SettingsPostBody {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireValidSession(req);
+  if (auth) return Response.json({ error: auth.error }, { status: auth.status });
+
   let body: SettingsPostBody;
   try {
     body = (await req.json()) as SettingsPostBody;
