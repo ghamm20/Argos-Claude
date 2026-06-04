@@ -30,6 +30,20 @@ export interface HeartbeatConfig {
 export interface ApiKeys {
   /** GitHub Personal Access Token (lifts /search rate 60→5000/hr). */
   github: string | null;
+  // Tier 4 (v2.4.0) operator-specific keyed sources. All optional — the tool
+  // gracefully reports "not configured" when null (never fabricates).
+  /** Have I Been Pwned API key (haveibeenpwned.com, paid). */
+  hibp: string | null;
+  /** api.congress.gov key (free, api.data.gov). */
+  congress_gov: string | null;
+  /** api.sam.gov key (free, api.data.gov). */
+  sam_gov: string | null;
+  /** USDA NASS QuickStats key (free, quickstats.nass.usda.gov). */
+  usda_nass: string | null;
+  /** NOAA NCEI CDO token (free, ncdc.noaa.gov/cdo-web). */
+  noaa_cdo: string | null;
+  /** FRED API key (free, St. Louis Fed). */
+  fred: string | null;
 }
 
 export interface PersistedSettings {
@@ -136,6 +150,12 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // Web Capability TIER 0: no API keys until the operator supplies them.
   apiKeys: {
     github: null,
+    hibp: null,
+    congress_gov: null,
+    sam_gov: null,
+    usda_nass: null,
+    noaa_cdo: null,
+    fred: null,
   },
 };
 

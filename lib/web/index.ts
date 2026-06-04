@@ -163,7 +163,15 @@ export async function webFetchJson<T = unknown>(
   }
 }
 
-export type ApiKeyName = "github";
+export type ApiKeyName =
+  | "github"
+  // Tier 4 (v2.4.0) keyed sources — all optional, graceful skip when null.
+  | "hibp"
+  | "congress_gov"
+  | "sam_gov"
+  | "usda_nass"
+  | "noaa_cdo"
+  | "fred";
 
 /** Decrypted API secret from settings, or null if unset. Never logged. */
 export async function getApiKey(name: ApiKeyName): Promise<string | null> {

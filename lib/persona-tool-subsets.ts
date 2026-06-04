@@ -53,6 +53,14 @@ export const PERSONA_TOOL_SUBSETS: Record<PersonaId, string[] | "*"> = {
     "pdf_extract",
     "doc_generate",
     "csv_analysis",
+    // Tier 4 (v2.4.0) — Tennessee environmental + media/documentation.
+    "usda_nass",
+    "usgs_water",
+    "noaa_climate",
+    "epa_envirofacts",
+    "internet_archive",
+    "openlibrary",
+    "libretranslate",
   ],
 
   // Operational triage — fast lookup + ops + data. (`frankfurter_fx` joins in
@@ -69,6 +77,12 @@ export const PERSONA_TOOL_SUBSETS: Record<PersonaId, string[] | "*"> = {
     "csv_analysis",
     // Weather / data
     "open_meteo_weather",
+    // Tier 4 (v2.4.0) — security ops + financial (frankfurter_fx promised here).
+    "nvd_cve",
+    "hibp",
+    "federal_register",
+    "frankfurter_fx",
+    "fred",
   ],
 
   // Warm communication — comms + light context. (`memory_audit` auto-injected.)

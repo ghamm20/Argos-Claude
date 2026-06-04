@@ -51,6 +51,50 @@ import * as jinaReader from "./jina-reader";
 import * as rsshub from "./rsshub";
 import * as firecrawlAlt from "./firecrawl-alt";
 import * as chainSearchRead from "./chain-search-read";
+// Web Capability TIER 4 (v2.4.0) — operator-specific sources (T37–T55).
+import * as nvdCve from "./nvd-cve";
+import * as hibp from "./hibp";
+import * as federalRegister from "./federal-register";
+import * as congressGov from "./congress-gov";
+import * as samGov from "./sam-gov";
+import * as usdaNass from "./usda-nass";
+import * as usgsWater from "./usgs-water";
+import * as noaaClimate from "./noaa-climate";
+import * as epaEnvirofacts from "./epa-envirofacts";
+import * as nominatim from "./nominatim";
+import * as overpassOsm from "./overpass-osm";
+import * as openElevation from "./open-elevation";
+import * as internetArchive from "./internet-archive";
+import * as openlibrary from "./openlibrary";
+import * as libretranslate from "./libretranslate";
+import * as frankfurterFx from "./frankfurter-fx";
+import * as fred from "./fred";
+import * as nhtsa from "./nhtsa";
+import * as openfema from "./openfema";
+
+// Tier 4 registry entries — all read-only web queries: safe, no approval,
+// reversible. Keyed sources gracefully report "not configured" (never faked).
+const TIER4: ToolDefinition[] = [
+  { id: "nvd_cve", name: "NVD CVE", description: "Look up CVE vulnerabilities by keyword or CVE id (NIST NVD).", category: "security", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: nvdCve.execute },
+  { id: "hibp", name: "Have I Been Pwned", description: "Check an email/username against known breaches (needs HIBP API key).", category: "security", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: hibp.execute },
+  { id: "federal_register", name: "Federal Register", description: "Search US federal rules, notices, executive orders.", category: "security", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: federalRegister.execute },
+  { id: "congress_gov", name: "Congress.gov", description: "US Congress bills + legislative activity (needs Congress API key).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: congressGov.execute },
+  { id: "sam_gov", name: "SAM.gov", description: "Federal contract opportunities (needs SAM.gov API key).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: samGov.execute },
+  { id: "usda_nass", name: "USDA NASS", description: "USDA agricultural statistics by commodity/state (needs NASS key).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: usdaNass.execute },
+  { id: "usgs_water", name: "USGS Water", description: "Real-time streamflow + gage height by site or state (default TN).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: usgsWater.execute },
+  { id: "noaa_climate", name: "NOAA Climate", description: "NOAA NCEI climate observations by station/location (needs CDO token).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: noaaClimate.execute },
+  { id: "epa_envirofacts", name: "EPA Envirofacts", description: "EPA environmental facility/program data (default TN).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: epaEnvirofacts.execute },
+  { id: "nominatim", name: "Nominatim Geocoder", description: "OSM geocoding: place name → lat/lon, or reverse.", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: nominatim.execute },
+  { id: "overpass_osm", name: "Overpass OSM", description: "Query OpenStreetMap features (raw QL, or amenity near a point).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: overpassOsm.execute },
+  { id: "open_elevation", name: "Open-Elevation", description: "Terrain elevation for lat/lon point(s).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: openElevation.execute },
+  { id: "internet_archive", name: "Internet Archive", description: "Search archive.org texts, audio, video, software, web.", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: internetArchive.execute },
+  { id: "openlibrary", name: "Open Library", description: "Search books by title/keyword/author (Open Library).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: openlibrary.execute },
+  { id: "libretranslate", name: "LibreTranslate", description: "Machine translation via a local LibreTranslate container.", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: libretranslate.execute },
+  { id: "frankfurter_fx", name: "Frankfurter FX", description: "ECB foreign-exchange rates + currency conversion.", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: frankfurterFx.execute },
+  { id: "fred", name: "FRED Economic Data", description: "US economic time series by series_id or search (needs FRED key).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: fred.execute },
+  { id: "nhtsa", name: "NHTSA", description: "Vehicle safety recalls (make/model/year) or VIN decode.", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: nhtsa.execute },
+  { id: "openfema", name: "OpenFEMA", description: "FEMA disaster declarations + public assistance (default TN).", category: "web", requiresApproval: false, requiresRestore: false, dangerous: false, reversible: true, execute: openfema.execute },
+];
 
 export const TOOLS: ToolDefinition[] = [
   // ---- web (all safe) ----
@@ -472,6 +516,8 @@ export const TOOLS: ToolDefinition[] = [
     validate: shellExec.validate,
     execute: shellExec.execute,
   },
+  // ---- Web Capability TIER 4 (v2.4.0) — 19 operator-specific sources ----
+  ...TIER4,
 ];
 
 const BY_ID: Record<string, ToolDefinition> = Object.fromEntries(

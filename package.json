@@ -37,6 +37,7 @@
     "misrepresentation:validate": "node scripts/validate-misrepresentation.mjs",
     "mirofish:validate": "node scripts/validate-mirofish.mjs",
     "persona-tools:validate": "node scripts/validate-persona-tools.mjs",
+    "tier4:smoke": "node scripts/smoke-tier4-tools.mjs",
     "web:smoke-infra": "node scripts/smoke-web-infra.mjs",
     "web:smoke-t1": "node scripts/smoke-tier1-tools.mjs",
     "web:smoke-t2": "node scripts/smoke-tier2-tools.mjs",
