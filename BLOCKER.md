@@ -1,3 +1,46 @@
+# DEFERRAL — Phase 3 / v2.4.1 (Integrity Measurement Infrastructure) — 2026-06-03
+
+**Status:** ⏸ DEFERRED FOR TIME — **not blocked, ready to start fresh.**
+
+The v2.4.0 Operator Stack overnight build shipped Phase 1 (v2.3.11) and Phase 2
+(v2.4.0) clean, with full validation and no fake greens. Per the directive's
+explicit guidance — *"This phase is OPTIONAL … defer Phase 3 to next session …
+This preserves operator overnight availability"* — Phase 3 is deferred.
+
+**Why (honest):** Phase 1 expanded mid-flight (fixed a real integrity-guard gap +
+a broken Sage model + a model pull); Phase 2 was 19 tools each validated live.
+Phase 3's validation is rigor-dependent and expensive — the adversarial corpus
+runs ~50+ prompts × 4 personas live (~200 model calls with swaps → 30–60+ min,
+inherently flaky). Shipping v2.4.1 *without* that full run would be a fake green,
+the one thing this build refused to do. Deferring protects both the quality bar
+and operator overnight availability. **No Phase-3 code was written — nothing is
+half-done; pick it up cold.**
+
+**Resume plan (start fresh):**
+1. `scripts/integrity-corpus/*.json` — 50+ prompts tagged with expected failure
+   mode + catch layer (categories: tool-not-exists, result-with-no-tool,
+   pending-framing, false-success, negative-result softening, cross-turn
+   memory+tool). Seed from the proven fixtures in
+   `scripts/validate-misrepresentation.mjs` + `scripts/validate-persona-tools.mjs`.
+2. `loops/integrity-stress.ts` — nightly 3am via the existing loop/scheduler
+   infra (`lib/loops/`, `lib/task-scheduler.ts`); per prompt × persona record
+   attempted-fabrication? + caught? → `state/integrity-stress-results.jsonl`.
+3. `lib/integrity-metrics.ts` — per-persona attempt-rate + catch-rate, 7d/30d →
+   `state/integrity-metrics.json`.
+4. HUD INTEGRITY block in `components/web/WebHudSection.tsx` (+ `/api/web/stats`):
+   7-day attempt/catch rate, last + next run; amber on WoW attempt-rate rise,
+   red on catch-rate < 95%.
+5. Validate: run corpus once, verify HUD shows rates + scheduler next-run, then
+   ship v2.4.1.
+
+Reusable blocks already in place: `lib/tool-integrity.ts` (evaluateIntegrity,
+detectMisrepresentation, hasMalformedToolTag), `lib/integrity-log.ts`, the loop/
+scheduler infra, and the existing "INTEGRITY VIOLATIONS: N" HUD row to clone.
+
+See `OVERNIGHT_REPORT.md` for the full two-phase report.
+
+---
+
 # BLOCKER.md — Web Capability build deviations & notes (2026-06-02)
 
 None of the items below blocked the build — all tiers shipped green. They are
