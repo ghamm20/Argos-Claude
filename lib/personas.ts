@@ -165,7 +165,17 @@ const GUEST_SYSTEM_PROMPT = [
 const MODEL_BART = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 const MODEL_JUNIPER =
   "fredrezones55/Qwen3.5-Uncensored-HauhauCS-Aggressive:9b";
-const MODEL_SAGE = "alfaxad/wild-gemma4:e4b";
+// Sage model fix (v2.3.11, 2026-06-03). The prior binding
+// `alfaxad/wild-gemma4:e4b` was (1) NOT installed (Sage was non-functional),
+// and (2) on pull, proved BROKEN: it crashes llama-server on every generation
+// (`GGML_ASSERT(ggml_can_repeat(b, a))` → 0xc0000409 stack-buffer overrun — a
+// tensor-shape/runtime incompatibility, not transient) AND it is a
+// "Savanna Sentinel — return only valid JSON" fine-tune, semantically wrong for
+// a research synthesist. Rebound to the PROVEN gemma-4 model (same as Bart):
+// it runs, reasons, carries cross-session memory, and emits the tool-call
+// format correctly — which Persona Tool Distribution (v2.3.11) requires so Sage
+// can actually USE her 17 research tools. Bart↔Sage swap is now zero-cost.
+const MODEL_SAGE = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 // Bobby — Phase 2 Persona Completion (2026-05-28): swapped from
 // second_constantine/deepseek-coder-v2:16b (Bobby v2 agentic coder)
 // → CyberCrew/notmythos-8b:latest (2.0 GB; fits VRAM with margin,

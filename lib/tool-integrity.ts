@@ -101,12 +101,37 @@ export interface IntegrityContext {
   hadGrounding: boolean;
   /** The operator explicitly commanded a tool this turn. */
   explicitToolRequest?: boolean;
+  /** v2.3.11 — the MODEL itself emitted a malformed tool tag this turn (a parse
+   *  FAILURE: no executable call), yet produced a substantive answer anyway.
+   *  A weak model (e.g. Bobby's) emits `<web_search {...}>` then fabricates a
+   *  result JSON block — no real tool ran, and the phrasing evades the claim
+   *  lists. This is fabrication: the model tried a tool, it didn't execute, and
+   *  it answered as if it had. */
+  attemptedToolButFailed?: boolean;
 }
 
 export interface IntegrityVerdict {
   violation: boolean;
   /** The specific claim phrases that triggered (for the violation log). */
   patterns: string[];
+}
+
+/**
+ * v2.3.11 — detect a MALFORMED tool attempt: an angle-bracket tag whose NAME is
+ * a real tool id, e.g. `<web_search {…}>` or `<open_meteo_weather {"lat":…}>`.
+ * Weak models emit this instead of the required `<tool>{"id":"web_search",…}</tool>`,
+ * so the parser never executes it — yet the model often fabricates a result
+ * after it. The real `<tool>` wrapper is NOT matched ("tool" is not a tool id).
+ */
+export function hasMalformedToolTag(content: string, knownToolIds: readonly string[]): boolean {
+  if (!content) return false;
+  const known = new Set(knownToolIds);
+  const re = /<\s*([a-z][a-z0-9_]+)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (known.has(m[1])) return true;
+  }
+  return false;
 }
 
 /** Evaluate a finished assistant message against the integrity doctrine. */
@@ -117,20 +142,32 @@ export function evaluateIntegrity(content: string, ctx: IntegrityContext): Integ
   const grounded = ctx.toolRan || ctx.hadGrounding;
   const strongViolation = strong.length > 0 && !ctx.toolRan;
   const softViolation = soft.length > 0 && !grounded;
-  // STRUCTURAL — the operator explicitly commanded a tool, NO tool ran, and the
-  // model neither emitted a parseable tool nor honestly disclaimed. It answered
-  // as if the tool ran. Catches fabrications whose PHRASING evades the pattern
-  // lists (e.g. "the narrative thread shows an entropy spike near Sector
-  // Gamma-7" with no tool call). 40-char floor skips terse honest replies.
+  // STRUCTURAL — a substantive answer that answers AS IF a tool ran, when none
+  // did and nothing was honestly disclaimed. Two triggers:
+  //   (a) the OPERATOR explicitly commanded a tool (explicitToolRequest), or
+  //   (b) the MODEL itself emitted a malformed tool tag this turn
+  //       (attemptedToolButFailed) and had no other grounding — it tried a tool,
+  //       it didn't execute, and it answered anyway (Bobby's `<web_search …>` +
+  //       fabricated JSON). Catches fabrications whose PHRASING evades the claim
+  //       lists. 40-char floor skips terse honest replies; the honesty-disclaimer
+  //       escape hatch keeps "I tried X but it failed" from being flagged.
+  const structuralTrigger =
+    (ctx.explicitToolRequest === true && !ctx.toolRan) ||
+    (ctx.attemptedToolButFailed === true && !ctx.toolRan && !ctx.hadGrounding);
   const structuralViolation =
-    ctx.explicitToolRequest === true &&
-    !ctx.toolRan &&
+    structuralTrigger &&
     content.trim().length > 40 &&
     !hasHonestyDisclaimer(content);
   const patterns: string[] = [];
   if (strongViolation) patterns.push(...strong);
   if (softViolation) patterns.push(...soft);
-  if (structuralViolation) patterns.push("substantive answer to an explicit tool command with no tool run and no honest disclaimer");
+  if (structuralViolation) {
+    patterns.push(
+      ctx.explicitToolRequest === true
+        ? "substantive answer to an explicit tool command with no tool run and no honest disclaimer"
+        : "substantive answer after a MALFORMED tool attempt (parse failure) with no tool run, no grounding, no honest disclaimer"
+    );
+  }
   return {
     violation: strongViolation || softViolation || structuralViolation,
     patterns: Array.from(new Set(patterns)),

@@ -32,6 +32,8 @@ import {
 import { requestTool } from "@/lib/tools/executor";
 import { appendParseFailureAudit } from "@/lib/tools/audit";
 import { toolSummaries } from "@/lib/tools/registry";
+// v2.3.11 — per-persona tool distribution (scoped awareness + execution enforcement).
+import { toolsForPersona, personaHasTool } from "@/lib/persona-tool-subsets";
 // Model-integrity guard (v2.3.8) — flags a turn that CLAIMS tool execution
 // when no tool actually ran. The doctrine backstop against fake success.
 import {
@@ -40,6 +42,7 @@ import {
   INTEGRITY_WARNING_REASON,
   inferMissingTool,
   isExplicitToolRequest,
+  hasMalformedToolTag,
   PARSE_FAILURE_SYSTEM_NOTE,
   FABRICATION_SYSTEM_NOTE,
   // v2.3.9 misrepresentation guard
@@ -653,10 +656,14 @@ export async function POST(req: NextRequest) {
       ].join("\n")
     );
   }
-  // Tools Phase — give Bartimaeus tool awareness (operator turns only; guests
-  // never get tools). Other personas don't carry the tool block, so they won't
-  // emit tool tags. Skipped on vision turns (the model is gemma4 there).
-  const toolsEnabled = isOperator && body.personaId === "bartimaeus" && !visionTurn;
+  // Tools Phase — tool awareness (operator turns only; guests never get tools;
+  // skipped on vision turns where the model is gemma4).
+  // v2.3.11 — persona tool DISTRIBUTION: each conversational persona gets a
+  // ROLE-SCOPED subset (Bart = all; Sage = research; Bobby = ops; Juniper =
+  // comms). The subset is enforced at execution below, so the distribution is
+  // real, not advisory.
+  const personaToolIds = toolsForPersona(persona.id, KNOWN_TOOL_IDS);
+  const toolsEnabled = isOperator && !visionTurn && personaToolIds.length > 0;
   // v2.3.9 — tool results the operator already saw on the most recent assistant
   // turn. The /api/chat wire history now carries them (ChatPane). They are used
   // two ways: surfaced to the model so it HAS the outcome in context (root cause
@@ -672,7 +679,11 @@ export async function POST(req: NextRequest) {
   // misrepresentation guard so a same-turn continuation can't soften them.
   const turnToolResults: ToolResultLike[] = [];
   if (toolsEnabled) {
-    systemParts.push(buildToolAwarenessBlock());
+    // Bart gets the full rich source-routing guidance; scoped personas get a
+    // concise block listing ONLY their subset.
+    systemParts.push(
+      buildToolAwarenessBlock(persona.id === "bartimaeus" ? undefined : personaToolIds)
+    );
     // v2.3.9 — surface the most recent COMPLETED tool results so the model
     // reports them faithfully and cannot honestly claim to be "awaiting" a
     // result that is already in its context.
@@ -713,7 +724,13 @@ export async function POST(req: NextRequest) {
   // initiated, parsed call)? The integrity guard uses this to decide whether a
   // tool-use claim in the final answer is backed by a real execution.
   let toolRanThisTurn = false;
-  if (toolsEnabled && userText) {
+  // v2.3.11 — set when the model emits a malformed tool tag (parse failure) this
+  // turn; feeds the integrity guard's structural check.
+  let toolParseFailedThisTurn = false;
+  // FORCED grounding stays Bartimaeus-only — it server-side-invokes web_search/
+  // chain_search_to_read/open_meteo_weather, which not every persona holds.
+  // Scoped personas reach those tools via the normal model-initiated path.
+  if (toolsEnabled && persona.id === "bartimaeus" && userText) {
     const cf = detectCurrentFacts(userText);
     if (cf.isCurrentFacts) {
       try {
@@ -1102,6 +1119,10 @@ export async function POST(req: NextRequest) {
         if (toolsEnabled) {
           try {
             const { calls, failures } = parseToolCalls(assistantBuf);
+            // v2.3.11 — the model emitted a malformed tool tag (parse failure):
+            // feed the integrity guard so a fabricated continuation after a
+            // failed tool attempt is caught (the Bobby `<web_search …>` case).
+            if (failures.length > 0) toolParseFailedThisTurn = true;
             // DOCTRINE (v2.3.8): a tool-call ATTEMPT is never silently lost.
             // Audit every parse failure (malformed JSON / unknown tool / orphan
             // tag) with the raw text the model emitted, and surface it.
@@ -1125,13 +1146,38 @@ export async function POST(req: NextRequest) {
               );
             }
             if (calls.length > 0) {
-              toolRanThisTurn = true; // a model-initiated tool call was recognized + routed
               const call = calls[0];
-              const outcome = await requestTool(call.id, call.params, {
-                sessionId: null,
-                personaId: body.personaId,
-                model: effectiveModel,
-              });
+              // v2.3.11 — ENFORCE the persona's tool subset. A persona that
+              // emits a tool OUTSIDE its scope is NOT run: it's audited and
+              // surfaced as not-permitted. The tool did not run, so
+              // toolRanThisTurn stays false — if the persona then claims a
+              // result, the v2.3.8 fabrication guard catches it.
+              if (!personaHasTool(persona.id, call.id, KNOWN_TOOL_IDS)) {
+                const reason = `tool '${call.id}' is not available to persona '${persona.id}' (out of its scoped subset)`;
+                await appendParseFailureAudit({
+                  raw: call.raw,
+                  reason,
+                  toolId: call.id,
+                  sessionId: null,
+                  persona: body.personaId,
+                });
+                controllerInner.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "tool_not_permitted",
+                      toolId: call.id,
+                      persona: persona.id,
+                      reason,
+                    })}\n`
+                  )
+                );
+              } else {
+                toolRanThisTurn = true; // a permitted model-initiated tool call was routed
+                const outcome = await requestTool(call.id, call.params, {
+                  sessionId: null,
+                  personaId: body.personaId,
+                  model: effectiveModel,
+                });
               if (outcome.kind === "approval") {
                 controllerInner.enqueue(
                   encoder.encode(
@@ -1195,6 +1241,7 @@ export async function POST(req: NextRequest) {
                   /* continuation is best-effort */
                 }
               }
+              } // close persona-subset `else` (v2.3.11 execution enforcement)
             }
           } catch {
             /* tool processing must never break the chat stream */
@@ -1220,6 +1267,12 @@ export async function POST(req: NextRequest) {
             toolRan: toolRanThisTurn,
             hadGrounding,
             explicitToolRequest: toolsEnabled && isExplicitToolRequest(userText, KNOWN_TOOL_IDS),
+            // v2.3.11 — a malformed tool attempt + fabricated continuation is
+            // caught: either a parser-flagged failure OR a `<tool_id …>` tag
+            // (the shape the parser silently skips because it has no "id" key).
+            attemptedToolButFailed:
+              toolsEnabled &&
+              (toolParseFailedThisTurn || hasMalformedToolTag(assistantBuf, KNOWN_TOOL_IDS)),
           });
           if (verdict.violation) {
             const warning = buildIntegrityWarning();

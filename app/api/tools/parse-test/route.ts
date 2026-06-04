@@ -24,6 +24,7 @@ import {
   claimsToolUse,
   evaluateIntegrity,
   inferMissingTool,
+  hasMalformedToolTag,
   type ToolResultLike,
   isNegativeStateResult,
   detectMisrepresentation,
@@ -36,7 +37,7 @@ export const dynamic = "force-dynamic";
 const KNOWN_TOOL_IDS = toolSummaries().map((t) => t.id);
 
 export async function POST(req: NextRequest) {
-  let body: { text?: string; toolRan?: boolean; hadGrounding?: boolean; explicitToolRequest?: boolean; toolResults?: ToolResultLike[]; logAudit?: boolean; logViolation?: boolean };
+  let body: { text?: string; toolRan?: boolean; hadGrounding?: boolean; explicitToolRequest?: boolean; attemptedToolButFailed?: boolean; toolResults?: ToolResultLike[]; logAudit?: boolean; logViolation?: boolean };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -48,6 +49,12 @@ export async function POST(req: NextRequest) {
     toolRan: body.toolRan === true,
     hadGrounding: body.hadGrounding === true,
     explicitToolRequest: body.explicitToolRequest === true,
+    // v2.3.11 — derive like the route does: a parser-flagged failure OR a
+    // `<tool_id …>` malformed tag (which the parser skips) is a failed attempt.
+    attemptedToolButFailed:
+      body.attemptedToolButFailed === true ||
+      failures.length > 0 ||
+      hasMalformedToolTag(text, KNOWN_TOOL_IDS),
   });
 
   // v2.3.9 — misrepresentation guard (Layer 2c). Deterministic over the

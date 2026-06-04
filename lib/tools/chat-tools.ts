@@ -155,55 +155,80 @@ export function parseToolCalls(text: string): ToolParseResult {
   return { calls, failures };
 }
 
-/** The tool-awareness block prepended/added to Bartimaeus's system prompt. */
-export function buildToolAwarenessBlock(): string {
+// Shared mechanics + governance + integrity — identical for every persona.
+const TOOL_MECHANICS = [
+  "TOOLS — you can ACT, not just advise.",
+  "",
+  "Use a tool ONLY when it genuinely helps the operator. Never use a tool for show.",
+  "",
+  "To use a tool, emit EXACTLY one tag in your reply:",
+  '<tool>{"id":"<tool_id>","params":{ ... }}</tool>',
+  "The system executes it and returns the result so you can continue your answer.",
+  "",
+  "GOVERNANCE — non-negotiable:",
+  "- For any DANGEROUS tool (writes, deletes, sends, executes, or touches an external",
+  "  system) you MUST first DISCLOSE, in plain words: what the tool will do, what could",
+  "  go wrong, and whether it is reversible. The operator approves before it runs.",
+  "- Use at most one tool per reply.",
+  "- You may ONLY call tools from the 'Available tools' list below. If a task needs a",
+  "  tool you do not have, say so plainly and (if useful) suggest the operator ask",
+  "  Bartimaeus, who holds the full tool set. NEVER invent a tool, and NEVER report a",
+  "  result for a tool you did not actually call.",
+  "",
+  "CRITICAL TOOL RULE: When a tool returns results, you MUST answer the operator's " +
+    "question directly using those results FIRST. Do not question the tool methodology. " +
+    "Do not philosophize about reliability. Read the result. Answer the question. One " +
+    "sentence answer. Then you may add commentary. Web search results are authoritative " +
+    "for current facts. If web_search returns a current president, that IS the current " +
+    "president. Use it.",
+].join("\n");
+
+// Bart-only rich source-routing guidance (references the full tool set).
+const FULL_SOURCE_GUIDANCE = [
+  "FACTUAL QUERIES — chain_search_to_read FIRST. For factual questions about people, " +
+    "companies, or current events: use chain_search_to_read FIRST. It searches AND reads " +
+    "pages. web_search alone returns shallow snippets that often don't contain the answer. " +
+    "Only use web_search alone for navigational queries where you just need URLs. If " +
+    "chain_search_to_read returns nothing useful, then try specialized tools " +
+    "(wikipedia_search for entities, arxiv_search for research, gdelt_events for events, " +
+    "sec_edgar for public companies).",
+  "",
+  "WHEN TO USE WHICH SOURCE (web knowledge):",
+  "- Most factual questions → chain_search_to_read (searches + reads; THE default).",
+  "- General current events / facts → searxng_search (aggregates many engines, DDG fallback).",
+  "- A specific page's content → jina_reader (clean markdown) or firecrawl_alt (structured).",
+  "- Entities / people / places / concepts → wikipedia_search (prose) + wikidata_query (structured facts).",
+  "- AI / ML / research papers → arxiv_search + papers_with_code; broaden with openalex_search.",
+  "- Academic metadata / DOI → crossref_lookup. Medical / biology → pubmed_search.",
+  "- Models / datasets → huggingface_hub.",
+  "- Global news / current events → gdelt_events.",
+  "- Weather / temperature / forecast → open_meteo_weather (pass the place name as `location`).",
+  "- Code / dev / errors → github_search + stackexchange_search.",
+  "- Public companies (filings, CEO, financials) → sec_edgar (+ wikipedia_search).",
+  "- A specific page's content → web_crawl. Open-ended digging → deep_research.",
+  "Always cite the source URL. State result freshness when it matters.",
+].join("\n");
+
+// Concise guidance for scoped personas (avoids naming tools they don't hold).
+const SCOPED_SOURCE_GUIDANCE =
+  "Pick the tool from your list that best fits the task. For most factual lookups, " +
+  "chain_search_to_read (if you have it) searches AND reads pages; web_search returns " +
+  "snippets. Always cite the source. State freshness when it matters.";
+
+/**
+ * The tool-awareness block added to a persona's system prompt at the route
+ * level. v2.3.11: pass `toolIds` to scope the block to a persona's subset.
+ * No argument → the FULL block (Bartimaeus; unchanged behavior).
+ */
+export function buildToolAwarenessBlock(toolIds?: string[]): string {
+  const guidance = toolIds ? SCOPED_SOURCE_GUIDANCE : FULL_SOURCE_GUIDANCE;
   return [
-    "TOOLS — you can ACT, not just advise.",
+    TOOL_MECHANICS,
     "",
-    "Use a tool ONLY when it genuinely helps the operator. Never use a tool for show.",
-    "",
-    "To use a tool, emit EXACTLY one tag in your reply:",
-    '<tool>{"id":"<tool_id>","params":{ ... }}</tool>',
-    "The system executes it and returns the result so you can continue your answer.",
-    "",
-    "GOVERNANCE — non-negotiable:",
-    "- For any DANGEROUS tool (writes, deletes, sends, executes, or touches an external",
-    "  system) you MUST first DISCLOSE, in plain words: what the tool will do, what could",
-    "  go wrong, and whether it is reversible. The operator approves before it runs.",
-    "- Use at most one tool per reply.",
-    "",
-    "CRITICAL TOOL RULE: When a tool returns results, you MUST answer the operator's " +
-      "question directly using those results FIRST. Do not question the tool methodology. " +
-      "Do not philosophize about reliability. Read the result. Answer the question. One " +
-      "sentence answer. Then you may add commentary. Web search results are authoritative " +
-      "for current facts. If web_search returns a current president, that IS the current " +
-      "president. Use it.",
-    "",
-    "FACTUAL QUERIES — chain_search_to_read FIRST. For factual questions about people, " +
-      "companies, or current events: use chain_search_to_read FIRST. It searches AND reads " +
-      "pages. web_search alone returns shallow snippets that often don't contain the answer. " +
-      "Only use web_search alone for navigational queries where you just need URLs. If " +
-      "chain_search_to_read returns nothing useful, then try specialized tools " +
-      "(wikipedia_search for entities, arxiv_search for research, gdelt_events for events, " +
-      "sec_edgar for public companies).",
-    "",
-    "WHEN TO USE WHICH SOURCE (web knowledge):",
-    "- Most factual questions → chain_search_to_read (searches + reads; THE default).",
-    "- General current events / facts → searxng_search (aggregates many engines, DDG fallback).",
-    "- A specific page's content → jina_reader (clean markdown) or firecrawl_alt (structured).",
-    "- Entities / people / places / concepts → wikipedia_search (prose) + wikidata_query (structured facts).",
-    "- AI / ML / research papers → arxiv_search + papers_with_code; broaden with openalex_search.",
-    "- Academic metadata / DOI → crossref_lookup. Medical / biology → pubmed_search.",
-    "- Models / datasets → huggingface_hub.",
-    "- Global news / current events → gdelt_events.",
-    "- Weather / temperature / forecast → open_meteo_weather (pass the place name as `location`).",
-    "- Code / dev / errors → github_search + stackexchange_search.",
-    "- Public companies (filings, CEO, financials) → sec_edgar (+ wikipedia_search).",
-    "- A specific page's content → web_crawl. Open-ended digging → deep_research.",
-    "Always cite the source URL. State result freshness when it matters.",
+    guidance,
     "",
     "Available tools:",
-    toolListForPrompt(),
+    toolListForPrompt(toolIds),
   ].join("\n");
 }
 

@@ -509,8 +509,11 @@ export function toolSummaries(): ToolSummary[] {
 }
 
 /** Compact tool list for Bartimaeus's system prompt. */
-export function toolListForPrompt(): string {
-  return TOOLS.map((t) => {
+/** Renders the tool catalogue for a system prompt. When `toolIds` is given
+ *  (v2.3.11 persona tool distribution), only those tools are listed, in the
+ *  given order — so each persona sees ONLY its scoped subset. */
+export function toolListForPrompt(toolIds?: string[]): string {
+  const render = (t: (typeof TOOLS)[number]) => {
     const gov =
       typeof t.requiresApproval === "function"
         ? "approval (conditional)"
@@ -518,5 +521,18 @@ export function toolListForPrompt(): string {
           ? "APPROVAL REQUIRED"
           : "safe";
     return `- ${t.id} — ${t.description} [${gov}]`;
-  }).join("\n");
+  };
+  if (!toolIds) return TOOLS.map(render).join("\n");
+  const byId = new Map(TOOLS.map((t) => [t.id, t]));
+  return toolIds
+    .map((id) => byId.get(id))
+    .filter((t): t is (typeof TOOLS)[number] => Boolean(t))
+    .map(render)
+    .join("\n");
+}
+
+/** The registry's canonical tool-id list (single source of truth for
+ *  persona-subset intersection + execution enforcement). */
+export function allToolIds(): string[] {
+  return TOOLS.map((t) => t.id);
 }
