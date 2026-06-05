@@ -13,7 +13,170 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Mic, Volume2, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
+import { Mic, Volume2, RefreshCw, CheckCircle2, AlertCircle, Sparkles, Play } from "lucide-react";
+
+const ELEVENLABS_TEST_TEXT = "I am Bartimaeus. Try not to waste my time.";
+
+/**
+ * Phase 7-C — ElevenLabs (Cassius) voice for Bartimaeus, with Piper as the
+ * offline fallback. API key is masked (password field) and only ever sent to
+ * the server; the GET response returns a hint, never the key.
+ */
+function ElevenLabsCard() {
+  const [configured, setConfigured] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [voiceId, setVoiceId] = useState("aGv5jHWKBy8K5xKvYeSX");
+  const [model, setModel] = useState("eleven_multilingual_v2");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/settings", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = (await r.json()) as {
+        elevenlabs?: { apiKey?: { configured?: boolean; hint?: string | null }; bartVoiceId?: string; model?: string };
+      };
+      const el = j.elevenlabs;
+      setConfigured(!!el?.apiKey?.configured);
+      setHint(el?.apiKey?.hint ?? null);
+      if (el?.bartVoiceId) setVoiceId(el.bartVoiceId);
+      if (el?.model) setModel(el.model);
+    } catch {
+      /* leave defaults */
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function save() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const elevenlabs: Record<string, unknown> = { bartVoiceId: voiceId.trim(), model: model.trim() };
+      // Only send the key when the operator typed a new one (empty = leave as-is).
+      if (keyInput.trim().length > 0) elevenlabs.apiKey = keyInput.trim();
+      const r = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ elevenlabs }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string };
+        setSaveMsg(`Save failed: ${j.error ?? `HTTP ${r.status}`}`);
+        return;
+      }
+      setKeyInput("");
+      setSaveMsg("Saved.");
+      await load();
+    } catch (e) {
+      setSaveMsg(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const r = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: ELEVENLABS_TEST_TEXT, personaId: "bartimaeus" }),
+      });
+      if (!r.ok) {
+        const j = (await r.json().catch(() => ({}))) as { error?: string; hint?: string };
+        setTestMsg(`Test failed: ${j.error ?? `HTTP ${r.status}`}${j.hint ? ` — ${j.hint}` : ""}`);
+        return;
+      }
+      const engine = r.headers.get("x-voice-engine") ?? "?";
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+      setTestMsg(
+        engine === "elevenlabs"
+          ? "Spoke via ElevenLabs (Cassius)."
+          : `Spoke via ${engine} (ElevenLabs not used — set a key, or it fell back).`
+      );
+    } catch (e) {
+      setTestMsg(`Test failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-neutral-800 bg-black/30 px-4 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} strokeWidth={1.8} className="text-neutral-400" />
+          <span className="text-[13px] font-medium text-neutral-100">
+            ElevenLabs — Bartimaeus voice (Cassius)
+          </span>
+        </div>
+        <StatusPill available={configured} label={configured ? "Key set" : "No key"} />
+      </div>
+      <p className="text-[11px] text-neutral-500 mb-3 leading-relaxed">
+        When a key is set, Bartimaeus speaks via ElevenLabs; on any failure he
+        falls back to Piper silently. Other personas always use Piper. Key is
+        encrypted at rest and never shown.
+      </p>
+
+      <label className="block text-[10px] uppercase tracking-[0.16em] text-neutral-600 mb-1">
+        API key {configured && hint ? <span className="text-neutral-500 normal-case tracking-normal">(current: {hint})</span> : null}
+      </label>
+      <input
+        type="password"
+        value={keyInput}
+        onChange={(e) => setKeyInput(e.target.value)}
+        placeholder={configured ? "•••••••• — enter a new key to replace" : "xi-…"}
+        autoComplete="off"
+        className="w-full mb-3 rounded-sm border border-neutral-700 bg-black/40 px-2 py-1.5 text-[12px] font-mono text-neutral-200 outline-none focus:border-neutral-500"
+      />
+
+      <label className="block text-[10px] uppercase tracking-[0.16em] text-neutral-600 mb-1">
+        Voice ID
+      </label>
+      <input
+        type="text"
+        value={voiceId}
+        onChange={(e) => setVoiceId(e.target.value)}
+        className="w-full mb-3 rounded-sm border border-neutral-700 bg-black/40 px-2 py-1.5 text-[12px] font-mono text-neutral-200 outline-none focus:border-neutral-500"
+      />
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="text-[11px] uppercase tracking-[0.16em] px-3 py-1.5 rounded-sm border border-neutral-600 text-neutral-300 hover:text-neutral-100 hover:border-neutral-400 transition-colors disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void test()}
+          disabled={testing}
+          title='Speak "I am Bartimaeus. Try not to waste my time."'
+          className="text-[11px] uppercase tracking-[0.16em] px-3 py-1.5 rounded-sm border border-emerald-600/50 text-emerald-300 hover:border-emerald-400 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
+        >
+          <Play size={11} strokeWidth={2} />
+          {testing ? "Speaking…" : "Test voice"}
+        </button>
+      </div>
+      {saveMsg && <div className="mt-2 text-[11px] text-neutral-400">{saveMsg}</div>}
+      {testMsg && <div className="mt-1 text-[11px] text-neutral-400">{testMsg}</div>}
+    </div>
+  );
+}
 
 interface VoiceCapability {
   stt: {
@@ -226,6 +389,12 @@ export function VoiceSection() {
           )}
         </div>
       )}
+
+      {/* Phase 7-C — ElevenLabs (Bartimaeus). Independent of the local Piper
+          probe, so it renders even when no binaries are installed. */}
+      <div className="mt-4">
+        <ElevenLabsCard />
+      </div>
     </div>
   );
 }

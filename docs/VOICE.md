@@ -268,3 +268,69 @@ Both writers are best-effort — a failed audit append never blocks the underlyi
 - `lib/voice-client.ts` — browser audio capture
 - `docs/AUDIT.md` — chain + audit event lifecycle
 - `methodology/decisions.md` — Phase 5 entry with rationale + alternatives considered
+
+---
+
+## Phase 7-C — ElevenLabs TTS for Bartimaeus (Cassius), Piper fallback
+
+Bartimaeus speaks in his ElevenLabs **Cassius** voice when an API key is
+configured; on any failure he falls back to **Piper silently**. The other
+personas (Juniper, Sage, Bobby) are unchanged — always Piper.
+
+**Network-OPTIONAL (USB-native intact):** no key, no network, or any ElevenLabs
+error → Bart uses Piper. ElevenLabs is an upgrade, never a requirement.
+
+### Config (`config/settings.json` → `elevenlabs`)
+
+| key | default | notes |
+|-----|---------|-------|
+| `elevenlabs.apiKey` | `null` | ElevenLabs API key. **Encrypted at rest** (AES-256-GCM, same as `apiKeys`); the GET `/api/settings` response returns only `{configured, hint}`, never the key. `null`/`""` disables ElevenLabs. |
+| `elevenlabs.bartVoiceId` | `aGv5jHWKBy8K5xKvYeSX` | Cassius voice id. |
+| `elevenlabs.model` | `eleven_multilingual_v2` | ElevenLabs model id. |
+
+Set these in **Settings → Voice → ElevenLabs**: a masked API-key field, the
+voice id (pre-filled), **Save**, and a **Test voice** button that speaks
+*"I am Bartimaeus. Try not to waste my time."* and reports which engine served
+it (ElevenLabs vs Piper fallback).
+
+### Request → engine resolution (`lib/voice.ts` `synthesizeText`)
+
+For `personaId === "bartimaeus"`, the chain is **ElevenLabs → F5 clone → Piper**;
+each tier is optional and any failure falls silently to the next:
+
+1. `resolveElevenLabs()` reads + decrypts the key. `null` → skip quietly (the
+   common offline case). A configured key that fails (network / API / tier) logs
+   a **non-secret** warning (HTTP status + short body excerpt, never the key),
+   then falls through.
+2. ElevenLabs call: `POST https://api.elevenlabs.io/v1/text-to-speech/{voiceId}?output_format=pcm_24000`,
+   headers `xi-api-key` + `content-type: application/json`, body
+   `{ text, model_id, voice_settings: { stability:0.50, similarity_boost:0.77, style:0, use_speaker_boost:true } }`.
+   Uses native `fetch()` — **no new npm package**. The response is 24 kHz mono
+   16-bit PCM, wrapped in a 44-byte WAV header (`pcmToWav`) so the route keeps
+   serving honest `audio/wav` and reuses the existing WAV pipeline (no MP3
+   transcode, no extra dependency). PCM output needs an ElevenLabs Starter tier
+   or above; if a tier rejects it the call fails → silent Piper fallback.
+3. Non-Bart personas never enter this block → always Piper.
+
+### Audit
+
+The `voice.spoken` audit event carries `elevenlabs_used: boolean` (true only when
+ElevenLabs served the turn). The response also sets `x-voice-engine`
+(`elevenlabs` | `f5-tts` | `piper`).
+
+### Doctrine
+
+- **No new npm packages** — native `fetch()` for the ElevenLabs call.
+- **Key in `config/settings.json` only**, encrypted at rest, **never logged**,
+  never returned by the API (masked hint only).
+- **Silent fallback** — the operator never sees an error if ElevenLabs fails;
+  Bart simply speaks in Piper.
+
+### Validation
+
+`npm run phase7c:smoke` (4 gate tests): settings stores the key (masked on
+read-back, raw key never echoed); Bart + key set → audio (fake key 401s →
+**silent Piper fallback**, no 503 — the doctrine path); Bart + no key → Piper
+audio (not 503); Juniper (key set) → Piper, ElevenLabs never used. A real
+ElevenLabs key (→ real Cassius audio) is validated by the operator via the
+Settings **Test voice** button.

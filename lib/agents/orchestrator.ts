@@ -446,7 +446,6 @@ class ArgosOrchestrator {
    * eligible for. Guests and agents with open circuit breakers are skipped.
    */
   claimNext(agentId: AgentId, ttlMs = 30_000): TaskReservation | null {
-    const _breaker = this.breakers.get(agentId);
     if (!this.breakers.mayProbe(agentId)) return null;
     const container = this.agents.get(agentId);
     if (!container) return null;
@@ -528,7 +527,6 @@ class ArgosOrchestrator {
   // -- internal ------------------------------------------------------------
 
   private route(item: WorkItem): AgentId {
-    const _category = item.payload?.category as string | undefined;
     if (item.kind === "chat.reply" || item.kind === "task.create") {
       return item.personaId ?? "bartimaeus";
     }

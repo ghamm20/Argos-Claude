@@ -14,6 +14,7 @@
 // lives in lib/auth-client.ts and must produce identical output for
 // the same PIN.
 
+import type { NextRequest } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readSettings } from "./settings";
 
@@ -151,13 +152,26 @@ export type AuthFailure = { ok: false; status: number; error: string };
 export async function requireValidSession(req: NextRequest): Promise<AuthFailure | null> {
   const settings = await readSettings().catch(() => null);
   const requirePin = settings?.requirePin === true;
+  const pinConfigured =
+    typeof settings?.operatorPinHash === "string" && settings.operatorPinHash.length > 0;
 
-  if (!requirePin) {
-    return {
-      ok: false,
-      status: 503,
-      error: "operator auth is disabled (requirePin=false); enable operator authentication before mutating state",
-    };
+  // Auth is only ENFORCEABLE once BOTH conditions hold:
+  //   (a) the operator opted in           → requirePin === true, AND
+  //   (b) a PIN is actually configured     → operatorPinHash is set.
+  // Otherwise the request is allowed — the original behavior every prior
+  // release relied on.
+  //
+  // Fix (Phase 7-C, 2026-06-04): commit 5a335b9 returned a 503 here instead,
+  // which (a) bricked ALL settings saves out of the box, and (b) created a
+  // bootstrapping DEADLOCK. operatorPinHash is set via POST /api/settings —
+  // the very endpoint this gate guards — so with requirePin=true and NO PIN
+  // configured (the exact state 5a335b9 left on disk), /api/auth/verify can
+  // never mint a token (nothing to compare against) and the settings save can
+  // never succeed. There is no recovery path. Allowing when the PIN is absent
+  // closes the deadlock while keeping the gate fully active for the real
+  // "PIN set + requirePin on" case below.
+  if (!requirePin || !pinConfigured) {
+    return null;
   }
 
   const bearer = parseBearer(req.headers.get("authorization"));

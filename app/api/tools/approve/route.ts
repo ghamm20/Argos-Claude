@@ -15,6 +15,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  // Auth gate (completes commit 5a335b9 — the import was added but the call was
+  // left unwired, which broke typecheck). No-op when requirePin is off.
+  const auth = await requireValidSession(req);
+  if (auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   let body: { approvalId?: string; decision?: string };
   try {
     body = await req.json();

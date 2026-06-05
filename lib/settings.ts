@@ -46,6 +46,21 @@ export interface ApiKeys {
   fred: string | null;
 }
 
+/**
+ * Phase 7-C (v2.4.1) — ElevenLabs TTS for Bartimaeus (Cassius voice), with Piper
+ * as the offline fallback. Network-OPTIONAL: empty apiKey → Bart stays on Piper.
+ * `apiKey` is encrypted at rest (same AES-256-GCM as apiKeys) + masked in the
+ * GET /api/settings response; never logged.
+ */
+export interface ElevenLabsConfig {
+  /** ElevenLabs API key (ciphertext at rest). null/"" → ElevenLabs disabled. */
+  apiKey: string | null;
+  /** Bart's voice id. Default = Cassius (aGv5jHWKBy8K5xKvYeSX). */
+  bartVoiceId: string;
+  /** Model id. Default = eleven_multilingual_v2. */
+  model: string;
+}
+
 export interface PersistedSettings {
   version: number;
   defaultPersona: PersonaId;
@@ -94,6 +109,8 @@ export interface PersistedSettings {
   heartbeat: HeartbeatConfig;
   /** Web Capability TIER 0 (2026-06-02) — encrypted external API secrets. */
   apiKeys: ApiKeys;
+  /** Phase 7-C (v2.4.1) — ElevenLabs TTS for Bartimaeus (Piper fallback). */
+  elevenlabs: ElevenLabsConfig;
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -156,6 +173,13 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     usda_nass: null,
     noaa_cdo: null,
     fred: null,
+  },
+  // Phase 7-C: ElevenLabs disabled until the operator supplies a key; voice +
+  // model pre-filled with Cassius / eleven_multilingual_v2 per directive.
+  elevenlabs: {
+    apiKey: null,
+    bartVoiceId: "aGv5jHWKBy8K5xKvYeSX",
+    model: "eleven_multilingual_v2",
   },
 };
 
@@ -260,6 +284,12 @@ export async function readSettings(): Promise<PersistedSettings> {
       apiKeys: {
         ...DEFAULT_SETTINGS.apiKeys,
         ...(parsed.apiKeys ?? {}),
+      },
+      // Phase 7-C forward-compat: missing → default (no key, Cassius voice).
+      // Older settings.json files (pre-ElevenLabs) load cleanly.
+      elevenlabs: {
+        ...DEFAULT_SETTINGS.elevenlabs,
+        ...(parsed.elevenlabs ?? {}),
       },
     };
   } catch (e) {

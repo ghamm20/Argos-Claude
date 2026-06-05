@@ -87,7 +87,11 @@ export async function POST(req: NextRequest) {
       personaId: body.personaId,
     });
     // Reflect the engine that actually served this request.
-    const engine = result.voice === "bartimaeus-f5" ? "f5-tts" : "piper";
+    const engine = result.elevenlabsUsed
+      ? "elevenlabs"
+      : result.voice === "bartimaeus-f5"
+        ? "f5-tts"
+        : "piper";
 
     void appendAudit(
       "voice.spoken",
@@ -96,6 +100,8 @@ export async function POST(req: NextRequest) {
         voice: result.voice,
         durationMs: result.durationMs,
         audioBytes: result.wav.length,
+        // Phase 7-C — did ElevenLabs serve this turn? (Bartimaeus only.)
+        elevenlabs_used: !!result.elevenlabsUsed,
       },
       { sessionId: body.sessionId }
     ).catch((e) =>

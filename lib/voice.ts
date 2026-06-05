@@ -29,6 +29,9 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
+// Phase 7-C — ElevenLabs config (key decrypted at use; never logged).
+import { readSettings } from "./settings";
+import { decryptSecret } from "./web/secrets";
 
 // ----- paths -----------------------------------------------------
 
@@ -762,6 +765,126 @@ export interface SynthesizeResult {
   durationMs: number;
   voice: string;
   charCount: number;
+  /** Phase 7-C — true when ElevenLabs served this synth (Bartimaeus only). */
+  elevenlabsUsed?: boolean;
+}
+
+// ----- ElevenLabs (Phase 7-C) -----------------------------------
+//
+// Bartimaeus speaks in his ElevenLabs "Cassius" voice when an API key is
+// configured. Network-OPTIONAL: no key (or any failure) → silent fall-through
+// to F5/Piper. The key is read+decrypted at call time and NEVER logged.
+
+const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1/text-to-speech";
+// PCM @ 24 kHz mono 16-bit — wrapped in a WAV header so the response stays
+// honest audio/wav and reuses the existing WAV pipeline (no MP3 transcode, no
+// new dep). Available on ElevenLabs Starter tier and above; if a tier rejects
+// it the call fails → silent Piper fallback (doctrine).
+const ELEVENLABS_OUTPUT = "pcm_24000";
+const ELEVENLABS_SAMPLE_RATE = 24000;
+
+interface ElevenLabsResolved {
+  apiKey: string;
+  voiceId: string;
+  model: string;
+}
+
+/** Read + decrypt the ElevenLabs config. null when no key is set (Bart stays on
+ *  Piper, silently — doctrine). Never logs the key. */
+async function resolveElevenLabs(): Promise<ElevenLabsResolved | null> {
+  try {
+    const cfg = (await readSettings()).elevenlabs;
+    if (!cfg?.apiKey) return null;
+    const apiKey = await decryptSecret(cfg.apiKey);
+    if (!apiKey) return null;
+    return {
+      apiKey,
+      voiceId: (cfg.bartVoiceId || "aGv5jHWKBy8K5xKvYeSX").trim(),
+      model: (cfg.model || "eleven_multilingual_v2").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Wrap raw signed-16-bit-LE mono PCM in a 44-byte WAV header. */
+export function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
+  const channels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16); // PCM fmt chunk size
+  header.writeUInt16LE(1, 20); // audioFormat = PCM
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+/**
+ * Synthesize via ElevenLabs (Bartimaeus only). THROWS on any failure so the
+ * caller can silently fall back to Piper. The API key is sent only in the
+ * xi-api-key header and is never logged — error logs carry the HTTP status +
+ * a short response excerpt, not the key.
+ */
+async function synthesizeElevenLabs(
+  text: string,
+  cfg: ElevenLabsResolved
+): Promise<SynthesizeResult> {
+  const url = `${ELEVENLABS_BASE}/${encodeURIComponent(cfg.voiceId)}?output_format=${ELEVENLABS_OUTPUT}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25_000);
+  const start = Date.now();
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "xi-api-key": cfg.apiKey,
+        "content-type": "application/json",
+        accept: "audio/*",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: cfg.model,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.77,
+          style: 0,
+          use_speaker_boost: true,
+        },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 200);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`ElevenLabs HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
+    }
+    const pcm = Buffer.from(await res.arrayBuffer());
+    if (pcm.length === 0) throw new Error("ElevenLabs returned empty audio");
+    return {
+      wav: pcmToWav(pcm, ELEVENLABS_SAMPLE_RATE),
+      durationMs: Date.now() - start,
+      voice: "bartimaeus-elevenlabs",
+      charCount: text.length,
+      elevenlabsUsed: true,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Kokoro fallback voice (only used if engine === "kokoro" — which
@@ -802,11 +925,28 @@ export async function synthesizeText(
     );
   }
 
-  // Phase 7-C: Bartimaeus speaks in his cloned voice (F5-TTS) when the tool
-  // + reference clip are present. Dynamic import avoids a static circular
-  // dependency (voice-f5 imports helpers from here). Any F5 failure falls
-  // through to Piper so the voice path never breaks — graceful by design.
+  // Phase 7-C: Bartimaeus's voice chain — ElevenLabs (Cassius) → F5 clone →
+  // Piper. Each tier is network-/tool-OPTIONAL; ANY failure falls silently to
+  // the next so the voice path never breaks (doctrine).
   if (opts.personaId === "bartimaeus") {
+    // 1) ElevenLabs — Bart's primary voice WHEN an API key is configured.
+    //    No key → resolveElevenLabs() returns null and we fall through quietly
+    //    (the common offline case; not a warning). A configured key that fails
+    //    (network/API/tier) logs a non-secret warning, then falls through.
+    const elCfg = await resolveElevenLabs();
+    if (elCfg) {
+      try {
+        return await synthesizeElevenLabs(trimmed, elCfg);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[voice] ElevenLabs failed for Bartimaeus, falling back to Piper: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        );
+      }
+    }
+    // 2) F5 clone — only if present (Dynamic import avoids a circular dep).
     try {
       const { isF5Available, synthesizeF5 } = await import("./voice-f5");
       if (isF5Available()) {

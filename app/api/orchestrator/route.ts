@@ -25,9 +25,15 @@ import type {
 // Shared boot / guards
 // ---------------------------------------------------------------------------
 
-export async function ensureEnabled(req: NextRequest) {
+// Local helper — NOT exported: Next.js App Router route files may only export
+// route handlers (GET/POST/…) + config. Exporting this broke `next build`
+// (the route-type validator that tsc doesn't run). Fix: Phase 7-C, 2026-06-04.
+async function ensureEnabled(req: NextRequest): Promise<NextResponse | null> {
   const auth = await requireValidSession(req);
-  return auth; // null = authorized, otherwise { error, status }
+  // null = authorized → handler proceeds. Otherwise convert the AuthFailure
+  // into a real Response so handlers can `return guard` (route handlers must
+  // return void|Response, not a raw object). Fix: Phase 7-C, 2026-06-04.
+  return auth ? NextResponse.json({ error: auth.error }, { status: auth.status }) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -35,6 +41,14 @@ export async function ensureEnabled(req: NextRequest) {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
+  // Resource-lock control sub-path: POST /api/orchestrator/resource → delegate
+  // to handleResource (completes commit 4d38492 — the handler was written but
+  // never wired, which left it dead-code and broke `next build`). It runs its
+  // own auth guard. Fix: Phase 7-C, 2026-06-04.
+  if (new URL(req.url).pathname.replace(/\/+$/, "").endsWith("/resource")) {
+    return handleResource(req);
+  }
+
   const guard = await ensureEnabled(req);
   if (guard) return guard;
 
@@ -111,7 +125,8 @@ export async function GET(req: NextRequest) {
 // Resource lock control (POST /api/orchestrator/resource)
 // ---------------------------------------------------------------------------
 
-export async function handleResource(req: NextRequest) {
+// Local helper — NOT exported (Next route-export contract; see ensureEnabled).
+async function handleResource(req: NextRequest) {
   const guard = await ensureEnabled(req);
   if (guard) return guard;
 

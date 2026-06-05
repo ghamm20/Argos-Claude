@@ -3,7 +3,6 @@ import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { AVAILABLE_MODELS } from "@/lib/store";
 import { readSettings, writeSettings, type SettingsPatch } from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
-import { requireValidSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +18,16 @@ export async function GET() {
         configured: !!s.apiKeys?.github,
         hint: maskSecret(s.apiKeys?.github ?? null),
       },
+    },
+    // Phase 7-C: never leak the ElevenLabs key (even ciphertext). Surface only
+    // configured/hint + the non-secret voice id + model.
+    elevenlabs: {
+      apiKey: {
+        configured: !!s.elevenlabs?.apiKey,
+        hint: maskSecret(s.elevenlabs?.apiKey ?? null),
+      },
+      bartVoiceId: s.elevenlabs?.bartVoiceId ?? "",
+      model: s.elevenlabs?.model ?? "",
     },
   };
   return Response.json(masked);
@@ -58,12 +67,27 @@ interface SettingsPostBody {
   // Web Capability TIER 0 — API secrets. Sent as PLAINTEXT from the Settings
   // UI; encrypted server-side before storage. github:"" or null clears it.
   apiKeys?: Partial<{ github: string | null }>;
+  // Phase 7-C — ElevenLabs TTS config. apiKey PLAINTEXT in, encrypted at rest;
+  // "" or null clears it. bartVoiceId/model are plain config.
+  elevenlabs?: Partial<{ apiKey: string | null; bartVoiceId: string; model: string }>;
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireValidSession(req);
-  if (auth) return Response.json({ error: auth.error }, { status: auth.status });
-
+  // NOTE — POST /api/settings is intentionally NOT auth-gated.
+  //
+  // It is the bootstrap surface for operator auth itself: the PIN hash and the
+  // requirePin toggle are SET via this endpoint. Gating it (commit 5a335b9)
+  // was reverted (Phase 7-C, 2026-06-04) because it broke the app two ways:
+  //   1. Bootstrap deadlock — operatorPinHash is written here, but the gate
+  //      blocked the write, so auth could never be turned on through the API.
+  //   2. Total settings lockout under auth — NO client settings call site
+  //      (ApiKeysSection, HeartbeatSection, VoiceSection, PinGate, …) attaches
+  //      an Authorization token; only /api/chat does. So with requirePin=true
+  //      every settings save 401'd. Every release through v2.4.0 — and both
+  //      smoke-settings + auth-smoke — rely on this endpoint being reachable.
+  // The real auth boundary lives in /api/chat (guest vs operator prompt +
+  // memory suppression), which is unchanged. Do NOT re-add a gate here without
+  // first plumbing the operator token through every settings client call site.
   let body: SettingsPostBody;
   try {
     body = (await req.json()) as SettingsPostBody;
@@ -294,6 +318,39 @@ export async function POST(req: NextRequest) {
       }
     }
     patch.apiKeys = nextKeys;
+  }
+
+  // Phase 7-C — ElevenLabs config. Merge into the current object; encrypt the
+  // key at rest; never log it.
+  if (body.elevenlabs !== undefined) {
+    if (typeof body.elevenlabs !== "object" || body.elevenlabs === null) {
+      return Response.json({ error: "elevenlabs must be an object" }, { status: 400 });
+    }
+    const current = (await readSettings()).elevenlabs;
+    const next = { ...current };
+    if (body.elevenlabs.apiKey !== undefined) {
+      const v = body.elevenlabs.apiKey;
+      if (v === null || v === "") {
+        next.apiKey = null;
+      } else if (typeof v === "string") {
+        next.apiKey = await encryptSecret(v.trim());
+      } else {
+        return Response.json({ error: "elevenlabs.apiKey must be a string or null" }, { status: 400 });
+      }
+    }
+    if (body.elevenlabs.bartVoiceId !== undefined) {
+      if (typeof body.elevenlabs.bartVoiceId !== "string") {
+        return Response.json({ error: "elevenlabs.bartVoiceId must be a string" }, { status: 400 });
+      }
+      next.bartVoiceId = body.elevenlabs.bartVoiceId.trim();
+    }
+    if (body.elevenlabs.model !== undefined) {
+      if (typeof body.elevenlabs.model !== "string") {
+        return Response.json({ error: "elevenlabs.model must be a string" }, { status: 400 });
+      }
+      next.model = body.elevenlabs.model.trim();
+    }
+    patch.elevenlabs = next;
   }
 
   if (Object.keys(patch).length === 0) {
