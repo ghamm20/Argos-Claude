@@ -13,17 +13,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requestTool } from "@/lib/tools/executor";
 import { PERSONA_BY_ID } from "@/lib/personas";
-import { requireValidSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const auth = await requireValidSession(req);
-  if (auth) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
-  }
-
   let body: {
     toolId?: string;
     params?: Record<string, unknown>;

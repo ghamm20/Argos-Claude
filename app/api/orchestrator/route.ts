@@ -5,36 +5,23 @@
 //   GET  /api/orchestrator/state  → agent status HUD
 //   POST /api/orchestrator/resource → acquire / release locks (admin)
 //
-// Auth: every endpoint requires a valid bearer token via
-// lib/auth.ts.requireValidSession. This keeps the multi-agent layer
-// out of guest-mode hands and aligns with existing auth gating.
+// Auth (v2.4.1): session gating was REMOVED from these endpoints. It was
+// non-functional — requireValidSession only enforces when requirePin=true with
+// a PIN configured, and NO client attaches a bearer token to /api/orchestrator,
+// so "on" bricked the route and "off" did nothing. The operator-auth boundary
+// lives in /api/chat (guest vs operator prompt). requireValidSession stays
+// exported in lib/auth.ts, reserved for a future Operator Auth phase.
 //
 // Integration point: chat/route.ts and tools/execute can enqueue work
 // with the orchestrator instead of (or in addition to) running inline.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getOrchestrator } from "@/lib/agents/orchestrator";
-import { requireValidSession } from "@/lib/auth";
 import type {
   WorkItem,
   AgentId,
   ResourceKey,
 } from "@/lib/agents/schemas";
-
-// ---------------------------------------------------------------------------
-// Shared boot / guards
-// ---------------------------------------------------------------------------
-
-// Local helper — NOT exported: Next.js App Router route files may only export
-// route handlers (GET/POST/…) + config. Exporting this broke `next build`
-// (the route-type validator that tsc doesn't run). Fix: Phase 7-C, 2026-06-04.
-async function ensureEnabled(req: NextRequest): Promise<NextResponse | null> {
-  const auth = await requireValidSession(req);
-  // null = authorized → handler proceeds. Otherwise convert the AuthFailure
-  // into a real Response so handlers can `return guard` (route handlers must
-  // return void|Response, not a raw object). Fix: Phase 7-C, 2026-06-04.
-  return auth ? NextResponse.json({ error: auth.error }, { status: auth.status }) : null;
-}
 
 // ---------------------------------------------------------------------------
 // POST /api/orchestrator   → enqueue a work item
@@ -43,14 +30,10 @@ async function ensureEnabled(req: NextRequest): Promise<NextResponse | null> {
 export async function POST(req: NextRequest) {
   // Resource-lock control sub-path: POST /api/orchestrator/resource → delegate
   // to handleResource (completes commit 4d38492 — the handler was written but
-  // never wired, which left it dead-code and broke `next build`). It runs its
-  // own auth guard. Fix: Phase 7-C, 2026-06-04.
+  // never wired, which left it dead-code and broke `next build`).
   if (new URL(req.url).pathname.replace(/\/+$/, "").endsWith("/resource")) {
     return handleResource(req);
   }
-
-  const guard = await ensureEnabled(req);
-  if (guard) return guard;
 
   let body: Partial<WorkItem> | null = null;
   try {
@@ -102,9 +85,6 @@ export async function POST(req: NextRequest) {
 // ---------------------------------------------------------------------------
 
 export async function GET(req: NextRequest) {
-  const guard = await ensureEnabled(req);
-  if (guard) return guard;
-
   const orch = getOrchestrator();
   const url = new URL(req.url);
   const resource = url.pathname.replace(/\/api\/orchestrator\/?/, "");
@@ -125,11 +105,9 @@ export async function GET(req: NextRequest) {
 // Resource lock control (POST /api/orchestrator/resource)
 // ---------------------------------------------------------------------------
 
-// Local helper — NOT exported (Next route-export contract; see ensureEnabled).
+// Local helper — NOT exported (Next.js App Router route files may only export
+// route handlers + config).
 async function handleResource(req: NextRequest) {
-  const guard = await ensureEnabled(req);
-  if (guard) return guard;
-
   const orch = getOrchestrator();
   let body: { action: "acquire" | "release"; resource: ResourceKey; agentId?: AgentId } | null = null;
   try {
