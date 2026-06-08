@@ -61,6 +61,25 @@ export interface ElevenLabsConfig {
   model: string;
 }
 
+/**
+ * v2.4.2 Phase A — inference backend switch. Two INDEPENDENT axes:
+ *  - inferenceBackend / perPersonaBackend: route a persona's chat call to the
+ *    local Ollama daemon or the Nous Research API
+ *    (nvidia/nemotron-3-ultra:free, free tier).
+ *  - useReboundModels: a SEPARATE feature flag that swaps Juniper + Bobby to
+ *    the local gemma-4 model. Default off → nothing moves.
+ * nousApiKey is encrypted at rest (AES-256-GCM via lib/web/secrets.ts) and
+ * masked in GET /api/settings, exactly like the ElevenLabs key. Never logged.
+ */
+export type InferenceBackendChoice = "local" | "nous";
+export type PersonaBackendChoice = "local" | "nous" | "default";
+export interface PerPersonaBackend {
+  bartimaeus?: PersonaBackendChoice;
+  juniper?: PersonaBackendChoice;
+  sage?: PersonaBackendChoice;
+  bobby?: PersonaBackendChoice;
+}
+
 export interface PersistedSettings {
   version: number;
   defaultPersona: PersonaId;
@@ -111,6 +130,17 @@ export interface PersistedSettings {
   apiKeys: ApiKeys;
   /** Phase 7-C (v2.4.1) — ElevenLabs TTS for Bartimaeus (Piper fallback). */
   elevenlabs: ElevenLabsConfig;
+  /** v2.4.2 Phase A — global inference backend (default "local"). */
+  inferenceBackend: InferenceBackendChoice;
+  /** v2.4.2 Phase A — optional per-persona backend override; "default" (or
+   *  absent) respects the global inferenceBackend. */
+  perPersonaBackend: PerPersonaBackend;
+  /** v2.4.2 Phase A — Nous API key (ciphertext at rest). null → Nous disabled;
+   *  any "nous" route falls back to local. */
+  nousApiKey: string | null;
+  /** v2.4.2 Phase A — feature flag (SEPARATE from the backend switch): rebind
+   *  Juniper + Bobby to the local gemma-4 model. Default false → unchanged. */
+  useReboundModels: boolean;
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -181,6 +211,13 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     bartVoiceId: "aGv5jHWKBy8K5xKvYeSX",
     model: "eleven_multilingual_v2",
   },
+  // v2.4.2 Phase A — inference backend switch. Defaults keep everything LOCAL
+  // and nothing rebound, so the default deployment is byte-for-byte unchanged
+  // until the operator opts in.
+  inferenceBackend: "local",
+  perPersonaBackend: {},
+  nousApiKey: null,
+  useReboundModels: false,
 };
 
 export function configDir(): string {
@@ -291,6 +328,16 @@ export async function readSettings(): Promise<PersistedSettings> {
         ...DEFAULT_SETTINGS.elevenlabs,
         ...(parsed.elevenlabs ?? {}),
       },
+      // v2.4.2 Phase A forward-compat: missing → local defaults. Older
+      // settings.json files (pre-backend-switch) load cleanly. Enum-guarded so
+      // a malformed value can never select a non-existent backend.
+      inferenceBackend: parsed.inferenceBackend === "nous" ? "nous" : "local",
+      perPersonaBackend: { ...(parsed.perPersonaBackend ?? {}) },
+      nousApiKey:
+        parsed.nousApiKey === undefined
+          ? DEFAULT_SETTINGS.nousApiKey
+          : parsed.nousApiKey,
+      useReboundModels: parsed.useReboundModels === true,
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {

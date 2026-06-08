@@ -20,6 +20,7 @@
     "audit:verify": "node scripts/verify-audit-chain.mjs",
     "voice:smoke": "node scripts/smoke-voice.mjs",
     "phase7c:smoke": "node scripts/smoke-phase7c.mjs",
+    "phasea:smoke": "node scripts/smoke-phase-a.mjs",
     "voice:smoke-offline": "node scripts/smoke-voice.mjs --no-http",
     "voice:smoke-f5": "node scripts/smoke-voice-f5.mjs",
     "voice:f5-daemon": "node scripts/start-f5-daemon.mjs",

@@ -83,6 +83,19 @@ import type { MemoryPersonaScope } from "@/lib/memory/schema";
 // Operator Auth (2026-05-28) — auth-mode gate.
 import { readSettings } from "@/lib/settings";
 import { parseBearer, isTokenValid } from "@/lib/auth";
+// v2.4.2 Phase A — inference backend switch (local Ollama OR Nous free tier)
+// + the useReboundModels LOCAL model swap. The Nous path is non-streamed and
+// falls back to local silently on any failure. See lib/inference-backend.ts.
+import {
+  resolveBackend,
+  resolveLocalModel,
+  callNous,
+  type NousResult,
+} from "@/lib/inference-backend";
+import { decryptSecret } from "@/lib/web/secrets";
+// v2.4.2 Phase A — durable per-turn inference audit (backend + exact model +
+// latency + tokens + fallback reason). No pre-existing chat audit event existed.
+import { appendAudit } from "@/lib/audit";
 // Phase 10 (2026-05-28) — research orchestrator. needsResearch is
 // imported alongside so we can short-circuit without touching the
 // network on non-research turns.
@@ -226,6 +239,27 @@ function isConnRefused(e: unknown): boolean {
   if (!(e instanceof Error)) return false;
   const msg = e.message;
   return /ECONNREFUSED|fetch failed|other side closed|ENOTFOUND/i.test(msg);
+}
+
+/** v2.4.2 Phase A — replay a complete (non-streamed) Nous answer as a single
+ *  Ollama-shaped NDJSON content frame + a final done frame. The existing stream
+ *  reader/accumulator path then handles the Nous response IDENTICALLY to a local
+ *  Ollama stream — same wire format to the client, same downstream integrity
+ *  evaluation. */
+function makeSyntheticReader(
+  content: string
+): ReadableStreamDefaultReader<Uint8Array> {
+  const enc = new TextEncoder();
+  const rs = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(
+        enc.encode(JSON.stringify({ message: { content }, done: false }) + "\n")
+      );
+      c.enqueue(enc.encode(JSON.stringify({ done: true }) + "\n"));
+      c.close();
+    },
+  });
+  return rs.getReader();
 }
 
 function lastUserText(msgs: WireMessage[]): string | null {
@@ -460,15 +494,34 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ---- Inference backend + rebound-model resolution (v2.4.2 Phase A) ----
+  // Read settings ONCE here (reused for the auth gate below — no second disk
+  // read). Two INDEPENDENT axes:
+  //   - useReboundModels: a LOCAL model swap (Juniper/Bobby → gemma-4) that must
+  //     feed resolveChatModel below, so the rebound model is what actually runs
+  //     AND what the audit logs. Default off → models run unchanged.
+  //   - requestedBackend: local Ollama vs the Nous free tier, resolved per
+  //     persona. The Nous CALL happens later (after the message list is built).
+  const settings = await readSettings().catch(() => null);
+  const useReboundModels = settings?.useReboundModels === true;
+  const reboundLocalModel = resolveLocalModel(
+    body.personaId,
+    body.model,
+    useReboundModels
+  );
+  const requestedBackend = resolveBackend(body.personaId, settings);
+
   // ---- Vision routing (2026-06-02) ----
   // If any message carries an image, route this turn to the multimodal model
   // (gemma4-turbo) instead of the persona's text model. The persona system
   // prompt is still injected below, so the analysis returns in-character —
-  // only the MODEL changes. Text-only turns are unaffected.
+  // only the MODEL changes. Text-only turns are unaffected. The rebound model
+  // (when the flag is on) is the LOCAL model fed here; vision routing overrides
+  // it for image turns regardless.
   const hasImages = messagesHaveImages(body.messages);
   const { model: effectiveModel, vision: visionTurn } = resolveChatModel({
     hasImages,
-    personaModel: body.model,
+    personaModel: reboundLocalModel,
   });
   if (visionTurn) {
     console.info(
@@ -534,8 +587,8 @@ export async function POST(req: NextRequest) {
   // is left intact because vault content is operator-uploaded
   // documents; the operator's own materials don't change between
   // modes.
-  const authSettings = await readSettings().catch(() => null);
-  const requirePin = authSettings?.requirePin === true;
+  // v2.4.2 Phase A — reuse the settings already read above (single disk read).
+  const requirePin = settings?.requirePin === true;
   const bearer = parseBearer(req.headers.get("authorization"));
   const isOperator = !requirePin || isTokenValid(bearer);
 
@@ -864,78 +917,126 @@ export async function POST(req: NextRequest) {
     }),
   ];
 
-  // ---- Open Ollama stream ----
+  // ---- Inference backend switch (v2.4.2 Phase A) ----
+  // Resolve WHERE this turn runs. Default (requestedBackend === "local") leaves
+  // the Ollama path below byte-for-byte unchanged. On the "nous" path we make a
+  // single NON-STREAMED POST to nvidia/nemotron-3-ultra:free; ANY failure (no
+  // key, non-2xx, timeout, empty) falls back to local SILENTLY and records the
+  // literal reason — the operator never sees an error. Vision turns are always
+  // local (the multimodal model is local-only). The answered backend + EXACT
+  // model are logged at stream close; never a generic "nous" label.
+  const inferenceStart = Date.now();
+  let answeredBackend: "local" | "nous" = "local";
+  let answeredModel = effectiveModel;
+  let fallbackReason: string | null = null;
+  let nousResult: NousResult | null = null;
+
   const controller = new AbortController();
   const firstTokenTimer = setTimeout(() => {
     controller.abort();
   }, FIRST_TOKEN_TIMEOUT_MS);
 
-  let upstream: Response;
-  try {
-    // v1.1 Task 2: per-persona `think` flag (was hardcoded `false`).
-    // Default is `false` if persona doesn't declare — preserves the
-    // Phase 2-RB doctrine for safety on gemma4/qwen3-thinking models
-    // (they emit ALL output via message.thinking + zero into
-    // message.content when think:true). Each persona sets this
-    // explicitly in lib/personas.ts; see MODELS.md for which models
-    // require which.
-    // Vision Phase 1: force think:false on vision turns — gemma4-turbo is a
-    // gemma4 model that emits ALL output via message.thinking (and nothing
-    // into message.content) when think:true. Text turns keep the persona flag.
-    const personaThink = !visionTurn && persona.think === true;
-    upstream = await fetch(OLLAMA_CHAT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: ollamaMessages,
-        stream: true,
-        think: personaThink,
-        // The operator is mid-conversation with this persona — keep it warm so
-        // the next message doesn't cold-load. Background calls (extractor, etc.)
-        // use a short keep_alive so they can't evict it (keep-alive coordination).
-        keep_alive: KEEP_ALIVE_CONVERSATIONAL,
-        // Ollama's num_predict is the response token cap. Brief by default for
-        // Bartimaeus; /deep lifts it to 2000; null = uncapped (Sage, vision).
-        options: {
-          think: personaThink,
-          ...(maxTokens != null ? { num_predict: maxTokens } : {}),
-        },
-      }),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    clearTimeout(firstTokenTimer);
-    if (isAbortError(e)) {
-      return abort(504, "Ollama did not respond within 60s (first-token timeout)");
+  if (requestedBackend === "nous" && visionTurn) {
+    fallbackReason = "vision_turn_local_only";
+  } else if (requestedBackend === "nous") {
+    const nousKey = settings?.nousApiKey
+      ? await decryptSecret(settings.nousApiKey).catch(() => null)
+      : null;
+    if (!nousKey) {
+      fallbackReason = "nous_key_missing";
+    } else {
+      try {
+        nousResult = await callNous({
+          apiKey: nousKey,
+          messages: ollamaMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          maxTokens,
+        });
+        answeredBackend = "nous";
+        answeredModel = nousResult.model; // EXACT echoed id — logged verbatim
+      } catch (e) {
+        // Silent fallback to local (doctrine). Record the literal reason.
+        fallbackReason = `nous_error: ${
+          e instanceof Error ? e.message : String(e)
+        }`;
+      }
     }
-    if (isConnRefused(e)) {
-      return abort(
-        503,
-        `Ollama not reachable at ${OLLAMA_BASE}. Is \`ollama serve\` running?`
-      );
-    }
-    return abort(502, `upstream fetch failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  if (!upstream.ok) {
+  // ---- Open the response source: synthetic (Nous) OR the Ollama stream ----
+  let upstream: Response | null = null;
+  if (nousResult) {
+    // Nous already returned the full answer; there's no upstream stream to open.
     clearTimeout(firstTokenTimer);
-    const errBody = await upstream.text();
-    if (upstream.status === 404 || /not found|no such model/i.test(errBody)) {
-      return abort(404, `model not found: ${effectiveModel}`, {
-        hint: visionTurn
-          ? `Vision model missing. Run: ollama pull ${effectiveModel}`
-          : `Run: ollama pull ${effectiveModel}`,
+  } else {
+    try {
+      // v1.1 Task 2: per-persona `think` flag (was hardcoded `false`).
+      // Default is `false` if persona doesn't declare — preserves the
+      // Phase 2-RB doctrine for safety on gemma4/qwen3-thinking models
+      // (they emit ALL output via message.thinking + zero into
+      // message.content when think:true). Each persona sets this
+      // explicitly in lib/personas.ts; see MODELS.md for which models
+      // require which.
+      // Vision Phase 1: force think:false on vision turns — gemma4-turbo is a
+      // gemma4 model that emits ALL output via message.thinking (and nothing
+      // into message.content) when think:true. Text turns keep the persona flag.
+      const personaThink = !visionTurn && persona.think === true;
+      upstream = await fetch(OLLAMA_CHAT, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: effectiveModel,
+          messages: ollamaMessages,
+          stream: true,
+          think: personaThink,
+          // The operator is mid-conversation with this persona — keep it warm so
+          // the next message doesn't cold-load. Background calls (extractor, etc.)
+          // use a short keep_alive so they can't evict it (keep-alive coordination).
+          keep_alive: KEEP_ALIVE_CONVERSATIONAL,
+          // Ollama's num_predict is the response token cap. Brief by default for
+          // Bartimaeus; /deep lifts it to 2000; null = uncapped (Sage, vision).
+          options: {
+            think: personaThink,
+            ...(maxTokens != null ? { num_predict: maxTokens } : {}),
+          },
+        }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(firstTokenTimer);
+      if (isAbortError(e)) {
+        return abort(504, "Ollama did not respond within 60s (first-token timeout)");
+      }
+      if (isConnRefused(e)) {
+        return abort(
+          503,
+          `Ollama not reachable at ${OLLAMA_BASE}. Is \`ollama serve\` running?`
+        );
+      }
+      return abort(502, `upstream fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    if (!upstream.ok) {
+      clearTimeout(firstTokenTimer);
+      const errBody = await upstream.text();
+      if (upstream.status === 404 || /not found|no such model/i.test(errBody)) {
+        return abort(404, `model not found: ${effectiveModel}`, {
+          hint: visionTurn
+            ? `Vision model missing. Run: ollama pull ${effectiveModel}`
+            : `Run: ollama pull ${effectiveModel}`,
+          ollamaBody: errBody,
+        });
+      }
+      return abort(upstream.status, `ollama error ${upstream.status}`, {
         ollamaBody: errBody,
       });
     }
-    return abort(upstream.status, `ollama error ${upstream.status}`, {
-      ollamaBody: errBody,
-    });
-  }
-  if (!upstream.body) {
-    clearTimeout(firstTokenTimer);
-    return abort(502, "empty stream body from Ollama");
+    if (!upstream.body) {
+      clearTimeout(firstTokenTimer);
+      return abort(502, "empty stream body from Ollama");
+    }
   }
 
   // Build the retrieval event we'll emit after Ollama closes.
@@ -1034,7 +1135,23 @@ export async function POST(req: NextRequest) {
     injected: recall.injected,
   };
 
-  const reader = upstream.body.getReader();
+  // v2.4.2 Phase A — leading frame announcing WHICH backend + EXACT model
+  // answered this turn, plus any silent fallback reason. Drives a HUD row and
+  // lets smokes assert the backend without parsing the whole stream.
+  const backendEvent = {
+    type: "backend" as const,
+    backend: answeredBackend,
+    model: answeredModel,
+    fallbackReason,
+  };
+
+  // v2.4.2 Phase A — read from the Ollama stream OR a synthetic stream that
+  // replays the Nous answer as one Ollama-shaped frame. ALL downstream work
+  // (accumulate → tools → integrity → audit) is then identical for both
+  // backends — the Nous response goes through the same integrity evaluation.
+  const reader = nousResult
+    ? makeSyntheticReader(nousResult.content)
+    : upstream!.body!.getReader();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   // Phase 9: accumulate assistant response in a side buffer so we can
@@ -1045,6 +1162,10 @@ export async function POST(req: NextRequest) {
   // path. Failures here are swallowed and never surface to the user.
   let assistantBuf = "";
   let pendingLine = "";
+  // v2.4.2 Phase A — capture token counts from the Ollama final ("done") frame
+  // for the chat.inference audit. The Nous path supplies its own usage counts.
+  let localPromptTokens: number | null = null;
+  let localCompletionTokens: number | null = null;
   const accumulateContent = (chunkText: string) => {
     pendingLine += chunkText;
     let nl = pendingLine.indexOf("\n");
@@ -1055,9 +1176,20 @@ export async function POST(req: NextRequest) {
         try {
           const parsed = JSON.parse(line) as {
             message?: { content?: string };
+            done?: boolean;
+            prompt_eval_count?: number;
+            eval_count?: number;
           };
           if (parsed?.message?.content) {
             assistantBuf += parsed.message.content;
+          }
+          if (parsed?.done === true) {
+            if (typeof parsed.prompt_eval_count === "number") {
+              localPromptTokens = parsed.prompt_eval_count;
+            }
+            if (typeof parsed.eval_count === "number") {
+              localCompletionTokens = parsed.eval_count;
+            }
           }
         } catch {
           // Ignore parse failures — Ollama occasionally splits NDJSON
@@ -1086,6 +1218,11 @@ export async function POST(req: NextRequest) {
         // Memory Phase — emit the recall frame in the same leading batch.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(memoryEvent)}\n`)
+        );
+        // v2.4.2 Phase A — backend frame in the same leading batch so the HUD
+        // can show which backend/model answered as soon as the turn starts.
+        controllerInner.enqueue(
+          encoder.encode(`${JSON.stringify(backendEvent)}\n`)
         );
       } catch {
         /* hint frame is best-effort; ignore */
@@ -1341,6 +1478,38 @@ export async function POST(req: NextRequest) {
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(researchEvent)}\n`)
         );
+
+        // ---- Inference audit (v2.4.2 Phase A) ----
+        // Durable, per-turn record of the LITERAL backend + exact model that
+        // answered, latency, token counts, and any silent fallback reason. No
+        // interpretation. There was no pre-existing chat audit event, so this
+        // adds the `chat.inference` kind. Best-effort: never breaks the stream.
+        try {
+          const auditPrompt = nousResult
+            ? nousResult.promptTokens
+            : localPromptTokens;
+          const auditCompletion = nousResult
+            ? nousResult.completionTokens
+            : localCompletionTokens;
+          const auditTotal = nousResult
+            ? nousResult.totalTokens
+            : auditPrompt != null && auditCompletion != null
+              ? auditPrompt + auditCompletion
+              : null;
+          await appendAudit("chat.inference", {
+            persona: body.personaId,
+            backend: answeredBackend,
+            model: answeredModel,
+            latency_ms: Date.now() - inferenceStart,
+            prompt_tokens: auditPrompt,
+            completion_tokens: auditCompletion,
+            total_tokens: auditTotal,
+            fallback_reason: fallbackReason,
+          });
+        } catch {
+          /* audit is best-effort; never break the chat stream */
+        }
+
         controllerInner.close();
         // Phase 11 — release the in-flight slot on natural stream
         // close (scheduler can now tick).
@@ -1428,6 +1597,11 @@ export async function POST(req: NextRequest) {
       // clients / smokes can read the routing decision from headers alone.
       "x-vision-model": effectiveModel,
       "x-vision-used": visionTurn ? "true" : "false",
+      // v2.4.2 Phase A — backend mirror so smokes can assert which backend +
+      // EXACT model answered (and any silent fallback) from headers alone.
+      "x-inference-backend": answeredBackend,
+      "x-inference-model": answeredModel,
+      "x-inference-fallback": fallbackReason ?? "none",
     },
   });
 }

@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { AVAILABLE_MODELS } from "@/lib/store";
-import { readSettings, writeSettings, type SettingsPatch } from "@/lib/settings";
+import {
+  readSettings,
+  writeSettings,
+  type SettingsPatch,
+  type PerPersonaBackend,
+} from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
 
 export const runtime = "nodejs";
@@ -28,6 +33,13 @@ export async function GET() {
       },
       bartVoiceId: s.elevenlabs?.bartVoiceId ?? "",
       model: s.elevenlabs?.model ?? "",
+    },
+    // v2.4.2 Phase A — never leak the Nous key (even ciphertext). inferenceBackend
+    // / perPersonaBackend / useReboundModels are non-secret and pass through via
+    // the `...s` spread above; only nousApiKey is replaced with a status view.
+    nousApiKey: {
+      configured: !!s.nousApiKey,
+      hint: maskSecret(s.nousApiKey ?? null),
     },
   };
   return Response.json(masked);
@@ -70,6 +82,12 @@ interface SettingsPostBody {
   // Phase 7-C — ElevenLabs TTS config. apiKey PLAINTEXT in, encrypted at rest;
   // "" or null clears it. bartVoiceId/model are plain config.
   elevenlabs?: Partial<{ apiKey: string | null; bartVoiceId: string; model: string }>;
+  // v2.4.2 Phase A — inference backend switch. nousApiKey PLAINTEXT in, encrypted
+  // at rest; "" or null clears it. The rest are plain config.
+  inferenceBackend?: string;
+  perPersonaBackend?: Record<string, unknown>;
+  nousApiKey?: string | null;
+  useReboundModels?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -351,6 +369,68 @@ export async function POST(req: NextRequest) {
       next.model = body.elevenlabs.model.trim();
     }
     patch.elevenlabs = next;
+  }
+
+  // v2.4.2 Phase A — inference backend switch.
+  if (body.inferenceBackend !== undefined) {
+    if (body.inferenceBackend !== "local" && body.inferenceBackend !== "nous") {
+      return Response.json(
+        { error: "inferenceBackend must be 'local' or 'nous'" },
+        { status: 400 }
+      );
+    }
+    patch.inferenceBackend = body.inferenceBackend;
+  }
+  if (body.perPersonaBackend !== undefined) {
+    if (typeof body.perPersonaBackend !== "object" || body.perPersonaBackend === null) {
+      return Response.json(
+        { error: "perPersonaBackend must be an object" },
+        { status: 400 }
+      );
+    }
+    const ALLOWED_PERSONAS = ["bartimaeus", "juniper", "sage", "bobby"];
+    const ALLOWED_CHOICES = ["local", "nous", "default"];
+    const merged: PerPersonaBackend = {
+      ...(await readSettings()).perPersonaBackend,
+    };
+    for (const [k, v] of Object.entries(body.perPersonaBackend)) {
+      if (!ALLOWED_PERSONAS.includes(k)) {
+        return Response.json(
+          { error: `perPersonaBackend: unknown persona '${k}'` },
+          { status: 400 }
+        );
+      }
+      if (typeof v !== "string" || !ALLOWED_CHOICES.includes(v)) {
+        return Response.json(
+          { error: `perPersonaBackend.${k} must be 'local' | 'nous' | 'default'` },
+          { status: 400 }
+        );
+      }
+      (merged as Record<string, string>)[k] = v;
+    }
+    patch.perPersonaBackend = merged;
+  }
+  if (body.nousApiKey !== undefined) {
+    const v = body.nousApiKey;
+    if (v === null || v === "") {
+      patch.nousApiKey = null;
+    } else if (typeof v === "string") {
+      patch.nousApiKey = await encryptSecret(v.trim());
+    } else {
+      return Response.json(
+        { error: "nousApiKey must be a string or null" },
+        { status: 400 }
+      );
+    }
+  }
+  if (body.useReboundModels !== undefined) {
+    if (typeof body.useReboundModels !== "boolean") {
+      return Response.json(
+        { error: "useReboundModels must be a boolean" },
+        { status: 400 }
+      );
+    }
+    patch.useReboundModels = body.useReboundModels;
   }
 
   if (Object.keys(patch).length === 0) {
