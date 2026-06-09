@@ -1436,6 +1436,7 @@ export async function POST(req: NextRequest) {
                       description: outcome.description,
                       risks: outcome.risks,
                       reversible: outcome.reversible,
+                      plan: outcome.plan ?? null,
                     })}\n`
                   )
                 );

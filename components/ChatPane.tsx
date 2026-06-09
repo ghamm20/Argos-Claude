@@ -34,6 +34,7 @@ import {
 import {
   ToolApprovalDialog,
   type ToolApprovalReq,
+  type ToolPlanStep,
 } from "./tools/ToolApprovalDialog";
 import { PERSONA_BY_ID, type PersonaId } from "@/lib/personas";
 import { chatToMarkdown, exportFilename } from "@/lib/chat-export";
@@ -479,6 +480,7 @@ interface OllamaStreamLine {
   description?: string;
   risks?: string;
   reversible?: boolean;
+  plan?: ToolPlanStep[] | null;
 }
 
 export function ChatPane() {
@@ -976,6 +978,7 @@ export function ChatPane() {
                 description: data.description ?? "",
                 risks: data.risks ?? "",
                 reversible: data.reversible === true,
+                plan: Array.isArray(data.plan) ? data.plan : undefined,
               });
               continue;
             }

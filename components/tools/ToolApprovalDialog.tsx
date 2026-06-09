@@ -11,6 +11,13 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, X } from "lucide-react";
 
+export interface ToolPlanStep {
+  op: string;
+  path: string;
+  dest?: string;
+  restorePoint: boolean;
+}
+
 export interface ToolApprovalReq {
   approvalId: string;
   toolId: string;
@@ -18,6 +25,8 @@ export interface ToolApprovalReq {
   description: string;
   risks: string;
   reversible: boolean;
+  /** Stage 1 — dry-run manifest: the exact steps that will run on approval. */
+  plan?: ToolPlanStep[];
 }
 
 export function ToolApprovalDialog({
@@ -87,6 +96,33 @@ export function ToolApprovalDialog({
 
         <div className="text-[14px] text-neutral-100 font-medium mb-1">{req.tool}</div>
         <div className="text-[12px] text-neutral-400 mb-3">{req.description}</div>
+
+        {req.plan && req.plan.length > 0 && (
+          <div className="rounded border border-neutral-700/70 bg-neutral-900/50 px-3 py-2 mb-3">
+            <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-400 mb-1.5">
+              Dry run — {req.plan.length} {req.plan.length === 1 ? "operation" : "operations"} will run
+            </div>
+            <ol className="space-y-1">
+              {req.plan.map((s, i) => (
+                <li key={i} className="flex items-start gap-2 text-[12px]">
+                  <span className="text-neutral-600 tabular-nums">{i + 1}.</span>
+                  <span className="font-mono uppercase text-[10px] mt-0.5 px-1 rounded bg-neutral-800 text-neutral-300">
+                    {s.op}
+                  </span>
+                  <span className="text-neutral-200 font-mono break-all">
+                    {s.path}
+                    {s.dest && <span className="text-neutral-500"> → {s.dest}</span>}
+                  </span>
+                  {s.restorePoint && (
+                    <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-emerald-400/80">
+                      restore pt
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
 
         <div className="rounded border border-amber-800/50 bg-amber-950/30 px-3 py-2 mb-3">
           <div className="text-[10px] uppercase tracking-[0.16em] text-amber-400 mb-1">

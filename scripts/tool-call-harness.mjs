@@ -391,6 +391,40 @@ async function main() {
     process.exit(clean === TRIALS ? 0 : 1);
   }
 
+  // --batch-probe: Stage 1 — does hermes3 emit a clean file_ops BATCH op for a
+  // multi-step request, against the current production block? Validates the
+  // nested {operation:"batch", ops:[...]} shape. Exit 1 unless ≥2/3 clean.
+  if (process.argv.includes("--batch-probe")) {
+    const MODEL = "hermes3:8b";
+    const prompt = assembleProductionCurrent(parts);
+    const task =
+      "Use file_ops to do BOTH of these in one step: create the folder " +
+      "workspace/reports/2026, and move workspace/harness-test.txt into it.";
+    console.log(`[harness] BATCH-PROBE: ${MODEL} vs current production block`);
+    let cleanBatch = 0;
+    for (let t = 1; t <= TRIALS; t++) {
+      process.stdout.write(`[harness] ${MODEL} batch trial ${t}/${TRIALS} ... `);
+      const r = await callOllama(MODEL, prompt, task);
+      let ok = false, why = r.error ?? "no batch";
+      if (!r.error) {
+        const m = r.content.match(/<tool>([\s\S]*?)<\/tool>/i);
+        try {
+          const obj = m ? JSON.parse(m[1].trim()) : null;
+          const ops = obj?.params?.ops;
+          const opName = (obj?.params?.operation ?? obj?.params?.op ?? obj?.params?.action ?? "").toLowerCase();
+          if (obj?.id === "file_ops" && opName === "batch" && Array.isArray(ops) && ops.length >= 2 &&
+              ops.every((o) => typeof (o.operation ?? o.op ?? o.action) === "string" && typeof o.path === "string")) {
+            ok = true; why = `${ops.length} ops: ${ops.map((o) => (o.operation ?? o.op ?? o.action)).join("+")}`;
+          } else { why = `not a valid batch: ${m ? m[1].trim().slice(0, 120) : r.content.slice(0, 120)}`; }
+        } catch { why = `bad json: ${(m ? m[1] : r.content).slice(0, 120)}`; }
+      }
+      if (ok) cleanBatch++;
+      console.log(`${ok ? "BATCH-OK" : "MISS"} [${why}] (${r.latencyMs} ms)`);
+    }
+    console.log(`\n[harness] batch-probe: ${cleanBatch}/${TRIALS} clean batch emissions`);
+    process.exit(cleanBatch >= 2 ? 0 : 1);
+  }
+
   const promptA = assemblePromptA(parts);
   const promptB = assemblePromptB(parts);
   console.log(`[harness] PROMPT A (verbatim production): ${promptA.length} chars`);

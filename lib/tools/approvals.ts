@@ -12,7 +12,7 @@
 // outlives the chat turn should expire, not resurrect.
 
 import { randomUUID } from "node:crypto";
-import type { ToolContext } from "./types";
+import type { ToolContext, ToolPlanStep } from "./types";
 
 export const APPROVAL_TIMEOUT_MS = 60_000;
 
@@ -25,6 +25,11 @@ export interface Disclosure {
   risks: string;
   /** Whether the action is reversible. */
   reversible: boolean;
+  /** Stage 1 (2026-06-09) — dry-run manifest: the exact steps that will run on
+   *  approval (op + path + restore-point per step). Present for file_ops
+   *  (single op = one step; batch = N steps); absent for tools without a
+   *  disclose() hook. */
+  plan?: ToolPlanStep[];
 }
 
 export interface PendingApproval {

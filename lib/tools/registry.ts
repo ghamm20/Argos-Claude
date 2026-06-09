@@ -490,16 +490,17 @@ export const TOOLS: ToolDefinition[] = [
   {
     id: "file_ops",
     name: "File System Operations",
-    description: "read/write/move/list/delete within ARGOS_ROOT (hard boundary).",
+    description: "read/write/move/copy/mkdir/list/delete (+ batch) within ARGOS_ROOT (hard boundary).",
     category: "system",
-    requiresApproval: fileOps.requiresApproval, // write/move/delete only
-    requiresRestore: fileOps.requiresRestore, // delete only
+    requiresApproval: fileOps.requiresApproval, // write tier (+ any gated batch op)
+    requiresRestore: fileOps.requiresRestore, // delete (or a batch containing one)
     dangerous: true,
     reversible: true,
     risks:
-      "Writes/moves/deletes files inside ARGOS_ROOT only. Deletes create a restore point first.",
+      "Writes/moves/copies/creates/deletes files inside ARGOS_ROOT only. Deletes create a restore point first.",
     validate: fileOps.validate,
     restorePaths: fileOps.restorePaths,
+    disclose: fileOps.disclose, // Stage 1 — dry-run manifest for the approval card
     execute: fileOps.execute,
   },
   {

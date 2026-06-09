@@ -29,18 +29,30 @@ import {
   type ToolContext,
   type ToolResult,
   type ToolDefinition,
+  type ToolPlanStep,
 } from "./types";
 
-/** Build the operator-facing disclosure for a tool call. */
+/** Build the operator-facing disclosure for a tool call. A tool may implement
+ *  disclose() to supply a structured dry-run manifest (Stage 1) + tailored
+ *  description/risks/reversible; otherwise we fall back to the static fields. */
 export function discloseTool(
   tool: ToolDefinition,
   params: Record<string, unknown>
 ): Disclosure {
+  let custom: ReturnType<NonNullable<ToolDefinition["disclose"]>> | null = null;
+  if (tool.disclose) {
+    try {
+      custom = tool.disclose(params);
+    } catch {
+      custom = null; // never let a disclose() bug block the approval prompt
+    }
+  }
   const paramKeys = Object.keys(params);
   const paramHint = paramKeys.length
     ? ` (params: ${paramKeys.slice(0, 6).join(", ")})`
     : "";
   const risks =
+    custom?.risks ??
     tool.risks ??
     (tool.requiresRestore
       ? "Irreversible without the restore point ARGOS creates first."
@@ -48,9 +60,10 @@ export function discloseTool(
         ? "Writes or sends data; review before approving."
         : "No destructive side effects.");
   return {
-    description: `${tool.name}: ${tool.description}${paramHint}`,
+    description: custom?.description ?? `${tool.name}: ${tool.description}${paramHint}`,
     risks,
-    reversible: tool.reversible,
+    reversible: custom?.reversible ?? tool.reversible,
+    ...(custom?.plan ? { plan: custom.plan } : {}),
   };
 }
 
@@ -64,6 +77,8 @@ export type ToolRequestOutcome =
       description: string;
       risks: string;
       reversible: boolean;
+      /** Stage 1 — dry-run manifest (op + path + restore-point per step). */
+      plan?: ToolPlanStep[];
     };
 
 /**
@@ -112,6 +127,7 @@ export async function requestTool(
       description: disclosure.description,
       risks: disclosure.risks,
       reversible: disclosure.reversible,
+      ...(disclosure.plan ? { plan: disclosure.plan } : {}),
     };
   }
   // Safe tool — execute immediately.

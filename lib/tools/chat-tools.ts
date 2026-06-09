@@ -191,8 +191,11 @@ const TOOL_MECHANICS = [
 // stalled on disclose-without-emitting (Orchestrator refused 3/3 without the
 // approval-flow note, emitted 3/3 clean with it).
 const FILE_OPS_PARAMS_SCHEMA = [
-  'file_ops params: {"operation": "read"|"write"|"move"|"list"|"delete", "path": string, "content": string (write only), "dest": string (move only)}',
+  'file_ops params: {"operation": "read"|"write"|"move"|"copy"|"mkdir"|"list"|"delete", "path": string, "content": string (write only), "dest": string (move/copy only)}',
   'The key is "operation" — never "action", "op_type", or any other name.',
+  'For MULTIPLE file operations in one request, emit ONE batch call (not several tags):',
+  '{"id":"file_ops","params":{"operation":"batch","ops":[{"operation":"mkdir","path":"reports/2026"},{"operation":"move","path":"x.txt","dest":"reports/2026/x.txt"}]}}',
+  "The operator approves the whole batch once, after reviewing the manifest.",
 ].join("\n");
 
 const APPROVAL_FLOW_NOTE =

@@ -63,6 +63,33 @@ export function resolveGov(
   }
 }
 
+/** One step in an operator-facing dry-run manifest (Stage 1, 2026-06-09). A
+ *  gated tool can disclose EXACTLY what it will do, step by step, so the
+ *  approval card shows the plan (op + path + whether a restore point is taken)
+ *  before the operator confirms. A single op is a one-step plan; a file_ops
+ *  batch is N steps. */
+export interface ToolPlanStep {
+  /** The operation that will run (e.g. "mkdir", "move", "delete"). */
+  op: string;
+  /** Primary path, relative to ARGOS_ROOT. */
+  path: string;
+  /** Destination, for move/copy. */
+  dest?: string;
+  /** True when this step creates a restore point before running. */
+  restorePoint: boolean;
+}
+
+/** Structured disclosure a tool can produce for its approval card. All fields
+ *  optional — the executor falls back to the static description/risks when a
+ *  tool doesn't implement disclose(). */
+export interface ToolDisclosure {
+  description?: string;
+  risks?: string;
+  reversible?: boolean;
+  /** Dry-run manifest: the exact steps that will run on approval. */
+  plan?: ToolPlanStep[];
+}
+
 export interface ToolDefinition {
   id: string;
   name: string;
@@ -86,6 +113,11 @@ export interface ToolDefinition {
   /** For restore-required tools: the files to snapshot BEFORE executing,
    *  derived from the call params. */
   restorePaths?: (params: Record<string, unknown>) => string[];
+  /** Stage 1 (2026-06-09) — structured dry-run disclosure for the approval
+   *  card. When present, the executor uses it to build the operator manifest
+   *  (op + path + restore-point per step). file_ops implements this so a batch
+   *  shows every step before approval. */
+  disclose?: (params: Record<string, unknown>) => ToolDisclosure;
   execute: ToolExecute;
 }
 
