@@ -28,6 +28,7 @@ import * as contractExtract from "./contract-extract";
 import * as threatAssess from "./threat-assess";
 import * as fileOps from "./file-ops";
 import * as shellExec from "./shell-exec";
+import * as tasks from "./tasks";
 import * as oculus from "./oculus-integration";
 import * as mirofish from "./mirofish-integration";
 // Web Capability TIER 1 (2026-06-02) — keyless knowledge sources.
@@ -516,6 +517,22 @@ export const TOOLS: ToolDefinition[] = [
       "Executes a command on this machine. Whitelist-only; non-whitelisted commands are denied. A restore point is created first.",
     validate: shellExec.validate,
     execute: shellExec.execute,
+  },
+  {
+    // Stage 2 (2026-06-09) — task ledger. UNGATED: a ledger, not an executor
+    // (writes only to state/tasks + the audit chain; no file/network side
+    // effects). Still audited on every mutation.
+    id: "tasks",
+    name: "Task Ledger",
+    description: "create/list/complete/cancel operator tasks (ledger only — no side effects).",
+    category: "system",
+    requiresApproval: false,
+    requiresRestore: false,
+    dangerous: false,
+    reversible: true,
+    risks: "No destructive side effects — records tasks in the ARGOS ledger only.",
+    validate: tasks.validate,
+    execute: tasks.execute,
   },
   // ---- Web Capability TIER 4 (v2.4.0) — 19 operator-specific sources ----
   ...TIER4,

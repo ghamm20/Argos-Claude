@@ -12,6 +12,7 @@ import { AuthSection } from "./settings/AuthSection";
 import { HeartbeatSection } from "./settings/HeartbeatSection";
 import { TwilioSection } from "./settings/TwilioSection";
 import { ApiKeysSection } from "./settings/ApiKeysSection";
+import { TasksSection } from "./settings/TasksSection";
 import type { RuntimeInfo } from "@/lib/runtime-info";
 
 type SectionId =
@@ -23,6 +24,7 @@ type SectionId =
   | "heartbeat"
   | "alerts"
   | "apikeys"
+  | "tasks"
   | "auth"
   | "about";
 
@@ -47,6 +49,8 @@ const SECTIONS: SectionProps[] = [
   { id: "heartbeat", label: "Heartbeat" },
   { id: "alerts", label: "Alerts (SMS)" },
   { id: "apikeys", label: "API Keys" },
+  // Stage 2 (2026-06-09) — read-only task ledger view.
+  { id: "tasks", label: "Tasks" },
   { id: "about", label: "About" },
 ];
 
@@ -99,6 +103,7 @@ export function SettingsCenterPane({
           {active === "heartbeat" && <HeartbeatSection />}
           {active === "alerts" && <TwilioSection />}
           {active === "apikeys" && <ApiKeysSection />}
+          {active === "tasks" && <TasksSection />}
           {active === "auth" && <AuthSection />}
           {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>

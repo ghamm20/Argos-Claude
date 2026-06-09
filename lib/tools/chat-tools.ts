@@ -203,6 +203,13 @@ const APPROVAL_FLOW_NOTE =
   "intercepts it and routes it to the operator approval queue — emitting the tag IS " +
   "the disclosure. Do not refuse; do not describe the operation without emitting the tag.";
 
+// Stage 2 (2026-06-09) — tasks ledger schema, included only when the persona
+// holds the tasks tool. Kept as tight as the file_ops spec.
+const TASKS_PARAMS_SCHEMA = [
+  'tasks params: {"operation": "create"|"list"|"complete"|"cancel", "title": string (create), "due": string ISO date (create, optional), "note": string (optional), "taskId": string (complete/cancel)}',
+  'The key is "operation". tasks is a ledger — it never touches files or the network, so it runs without approval.',
+].join("\n");
+
 // Bart-only rich source-routing guidance (references the full tool set).
 const FULL_SOURCE_GUIDANCE = [
   "FACTUAL QUERIES — chain_search_to_read FIRST. For factual questions about people, " +
@@ -247,10 +254,12 @@ export function buildToolAwarenessBlock(toolIds?: string[]): string {
   // for an unheld tool invites out-of-scope calls. The approval-flow note is
   // universal: every persona has at least one gated tool shape.
   const hasFileOps = !toolIds || toolIds.includes("file_ops");
+  const hasTasks = !toolIds || toolIds.includes("tasks");
   return [
     TOOL_MECHANICS,
     "",
     ...(hasFileOps ? [FILE_OPS_PARAMS_SCHEMA, ""] : []),
+    ...(hasTasks ? [TASKS_PARAMS_SCHEMA, ""] : []),
     APPROVAL_FLOW_NOTE,
     "",
     guidance,
