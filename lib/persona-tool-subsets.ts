@@ -76,6 +76,7 @@ export const PERSONA_TOOL_SUBSETS: Record<PersonaId, string[] | "*"> = {
     "schedule_query",
     "csv_analysis",
     "tasks", // Stage 2 — task ledger (ungated)
+    "email_read", // Stage 3 — read-only email (untrusted content guards)
     // Weather / data
     "open_meteo_weather",
     // Tier 4 (v2.4.0) — security ops + financial (frankfurter_fx promised here).

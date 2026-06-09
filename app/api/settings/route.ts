@@ -42,6 +42,14 @@ export async function GET() {
       configured: !!s.nousApiKey,
       hint: maskSecret(s.nousApiKey ?? null),
     },
+    // Stage 3 — never leak Gmail OAuth secrets. clientId is a non-secret
+    // identifier; clientSecret + refreshToken are masked status views.
+    gmail: {
+      clientId: s.gmail?.clientId ?? null,
+      clientSecret: { configured: !!s.gmail?.clientSecret, hint: maskSecret(s.gmail?.clientSecret ?? null) },
+      refreshToken: { configured: !!s.gmail?.refreshToken, hint: maskSecret(s.gmail?.refreshToken ?? null) },
+      connected: !!(s.gmail?.clientId && s.gmail?.clientSecret && s.gmail?.refreshToken),
+    },
   };
   return Response.json(masked);
 }
@@ -89,6 +97,9 @@ interface SettingsPostBody {
   perPersonaBackend?: Record<string, unknown>;
   // Gate 2 (2026-06-09) — per-persona cloud data policy ("full" | "redacted").
   cloudDataPolicy?: Record<string, unknown>;
+  // Stage 3 (2026-06-09) — Gmail read-only OAuth creds. clientSecret +
+  // refreshToken arrive PLAINTEXT, encrypted server-side before storage.
+  gmail?: { clientId?: string | null; clientSecret?: string | null; refreshToken?: string | null };
   nousApiKey?: string | null;
   useReboundModels?: boolean;
   // Tool-call enablement (2026-06-09) — dedicated tool-emission model for
@@ -447,6 +458,24 @@ export async function POST(req: NextRequest) {
       else delete (merged as Record<string, string>)[k];
     }
     patch.cloudDataPolicy = merged;
+  }
+  if (body.gmail !== undefined) {
+    if (typeof body.gmail !== "object" || body.gmail === null) {
+      return Response.json({ error: "gmail must be an object" }, { status: 400 });
+    }
+    const current = (await readSettings()).gmail;
+    const next = { ...current };
+    if (body.gmail.clientId !== undefined) {
+      next.clientId = body.gmail.clientId === null || body.gmail.clientId === "" ? null : String(body.gmail.clientId).trim();
+    }
+    for (const field of ["clientSecret", "refreshToken"] as const) {
+      const val = body.gmail[field];
+      if (val === undefined) continue;
+      if (val === null || val === "") next[field] = null;
+      else if (typeof val === "string") next[field] = await encryptSecret(val.trim());
+      else return Response.json({ error: `gmail.${field} must be a string or null` }, { status: 400 });
+    }
+    patch.gmail = next;
   }
   if (body.nousApiKey !== undefined) {
     const v = body.nousApiKey;

@@ -89,7 +89,8 @@ export type ToolRequestOutcome =
 export async function requestTool(
   toolId: string,
   params: Record<string, unknown>,
-  ctx: ToolContext
+  ctx: ToolContext,
+  opts: { forceApproval?: boolean } = {}
 ): Promise<ToolRequestOutcome> {
   const tool = getTool(toolId);
   if (!tool) {
@@ -110,7 +111,10 @@ export async function requestTool(
       return { kind: "result", result: res };
     }
   }
-  if (resolveGov(tool.requiresApproval, params)) {
+  // Guard 3 (Stage 3): when email content is in the turn's context, the route
+  // passes forceApproval — even a normally-safe/ungated tool must be confirmed
+  // by the operator (email may have injected the instruction).
+  if (opts.forceApproval || resolveGov(tool.requiresApproval, params)) {
     const disclosure = discloseTool(tool, params);
     const a = registerApproval({
       toolId: tool.id,

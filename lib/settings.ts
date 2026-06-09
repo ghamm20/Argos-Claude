@@ -71,6 +71,15 @@ export interface ElevenLabsConfig {
  * nousApiKey is encrypted at rest (AES-256-GCM via lib/web/secrets.ts) and
  * masked in GET /api/settings, exactly like the ElevenLabs key. Never logged.
  */
+export interface GmailConfig {
+  /** OAuth client id (non-secret identifier). */
+  clientId: string | null;
+  /** OAuth client secret — ciphertext at rest. */
+  clientSecret: string | null;
+  /** OAuth refresh token — ciphertext at rest. Minted once via gmail-auth. */
+  refreshToken: string | null;
+}
+
 export type InferenceBackendChoice = "local" | "nous";
 export type PersonaBackendChoice = "local" | "nous" | "default";
 // Gate 2 (2026-06-09) — per-persona cloud data policy. Governs what local
@@ -157,6 +166,11 @@ export interface PersistedSettings {
   /** v2.4.2 Phase A — feature flag (SEPARATE from the backend switch): rebind
    *  Juniper + Bobby to the local gemma-4 model. Default false → unchanged. */
   useReboundModels: boolean;
+  /** Stage 3 (2026-06-09) — Gmail read-only OAuth credentials. clientSecret +
+   *  refreshToken are ciphertext at rest; clientId is a non-secret identifier.
+   *  All null until the operator mints a refresh token (scripts/gmail-auth.mjs).
+   *  Scope is gmail.readonly — the token cannot send/delete/modify. */
+  gmail: GmailConfig;
   /** Tool-call enablement (2026-06-09) — the dedicated tool-emission model.
    *  When the operator EXPLICITLY commands a tool (isExplicitToolRequest),
    *  /api/chat routes that turn to this model — same seam as vision routing:
@@ -250,6 +264,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
   // (round 2, prompt B: 3/3 clean, ~0.7s warm, 4.7 GB — fits VRAM whole).
   toolExecutionModel: "hermes3:8b",
+  // Stage 3: Gmail read-only — unconfigured until the operator mints a token.
+  gmail: { clientId: null, clientSecret: null, refreshToken: null },
 };
 
 export function configDir(): string {
@@ -405,6 +421,12 @@ export async function readSettings(): Promise<PersistedSettings> {
       // Tool-call enablement forward-compat: missing/blank/retired → default
       // (hermes3:8b). Older settings.json files load cleanly.
       toolExecutionModel: normalizeToolExecutionModel(parsed.toolExecutionModel),
+      // Stage 3 forward-compat: missing → no creds. Older files load cleanly.
+      gmail: {
+        clientId: parsed.gmail?.clientId ?? DEFAULT_SETTINGS.gmail.clientId,
+        clientSecret: parsed.gmail?.clientSecret ?? DEFAULT_SETTINGS.gmail.clientSecret,
+        refreshToken: parsed.gmail?.refreshToken ?? DEFAULT_SETTINGS.gmail.refreshToken,
+      },
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {

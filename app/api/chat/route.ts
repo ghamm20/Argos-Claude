@@ -29,6 +29,7 @@ import {
   parseToolCalls,
   continuationPrompt,
 } from "@/lib/tools/chat-tools";
+import { callOriginatesFromEmail } from "@/lib/email/guards";
 import { requestTool } from "@/lib/tools/executor";
 import { appendParseFailureAudit } from "@/lib/tools/audit";
 import { toolSummaries } from "@/lib/tools/registry";
@@ -705,10 +706,13 @@ export async function POST(req: NextRequest) {
   // push order. `sensitive` = "this segment carries operator-private local data
   // that must not leave the box under the redacted policy."
   const systemParts: string[] = [];
-  const partMeta: Array<{ label: string; sensitive: boolean }> = [];
-  const addPart = (text: string, label: string, sensitive = false): void => {
+  // `sensitive` → stripped on a REDACTED Nous turn. `alwaysStrip` → stripped on
+  // ANY Nous turn regardless of cloudDataPolicy (Guard 4: email content never
+  // leaves the box, even under "full").
+  const partMeta: Array<{ label: string; sensitive: boolean; alwaysStrip: boolean }> = [];
+  const addPart = (text: string, label: string, sensitive = false, alwaysStrip = false): void => {
     systemParts.push(text);
-    partMeta.push({ label, sensitive });
+    partMeta.push({ label, sensitive, alwaysStrip });
   };
   if (recall.injected && recall.block) {
     addPart(recall.block, "memory:recall", true);
@@ -773,6 +777,21 @@ export async function POST(req: NextRequest) {
     return Array.isArray(trs) ? (trs as ToolResultLike[]) : [];
   })();
   const priorNegatives = priorToolResults.filter(isNegativeStateResult);
+  // ---- Email injection guards (Stage 3) ----
+  // Split email tool results from the rest. Email content is UNTRUSTED: it gets
+  // its own always-cloud-stripped segment (Guard 4) and arms email_context_gate
+  // (Guard 3 — any tool op this turn is forced through approval) + the
+  // origin-check (Guard 2 — a tool call whose raw text came from email content
+  // is never executed).
+  const emailPriorResults = priorToolResults.filter((r) => r.toolId === "email_read");
+  const otherPriorResults = priorToolResults.filter((r) => r.toolId !== "email_read");
+  const emailContexts: string[] = emailPriorResults
+    .map((r) => {
+      const ec = (r.data as { emailContext?: unknown } | null)?.emailContext;
+      return typeof ec === "string" ? ec : "";
+    })
+    .filter(Boolean);
+  const emailContextActive = emailContexts.length > 0;
   // Tool results computed THIS turn (model-initiated or forced). Also fed to the
   // misrepresentation guard so a same-turn continuation can't soften them.
   const turnToolResults: ToolResultLike[] = [];
@@ -789,8 +808,14 @@ export async function POST(req: NextRequest) {
     // result that is already in its context. SENSITIVE: prior tool results can
     // carry file contents (file_ops read) or other local data — stripped on a
     // redacted Nous turn.
-    if (priorToolResults.length > 0) {
-      addPart(buildRecentToolResultsBlock(priorToolResults), "tool_results:prior", true);
+    if (otherPriorResults.length > 0) {
+      addPart(buildRecentToolResultsBlock(otherPriorResults), "tool_results:prior", true);
+    }
+    // Guard 4 — email content is its own always-cloud-stripped segment. It
+    // already carries the untrusted envelope + neutralized tool syntax (applied
+    // at read time). sensitive AND alwaysStrip → gone on every Nous turn.
+    if (emailContexts.length > 0) {
+      addPart(emailContexts.join("\n\n"), "email:content", true, true);
     }
     // Next-turn corrective injection (v2.3.8 doctrine, Layer 1 §5 + Layer 2 §4;
     // v2.3.9 §7 adds the misrepresentation correction).
@@ -1020,12 +1045,16 @@ export async function POST(req: NextRequest) {
       // persona answers in character, just without local-data leakage. "full"
       // sends the byte-identical original prompt (explicit per-persona opt-in).
       let nousSystemContent = systemPrompt;
-      if (cloudPolicy === "redacted") {
+      // A segment is stripped if: it's alwaysStrip (Guard 4 — email content,
+      // regardless of policy), OR the policy is "redacted" and it's sensitive.
+      const stripSegment = (m: { sensitive: boolean; alwaysStrip: boolean }) =>
+        m.alwaysStrip || (cloudPolicy === "redacted" && m.sensitive);
+      {
         const kept: string[] = [];
         const strippedLabels: string[] = [];
         let bytesWithheld = 0;
         for (let i = 0; i < systemParts.length; i++) {
-          if (partMeta[i].sensitive) {
+          if (stripSegment(partMeta[i])) {
             strippedLabels.push(partMeta[i].label);
             bytesWithheld += Buffer.byteLength(systemParts[i], "utf8");
           } else {
@@ -1042,11 +1071,12 @@ export async function POST(req: NextRequest) {
             policy: cloudPolicy,
             segments_stripped: strippedLabels.length,
             labels_stripped: strippedLabels,
-            labels_kept: partMeta.filter((m) => !m.sensitive).map((m) => m.label),
+            labels_kept: partMeta.filter((m) => !stripSegment(m)).map((m) => m.label),
             bytes_withheld: bytesWithheld,
             vault_chunks_stripped: retrievedHits.length,
             memory_facts_injected: recall.factsFound,
-            prior_tool_results_stripped: priorToolResults.length,
+            prior_tool_results_stripped: otherPriorResults.length,
+            email_content_stripped: emailContexts.length,
           }).catch(() => {
             /* audit is the receipt, never the gate */
           });
@@ -1418,13 +1448,41 @@ export async function POST(req: NextRequest) {
                     })}\n`
                   )
                 );
+              } else if (callOriginatesFromEmail(call.raw, emailContexts)) {
+                // Guard 2 (Stage 3, HARD origin check) — a tool call whose raw
+                // text came from email content is an injection. It is NEVER
+                // executed; it's audited and surfaced as an injection attempt.
+                await appendAudit("email.injection_attempt", {
+                  toolId: call.id,
+                  persona: body.personaId,
+                  reason: "tool call originated from untrusted email content — blocked, not executed",
+                  raw: call.raw.slice(0, 400),
+                }).catch(() => {});
+                controllerInner.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "email_injection_blocked",
+                      toolId: call.id,
+                      reason: "tool call originated from email content; blocked",
+                    })}\n`
+                  )
+                );
               } else {
                 toolRanThisTurn = true; // a permitted model-initiated tool call was routed
+                // Guard 3 (Stage 3) — when email content is in context, force
+                // approval on ANY tool op (even normally-safe/ungated ones).
                 const outcome = await requestTool(call.id, call.params, {
                   sessionId: null,
                   personaId: body.personaId,
                   model: effectiveModel,
-                });
+                }, { forceApproval: emailContextActive });
+                if (emailContextActive && outcome.kind === "approval") {
+                  await appendAudit("email_context_gate", {
+                    toolId: call.id,
+                    persona: body.personaId,
+                    reason: "email content in context — tool op forced through operator approval",
+                  }).catch(() => {});
+                }
               if (outcome.kind === "approval") {
                 controllerInner.enqueue(
                   encoder.encode(
