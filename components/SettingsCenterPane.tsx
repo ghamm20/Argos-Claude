@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Settings as SettingsIcon } from "lucide-react";
 import { ModelSection } from "./settings/ModelSection";
+import { InferenceSection } from "./settings/InferenceSection";
 import { PersonaSection } from "./settings/PersonaSection";
 import { VaultSection } from "./settings/VaultSection";
 import { VoiceSection } from "./settings/VoiceSection";
@@ -15,6 +16,7 @@ import type { RuntimeInfo } from "@/lib/runtime-info";
 
 type SectionId =
   | "model"
+  | "inference"
   | "personas"
   | "vault"
   | "voice"
@@ -31,6 +33,8 @@ interface SectionProps {
 
 const SECTIONS: SectionProps[] = [
   { id: "model", label: "Model" },
+  // v2.4.2 — inference backend switch (Local Ollama ⇄ Nous API) UI.
+  { id: "inference", label: "Inference" },
   // Operator Auth (2026-05-28): promoted to nav position 2 so the
   // PIN gate is the second thing the operator sees on opening Settings.
   // Previously buried at position 5; operator reported missing it. The
@@ -88,6 +92,7 @@ export function SettingsCenterPane({
 
         <div className="flex-1 overflow-y-auto px-8 py-6">
           {active === "model" && <ModelSection />}
+          {active === "inference" && <InferenceSection />}
           {active === "personas" && <PersonaSection />}
           {active === "vault" && <VaultSection />}
           {active === "voice" && <VoiceSection />}
