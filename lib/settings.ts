@@ -141,6 +141,14 @@ export interface PersistedSettings {
   /** v2.4.2 Phase A — feature flag (SEPARATE from the backend switch): rebind
    *  Juniper + Bobby to the local gemma-4 model. Default false → unchanged. */
   useReboundModels: boolean;
+  /** Tool-call enablement (2026-06-09) — the dedicated tool-emission model.
+   *  When the operator EXPLICITLY commands a tool (isExplicitToolRequest),
+   *  /api/chat routes that turn to this model — same seam as vision routing:
+   *  only the MODEL changes, the persona voice stays. Default hermes3:8b
+   *  (3/3 clean in the round-2 emission harness vs 1/3 for the best persona
+   *  model — scripts/harness-evidence.jsonl). Self-heals off retired models
+   *  like defaultModel does. */
+  toolExecutionModel: string;
 }
 
 // Phase 2 (2026-05-25): Bartimaeus is the boot default. Model is the
@@ -218,6 +226,9 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   perPersonaBackend: {},
   nousApiKey: null,
   useReboundModels: false,
+  // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
+  // (round 2, prompt B: 3/3 clean, ~0.7s warm, 4.7 GB — fits VRAM whole).
+  toolExecutionModel: "hermes3:8b",
 };
 
 export function configDir(): string {
@@ -247,6 +258,19 @@ const RETIRED_DEFAULT_MODELS = new Set<string>([
 function normalizeDefaultModel(persisted: string | undefined): string {
   const m = persisted ?? DEFAULT_SETTINGS.defaultModel;
   return RETIRED_DEFAULT_MODELS.has(m) ? DEFAULT_SETTINGS.defaultModel : m;
+}
+
+// Tool-call enablement (2026-06-09): same self-heal pattern for the tool
+// model — a persisted pointer at a retired (or blank) model normalizes to the
+// current default rather than silently calling a dead model.
+function normalizeToolExecutionModel(persisted: unknown): string {
+  const m =
+    typeof persisted === "string" && persisted.trim().length > 0
+      ? persisted.trim()
+      : DEFAULT_SETTINGS.toolExecutionModel;
+  return RETIRED_DEFAULT_MODELS.has(m)
+    ? DEFAULT_SETTINGS.toolExecutionModel
+    : m;
 }
 
 export async function readSettings(): Promise<PersistedSettings> {
@@ -338,6 +362,9 @@ export async function readSettings(): Promise<PersistedSettings> {
           ? DEFAULT_SETTINGS.nousApiKey
           : parsed.nousApiKey,
       useReboundModels: parsed.useReboundModels === true,
+      // Tool-call enablement forward-compat: missing/blank/retired → default
+      // (hermes3:8b). Older settings.json files load cleanly.
+      toolExecutionModel: normalizeToolExecutionModel(parsed.toolExecutionModel),
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {

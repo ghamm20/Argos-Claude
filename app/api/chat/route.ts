@@ -519,10 +519,15 @@ export async function POST(req: NextRequest) {
   // (when the flag is on) is the LOCAL model fed here; vision routing overrides
   // it for image turns regardless.
   const hasImages = messagesHaveImages(body.messages);
-  const { model: effectiveModel, vision: visionTurn } = resolveChatModel({
+  // `let`: the tool-execution model routing below (after toolsEnabled is
+  // known) may override this for an explicit tool turn — same per-turn
+  // model-swap seam as vision. Vision wins on image turns (resolved here
+  // first; tool routing is gated on toolsEnabled, which excludes vision).
+  const { model: visionRoutedModel, vision: visionTurn } = resolveChatModel({
     hasImages,
     personaModel: reboundLocalModel,
   });
+  let effectiveModel = visionRoutedModel;
   if (visionTurn) {
     console.info(
       `[chat] vision turn — routing to ${effectiveModel} (persona ${body.personaId} stays in voice)`
@@ -717,6 +722,27 @@ export async function POST(req: NextRequest) {
   // real, not advisory.
   const personaToolIds = toolsForPersona(persona.id, KNOWN_TOOL_IDS);
   const toolsEnabled = isOperator && !visionTurn && personaToolIds.length > 0;
+  // ---- Tool-execution model routing (2026-06-09) ----
+  // When the operator EXPLICITLY commands a tool this turn, route the turn to
+  // the dedicated tool-emission model (settings.toolExecutionModel, default
+  // hermes3:8b — 3/3 clean in the round-2 emission harness vs 1/3 for the
+  // best persona model; scripts/harness-evidence.jsonl). Same seam as vision:
+  // only the MODEL changes — the persona prompt is still injected, so the
+  // answer stays in character. The trigger is isExplicitToolRequest — the
+  // detector the integrity guard already trusts (no new classifier). Implicit
+  // mid-conversation tool use stays on the persona model; the prompt schema +
+  // the file_ops "action" alias cover that path.
+  const toolExecutionModel = settings?.toolExecutionModel ?? "";
+  const toolModelTurn =
+    toolsEnabled &&
+    toolExecutionModel.length > 0 &&
+    isExplicitToolRequest(userText, KNOWN_TOOL_IDS);
+  if (toolModelTurn) {
+    effectiveModel = toolExecutionModel;
+    console.info(
+      `[chat] explicit tool turn — routing to ${effectiveModel} (persona ${body.personaId} stays in voice)`
+    );
+  }
   // v2.3.9 — tool results the operator already saw on the most recent assistant
   // turn. The /api/chat wire history now carries them (ChatPane). They are used
   // two ways: surfaced to the model so it HAS the outcome in context (root cause
@@ -938,6 +964,11 @@ export async function POST(req: NextRequest) {
 
   if (requestedBackend === "nous" && visionTurn) {
     fallbackReason = "vision_turn_local_only";
+  } else if (requestedBackend === "nous" && toolModelTurn) {
+    // Tool reliability is the entire point of the tool-model route — Nemotron
+    // emits native OpenAI tool_calls, which ARGOS does not read. Explicit tool
+    // turns stay local on the tool model; the reason is audited honestly.
+    fallbackReason = "tool_turn_local_only";
   } else if (requestedBackend === "nous") {
     const nousKey = settings?.nousApiKey
       ? await decryptSecret(settings.nousApiKey).catch(() => null)

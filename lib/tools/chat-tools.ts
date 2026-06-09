@@ -183,6 +183,23 @@ const TOOL_MECHANICS = [
     "president. Use it.",
 ].join("\n");
 
+// Tool-call enablement (2026-06-09) — both blocks lifted VERBATIM from the
+// round-2 harness Prompt B after A/B evidence (scripts/harness-evidence.jsonl):
+// across 5 models the verbatim block scored 1/15 clean; adding these two
+// scored 11/15. The dominant malform was an invented params key ("action") —
+// the schema was never specified anywhere in the prompt — and gated ops
+// stalled on disclose-without-emitting (Orchestrator refused 3/3 without the
+// approval-flow note, emitted 3/3 clean with it).
+const FILE_OPS_PARAMS_SCHEMA = [
+  'file_ops params: {"operation": "read"|"write"|"move"|"list"|"delete", "path": string, "content": string (write only), "dest": string (move only)}',
+  'The key is "operation" — never "action", "op_type", or any other name.',
+].join("\n");
+
+const APPROVAL_FLOW_NOTE =
+  "For gated operations (write/move/delete): emit the tool tag anyway. The system " +
+  "intercepts it and routes it to the operator approval queue — emitting the tag IS " +
+  "the disclosure. Do not refuse; do not describe the operation without emitting the tag.";
+
 // Bart-only rich source-routing guidance (references the full tool set).
 const FULL_SOURCE_GUIDANCE = [
   "FACTUAL QUERIES — chain_search_to_read FIRST. For factual questions about people, " +
@@ -222,8 +239,16 @@ const SCOPED_SOURCE_GUIDANCE =
  */
 export function buildToolAwarenessBlock(toolIds?: string[]): string {
   const guidance = toolIds ? SCOPED_SOURCE_GUIDANCE : FULL_SOURCE_GUIDANCE;
+  // The file_ops schema is included only when the persona actually holds
+  // file_ops (Bart's full set, or a scoped subset containing it) — a schema
+  // for an unheld tool invites out-of-scope calls. The approval-flow note is
+  // universal: every persona has at least one gated tool shape.
+  const hasFileOps = !toolIds || toolIds.includes("file_ops");
   return [
     TOOL_MECHANICS,
+    "",
+    ...(hasFileOps ? [FILE_OPS_PARAMS_SCHEMA, ""] : []),
+    APPROVAL_FLOW_NOTE,
     "",
     guidance,
     "",

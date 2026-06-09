@@ -9,14 +9,40 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { toolOk, toolErr, type ToolExecute } from "./types";
 import { resolveWithinRoot } from "./fs-guard";
+import { appendAudit } from "../audit";
 
 export const ID = "file_ops";
 
 const WRITE_OPS = new Set(["write", "move", "delete"]);
 const ALL_OPS = new Set(["read", "write", "move", "list", "delete"]);
 
+// Belt-and-suspenders (2026-06-09): tool-call harness rounds 1-2 showed the
+// dominant malform across EVERY tested model was `"action"` in place of
+// `"operation"` (the "unknown operation \"\"" bug). The prompt now specifies
+// the key, but non-hermes3 personas still slip — accept `action` as an alias
+// so an otherwise-perfect call executes. Every alias acceptance is audited
+// (kind "tool.param_alias") so usage stays measurable, never silent. The
+// WeakSet de-dupes per params object: op() is called by validate/
+// requiresApproval/requiresRestore/execute on the SAME object — one audit
+// entry per tool call, not four.
+const aliasAudited = new WeakSet<object>();
+
 function op(params: Record<string, unknown>): string {
-  return String(params.operation ?? params.op ?? "").toLowerCase();
+  const primary = params.operation ?? params.op;
+  if (primary == null && params.action != null) {
+    if (!aliasAudited.has(params)) {
+      aliasAudited.add(params);
+      void appendAudit("tool.param_alias", {
+        toolId: ID,
+        alias: "action",
+        value: String(params.action),
+      }).catch(() => {
+        /* audit is the receipt, never the gate */
+      });
+    }
+    return String(params.action).toLowerCase();
+  }
+  return String(primary ?? "").toLowerCase();
 }
 
 /** Pre-approval gate: valid op + every referenced path inside the boundary. */

@@ -88,6 +88,9 @@ interface SettingsPostBody {
   perPersonaBackend?: Record<string, unknown>;
   nousApiKey?: string | null;
   useReboundModels?: boolean;
+  // Tool-call enablement (2026-06-09) — dedicated tool-emission model for
+  // explicit tool turns. Plain config (non-secret), default hermes3:8b.
+  toolExecutionModel?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -431,6 +434,18 @@ export async function POST(req: NextRequest) {
       );
     }
     patch.useReboundModels = body.useReboundModels;
+  }
+  if (body.toolExecutionModel !== undefined) {
+    if (
+      typeof body.toolExecutionModel !== "string" ||
+      body.toolExecutionModel.trim().length === 0
+    ) {
+      return Response.json(
+        { error: "toolExecutionModel must be a non-empty string" },
+        { status: 400 }
+      );
+    }
+    patch.toolExecutionModel = body.toolExecutionModel.trim();
   }
 
   if (Object.keys(patch).length === 0) {
