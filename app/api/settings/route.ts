@@ -6,6 +6,7 @@ import {
   writeSettings,
   type SettingsPatch,
   type PerPersonaBackend,
+  type PerPersonaCloudPolicy,
 } from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
 
@@ -86,6 +87,8 @@ interface SettingsPostBody {
   // at rest; "" or null clears it. The rest are plain config.
   inferenceBackend?: string;
   perPersonaBackend?: Record<string, unknown>;
+  // Gate 2 (2026-06-09) — per-persona cloud data policy ("full" | "redacted").
+  cloudDataPolicy?: Record<string, unknown>;
   nousApiKey?: string | null;
   useReboundModels?: boolean;
   // Tool-call enablement (2026-06-09) — dedicated tool-emission model for
@@ -412,6 +415,38 @@ export async function POST(req: NextRequest) {
       (merged as Record<string, string>)[k] = v;
     }
     patch.perPersonaBackend = merged;
+  }
+  if (body.cloudDataPolicy !== undefined) {
+    if (typeof body.cloudDataPolicy !== "object" || body.cloudDataPolicy === null) {
+      return Response.json(
+        { error: "cloudDataPolicy must be an object" },
+        { status: 400 }
+      );
+    }
+    const ALLOWED_PERSONAS = ["bartimaeus", "juniper", "sage", "bobby"];
+    const ALLOWED_POLICIES = ["full", "redacted"];
+    const merged: PerPersonaCloudPolicy = {
+      ...(await readSettings()).cloudDataPolicy,
+    };
+    for (const [k, v] of Object.entries(body.cloudDataPolicy)) {
+      if (!ALLOWED_PERSONAS.includes(k)) {
+        return Response.json(
+          { error: `cloudDataPolicy: unknown persona '${k}'` },
+          { status: 400 }
+        );
+      }
+      if (typeof v !== "string" || !ALLOWED_POLICIES.includes(v)) {
+        return Response.json(
+          { error: `cloudDataPolicy.${k} must be 'full' | 'redacted'` },
+          { status: 400 }
+        );
+      }
+      // Store "full" explicitly; "redacted" is the default, so drop it to keep
+      // the persisted object minimal and fail-safe (matches load sanitizer).
+      if (v === "full") (merged as Record<string, string>)[k] = "full";
+      else delete (merged as Record<string, string>)[k];
+    }
+    patch.cloudDataPolicy = merged;
   }
   if (body.nousApiKey !== undefined) {
     const v = body.nousApiKey;

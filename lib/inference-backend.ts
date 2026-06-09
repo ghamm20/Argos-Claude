@@ -24,7 +24,11 @@
 //     fabricate a response or a backend label.
 //   - No new npm deps: native fetch only.
 
-import type { PersistedSettings, PersonaBackendChoice } from "./settings";
+import type {
+  PersistedSettings,
+  PersonaBackendChoice,
+  CloudDataPolicy,
+} from "./settings";
 
 /** Nous OpenAI-compatible chat-completions endpoint. */
 export const NOUS_CHAT_URL =
@@ -78,6 +82,23 @@ export function resolveBackend(
   ] as PersonaBackendChoice | undefined;
   if (per === "local" || per === "nous") return per;
   return settings.inferenceBackend === "nous" ? "nous" : "local";
+}
+
+/**
+ * Resolve a persona's cloud data policy. Gate 2 (2026-06-09).
+ *   "full"     ONLY when explicitly opted in for this persona.
+ *   "redacted" otherwise — the safe default (absent persona, null settings, or
+ *              any non-"full" value). On a Nous turn, "redacted" strips vault
+ *              chunks, memory facts, and prior tool results before the call.
+ */
+export function resolveCloudDataPolicy(
+  personaId: string,
+  settings: PersistedSettings | null
+): CloudDataPolicy {
+  const per = settings?.cloudDataPolicy?.[
+    personaId as keyof PersistedSettings["cloudDataPolicy"]
+  ];
+  return per === "full" ? "full" : "redacted";
 }
 
 export interface NousResult {

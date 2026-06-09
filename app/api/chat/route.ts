@@ -89,6 +89,7 @@ import { parseBearer, isTokenValid } from "@/lib/auth";
 import {
   resolveBackend,
   resolveLocalModel,
+  resolveCloudDataPolicy,
   callNous,
   type NousResult,
 } from "@/lib/inference-backend";
@@ -510,6 +511,10 @@ export async function POST(req: NextRequest) {
     useReboundModels
   );
   const requestedBackend = resolveBackend(body.personaId, settings);
+  // Gate 2 (2026-06-09) — cloud data policy for THIS persona. "redacted"
+  // (default) strips local-data system segments before any Nous call. Resolved
+  // here; applied only if the turn actually takes the Nous path below.
+  const cloudPolicy = resolveCloudDataPolicy(body.personaId, settings);
 
   // ---- Vision routing (2026-06-02) ----
   // If any message carries an image, route this turn to the multimodal model
@@ -692,16 +697,28 @@ export async function POST(req: NextRequest) {
   // Memory Phase: semantic recall PREPENDS the persona prompt — additive,
   // never a replacement. The block is short (≤300 chars) and tells the model
   // to use the context naturally without announcing it.
+  // Gate 2 (2026-06-09) — labeled system segments. Each push records a label
+  // and a `sensitive` flag so the Nous egress guard can strip local-data
+  // segments (vault chunks, memory facts, prior tool results) on a "redacted"
+  // turn while keeping identity/voice/instructions. The LOCAL path is byte-for-
+  // byte unchanged: systemPrompt is still `parts.map(text).join("\n\n")` in
+  // push order. `sensitive` = "this segment carries operator-private local data
+  // that must not leave the box under the redacted policy."
   const systemParts: string[] = [];
+  const partMeta: Array<{ label: string; sensitive: boolean }> = [];
+  const addPart = (text: string, label: string, sensitive = false): void => {
+    systemParts.push(text);
+    partMeta.push({ label, sensitive });
+  };
   if (recall.injected && recall.block) {
-    systemParts.push(recall.block);
+    addPart(recall.block, "memory:recall", true);
   }
-  systemParts.push(baseSystemPrompt);
+  addPart(baseSystemPrompt, "persona:identity", false);
   // Register calibration (2026-06-02) — Bartimaeus is brief by default. Keeps
   // operational replies tight; depth is on demand via /deep. Operator turns
   // only (guests get the generic register).
   if (isOperator && body.personaId === "bartimaeus") {
-    systemParts.push(
+    addPart(
       [
         "REGISTER RULES:",
         "- Operational/factual exchanges: 2-3 sentences. Answer first. Wit second. Never third.",
@@ -711,7 +728,9 @@ export async function POST(req: NextRequest) {
         "- Default assumption: the operator wants the answer, not the architecture of the answer.",
         "- You are sardonic, not verbose. Precision means fewer words, not more.",
         "- If the operator tells you to dial it back, stop the banter immediately — minimal answers until told otherwise.",
-      ].join("\n")
+      ].join("\n"),
+      "register:bart",
+      false
     );
   }
   // Tools Phase — tool awareness (operator turns only; guests never get tools;
@@ -760,14 +779,18 @@ export async function POST(req: NextRequest) {
   if (toolsEnabled) {
     // Bart gets the full rich source-routing guidance; scoped personas get a
     // concise block listing ONLY their subset.
-    systemParts.push(
-      buildToolAwarenessBlock(persona.id === "bartimaeus" ? undefined : personaToolIds)
+    addPart(
+      buildToolAwarenessBlock(persona.id === "bartimaeus" ? undefined : personaToolIds),
+      "tools:awareness",
+      false
     );
     // v2.3.9 — surface the most recent COMPLETED tool results so the model
     // reports them faithfully and cannot honestly claim to be "awaiting" a
-    // result that is already in its context.
+    // result that is already in its context. SENSITIVE: prior tool results can
+    // carry file contents (file_ops read) or other local data — stripped on a
+    // redacted Nous turn.
     if (priorToolResults.length > 0) {
-      systemParts.push(buildRecentToolResultsBlock(priorToolResults));
+      addPart(buildRecentToolResultsBlock(priorToolResults), "tool_results:prior", true);
     }
     // Next-turn corrective injection (v2.3.8 doctrine, Layer 1 §5 + Layer 2 §4;
     // v2.3.9 §7 adds the misrepresentation correction).
@@ -780,15 +803,16 @@ export async function POST(req: NextRequest) {
       if (priorAssistant) {
         const priorParse = parseToolCalls(priorAssistant);
         if (priorParse.calls.length === 0 && priorParse.failures.length > 0) {
-          systemParts.push(PARSE_FAILURE_SYSTEM_NOTE);
+          addPart(PARSE_FAILURE_SYSTEM_NOTE, "integrity:parse_failure_note", false);
         }
         if (/MISREPRESENTATION/i.test(priorAssistant)) {
           // The prior turn softened a completed negative result. Correct it with
-          // the actual outcome (from the results the operator saw).
+          // the actual outcome (from the results the operator saw). SENSITIVE:
+          // embeds a prior tool-result summary — stripped on a redacted turn.
           const sum = (priorNegatives[0]?.summary ?? "a negative result").toString();
-          systemParts.push(buildMisrepCorrectionNote(sum));
+          addPart(buildMisrepCorrectionNote(sum), "tool_results:misrep_correction", true);
         } else if (/INTEGRITY VIOLATION|INTEGRITY WARNING/i.test(priorAssistant)) {
-          systemParts.push(FABRICATION_SYSTEM_NOTE);
+          addPart(FABRICATION_SYSTEM_NOTE, "integrity:fabrication_note", false);
         }
       }
     } catch {
@@ -830,7 +854,11 @@ export async function POST(req: NextRequest) {
           // Weather → structured Open-Meteo forecast (replaces the DDG hack).
           const outcome = await requestTool("open_meteo_weather", { location: cf.location }, toolCtx);
           if (outcome.kind === "result" && outcome.result.ok) {
-            systemParts.push(buildWeatherBlock(outcome.result));
+            // Forced grounding = CURRENT-turn public web/weather data the model
+            // needs to answer THIS query — not operator-private local data. Kept
+            // on a redacted Nous turn (stripping it would force a hallucinated
+            // answer). See egress note in the report; flagged as a judgment call.
+            addPart(buildWeatherBlock(outcome.result), "grounding:weather", false);
             grounded = true;
             toolRanThisTurn = true; // a forced tool ran this turn
           }
@@ -839,7 +867,7 @@ export async function POST(req: NextRequest) {
           // so "who is the CEO of X" gets real content, not shallow snippets.
           const outcome = await requestTool("chain_search_to_read", { query }, toolCtx);
           if (outcome.kind === "result" && outcome.result.ok) {
-            systemParts.push(buildChainBlock(cf, outcome.result));
+            addPart(buildChainBlock(cf, outcome.result), "grounding:chain", false);
             grounded = true;
             toolRanThisTurn = true; // a forced tool ran this turn
           }
@@ -850,13 +878,13 @@ export async function POST(req: NextRequest) {
             toolCtx
           );
           if (outcome.kind === "result" && outcome.result.ok) {
-            systemParts.push(buildCurrentFactsBlock(cf, outcome.result));
+            addPart(buildCurrentFactsBlock(cf, outcome.result), "grounding:current_facts", false);
             grounded = true;
             toolRanThisTurn = true; // a forced tool ran this turn
           }
         }
         if (!grounded) {
-          systemParts.push(buildNoGroundingBlock(cf));
+          addPart(buildNoGroundingBlock(cf), "grounding:none", false);
         }
       } catch {
         /* graceful — no grounding block; Bart's normal tool flow still applies */
@@ -864,16 +892,22 @@ export async function POST(req: NextRequest) {
     }
   }
   if (memoryBlock.length > 0) {
-    systemParts.push(memoryBlock);
+    // SENSITIVE: cross-session operator memory facts.
+    addPart(memoryBlock, "memory:facts", true);
   }
   if (researchReport) {
-    systemParts.push(buildResearchBlock(researchReport));
+    // Research = public web research the system performed (Phase 10/11), not
+    // operator-private local data. Kept on a redacted turn; flagged as a
+    // judgment call in the report alongside grounding.
+    addPart(buildResearchBlock(researchReport), "research:report", false);
   }
   if (retrievedHits.length > 0) {
-    systemParts.push(buildRetrievalBlock(retrievedHits));
+    // SENSITIVE: vault retrieval chunks — operator documents. Stripped on a
+    // redacted Nous turn.
+    addPart(buildRetrievalBlock(retrievedHits), "vault:retrieval", true);
   }
   if (body.truthMode === true) {
-    systemParts.push(TRUTH_MODE_CLAUSE);
+    addPart(TRUTH_MODE_CLAUSE, "truth_mode", false);
   }
   // Conversational-memory reminder, pushed LAST so it's the final system
   // content immediately before the message thread — maximum recency. Belt-and-
@@ -885,12 +919,15 @@ export async function POST(req: NextRequest) {
   {
     const userTurns = body.messages.filter((m) => m.role === "user").length;
     if (userTurns >= 2) {
-      systemParts.push(
+      // Instruction about the thread (always sent), not local data — not sensitive.
+      addPart(
         "CONVERSATION MEMORY: The full message thread below is visible to you. " +
           "If the operator asks what they (or you) said, asked, or established earlier in " +
           "this conversation, read the messages and answer from them. NEVER claim the " +
           "operator hasn't told you something that is present in the thread, and never " +
-          "recite an \"I have no memory of past interactions\" disclaimer — it is false here."
+          "recite an \"I have no memory of past interactions\" disclaimer — it is false here.",
+        "memory:conversation_reminder",
+        false
       );
     }
   }
@@ -976,13 +1013,55 @@ export async function POST(req: NextRequest) {
     if (!nousKey) {
       fallbackReason = "nous_key_missing";
     } else {
+      // ---- Egress guard (Gate 2, 2026-06-09) ----
+      // On a "redacted" turn, strip the SENSITIVE system segments (vault chunks,
+      // memory facts, prior tool results) before the cloud call. Identity/voice,
+      // tool-awareness, register, grounding and the user thread still go — the
+      // persona answers in character, just without local-data leakage. "full"
+      // sends the byte-identical original prompt (explicit per-persona opt-in).
+      let nousSystemContent = systemPrompt;
+      if (cloudPolicy === "redacted") {
+        const kept: string[] = [];
+        const strippedLabels: string[] = [];
+        let bytesWithheld = 0;
+        for (let i = 0; i < systemParts.length; i++) {
+          if (partMeta[i].sensitive) {
+            strippedLabels.push(partMeta[i].label);
+            bytesWithheld += Buffer.byteLength(systemParts[i], "utf8");
+          } else {
+            kept.push(systemParts[i]);
+          }
+        }
+        nousSystemContent = kept.join("\n\n");
+        if (strippedLabels.length > 0) {
+          // Audit the redaction with COUNTS + LABELS only — never the stripped
+          // content itself (that would defeat the guard's whole purpose).
+          await appendAudit("chat.egress_redaction", {
+            persona: body.personaId,
+            backend: "nous",
+            policy: cloudPolicy,
+            segments_stripped: strippedLabels.length,
+            labels_stripped: strippedLabels,
+            labels_kept: partMeta.filter((m) => !m.sensitive).map((m) => m.label),
+            bytes_withheld: bytesWithheld,
+            vault_chunks_stripped: retrievedHits.length,
+            memory_facts_injected: recall.factsFound,
+            prior_tool_results_stripped: priorToolResults.length,
+          }).catch(() => {
+            /* audit is the receipt, never the gate */
+          });
+        }
+      }
+      // Rebuild the message list with the (possibly redacted) system content at
+      // index 0; user/assistant turns are passed through unchanged.
+      const nousMessages = ollamaMessages.map((m, i) => ({
+        role: m.role,
+        content: i === 0 ? nousSystemContent : m.content,
+      }));
       try {
         nousResult = await callNous({
           apiKey: nousKey,
-          messages: ollamaMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: nousMessages,
           maxTokens,
         });
         answeredBackend = "nous";

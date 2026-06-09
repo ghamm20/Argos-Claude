@@ -15,10 +15,11 @@
 // (the chat route's documented behavior) — surfaced as a hint here.
 
 import { useCallback, useEffect, useState } from "react";
-import { Cloud, Cpu, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Cloud, Cpu, Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 
 type Backend = "local" | "nous";
 type PersonaChoice = "local" | "nous" | "default";
+type CloudPolicy = "full" | "redacted";
 
 interface KeyStatus {
   configured: boolean;
@@ -37,6 +38,7 @@ const NOUS_MODEL = "nvidia/nemotron-3-ultra:free";
 export function InferenceSection() {
   const [backend, setBackend] = useState<Backend>("local");
   const [perPersona, setPerPersona] = useState<Record<string, PersonaChoice>>({});
+  const [cloudPolicy, setCloudPolicy] = useState<Record<string, CloudPolicy>>({});
   const [rebound, setRebound] = useState(false);
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ configured: false, hint: null });
   const [keyInput, setKeyInput] = useState("");
@@ -51,11 +53,13 @@ export function InferenceSection() {
       const j = (await r.json()) as {
         inferenceBackend?: Backend;
         perPersonaBackend?: Record<string, PersonaChoice>;
+        cloudDataPolicy?: Record<string, CloudPolicy>;
         useReboundModels?: boolean;
         nousApiKey?: KeyStatus;
       };
       setBackend(j.inferenceBackend === "nous" ? "nous" : "local");
       setPerPersona(j.perPersonaBackend ?? {});
+      setCloudPolicy(j.cloudDataPolicy ?? {});
       setRebound(j.useReboundModels === true);
       if (j.nousApiKey) setKeyStatus(j.nousApiKey);
     } catch {
@@ -105,6 +109,23 @@ export function InferenceSection() {
   const choosePersona = (persona: string, choice: PersonaChoice) => {
     setPerPersona((p) => ({ ...p, [persona]: choice }));
     void patch({ perPersonaBackend: { [persona]: choice } }, "Per-persona backend saved.");
+  };
+
+  const choosePolicy = (persona: string, policy: CloudPolicy) => {
+    setCloudPolicy((p) => ({ ...p, [persona]: policy }));
+    void patch(
+      { cloudDataPolicy: { [persona]: policy } },
+      policy === "full"
+        ? "Cloud policy → FULL: vault/memory/tool-results will leave the box."
+        : "Cloud policy → redacted: local data stripped before cloud calls."
+    );
+  };
+
+  // A persona is effectively on the Nous backend when its explicit override is
+  // "nous", OR its override defers to a global default that is "nous".
+  const personaOnNous = (id: string) => {
+    const c = perPersona[id] ?? "default";
+    return c === "nous" || (c === "default" && backend === "nous");
   };
 
   const toggleRebound = () => {
@@ -188,6 +209,65 @@ export function InferenceSection() {
                     </button>
                   ))}
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Cloud data policy (Gate 2) */}
+      <div className="mt-4 rounded-lg border border-neutral-800/70 bg-neutral-950/40 p-4">
+        <div className="text-[13px] font-medium text-neutral-200">Cloud data policy</div>
+        <div className="mt-1 text-[11px] text-neutral-500">
+          What local context may leave the box on an API turn. <span className="text-neutral-400">Redacted</span> (default)
+          strips vault documents, memory facts, and prior tool results before the
+          call — persona voice and your message still go. <span className="text-neutral-400">Full</span> sends everything.
+        </div>
+        <div className="mt-3 space-y-2">
+          {PERSONAS.map((p) => {
+            const onNous = personaOnNous(p.id);
+            const cur: CloudPolicy = cloudPolicy[p.id] === "full" ? "full" : "redacted";
+            return (
+              <div key={p.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className={
+                      "text-[12px] " + (onNous ? "text-neutral-300" : "text-neutral-600")
+                    }
+                  >
+                    {p.name}
+                    {!onNous && <span className="ml-1.5 text-[10px] text-neutral-600">(local — N/A)</span>}
+                  </span>
+                  <div className="inline-flex rounded-md border border-neutral-800 overflow-hidden">
+                    {(["redacted", "full"] as CloudPolicy[]).map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => choosePolicy(p.id, c)}
+                        className={
+                          "px-2.5 py-1 text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50 " +
+                          (cur === c
+                            ? c === "full"
+                              ? "bg-amber-700/60 text-amber-100"
+                              : "bg-neutral-700/70 text-neutral-100"
+                            : "text-neutral-500 hover:bg-neutral-900/60 hover:text-neutral-300")
+                        }
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {onNous && cur === "full" && (
+                  <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-400/90">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-px" />
+                    <span>
+                      {p.name} is on the API backend with <span className="font-medium">FULL</span> policy —
+                      vault documents, memory facts, and tool results leave the box to Nous on every turn.
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}

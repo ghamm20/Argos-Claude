@@ -73,6 +73,18 @@ export interface ElevenLabsConfig {
  */
 export type InferenceBackendChoice = "local" | "nous";
 export type PersonaBackendChoice = "local" | "nous" | "default";
+// Gate 2 (2026-06-09) — per-persona cloud data policy. Governs what local
+// context (vault chunks, memory facts, prior tool results) may leave the box on
+// a Nous-backend turn. "redacted" (DEFAULT for every persona) strips those
+// segments before the cloud call; "full" sends everything and REQUIRES explicit
+// per-persona opt-in via Settings → Inference. Absent → "redacted".
+export type CloudDataPolicy = "full" | "redacted";
+export interface PerPersonaCloudPolicy {
+  bartimaeus?: CloudDataPolicy;
+  juniper?: CloudDataPolicy;
+  sage?: CloudDataPolicy;
+  bobby?: CloudDataPolicy;
+}
 export interface PerPersonaBackend {
   bartimaeus?: PersonaBackendChoice;
   juniper?: PersonaBackendChoice;
@@ -135,6 +147,10 @@ export interface PersistedSettings {
   /** v2.4.2 Phase A — optional per-persona backend override; "default" (or
    *  absent) respects the global inferenceBackend. */
   perPersonaBackend: PerPersonaBackend;
+  /** Gate 2 (2026-06-09) — per-persona cloud data policy. Absent persona →
+   *  "redacted" (the safe default): vault/memory/tool-result segments are
+   *  stripped before any Nous call. "full" is explicit opt-in per persona. */
+  cloudDataPolicy: PerPersonaCloudPolicy;
   /** v2.4.2 Phase A — Nous API key (ciphertext at rest). null → Nous disabled;
    *  any "nous" route falls back to local. */
   nousApiKey: string | null;
@@ -224,6 +240,11 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // until the operator opts in.
   inferenceBackend: "local",
   perPersonaBackend: {},
+  // Gate 2: every persona defaults to "redacted" by being absent here — the
+  // resolver treats absent as redacted. The default deployment never sends
+  // vault/memory/tool-results to the cloud unless the operator opts a persona
+  // into "full".
+  cloudDataPolicy: {},
   nousApiKey: null,
   useReboundModels: false,
   // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
@@ -271,6 +292,20 @@ function normalizeToolExecutionModel(persisted: unknown): string {
   return RETIRED_DEFAULT_MODELS.has(m)
     ? DEFAULT_SETTINGS.toolExecutionModel
     : m;
+}
+
+// Gate 2 (2026-06-09): load-time sanitizer for the per-persona cloud policy.
+// Only an EXPLICIT "full" survives; every other value (including "redacted",
+// which is already the resolver default) is dropped, keeping the stored object
+// minimal and fail-safe. Unknown persona keys are discarded.
+const CLOUD_POLICY_PERSONAS = ["bartimaeus", "juniper", "sage", "bobby"] as const;
+function sanitizeCloudPolicy(raw: unknown): PerPersonaCloudPolicy {
+  if (!raw || typeof raw !== "object") return {};
+  const out: PerPersonaCloudPolicy = {};
+  for (const p of CLOUD_POLICY_PERSONAS) {
+    if ((raw as Record<string, unknown>)[p] === "full") out[p] = "full";
+  }
+  return out;
 }
 
 export async function readSettings(): Promise<PersistedSettings> {
@@ -357,6 +392,11 @@ export async function readSettings(): Promise<PersistedSettings> {
       // a malformed value can never select a non-existent backend.
       inferenceBackend: parsed.inferenceBackend === "nous" ? "nous" : "local",
       perPersonaBackend: { ...(parsed.perPersonaBackend ?? {}) },
+      // Gate 2 forward-compat: missing → {} (all personas redacted). Each value
+      // is enum-guarded so a malformed entry can never silently become "full"
+      // (fail safe — anything not exactly "full" reads as redacted at resolve
+      // time, and we drop non-"full" stray values on load).
+      cloudDataPolicy: sanitizeCloudPolicy(parsed.cloudDataPolicy),
       nousApiKey:
         parsed.nousApiKey === undefined
           ? DEFAULT_SETTINGS.nousApiKey
