@@ -8,20 +8,41 @@
 // via POST /api/settings (clientSecret + refreshToken encrypted at rest). The
 // token can ONLY read mail — it cannot send, delete, or modify.
 //
-// Usage (PowerShell — set the three values from your OAuth client first):
-//   $env:ARGOS_GMAIL_CLIENT_ID="xxxx.apps.googleusercontent.com"
-//   $env:ARGOS_GMAIL_CLIENT_SECRET="GOCSPX-xxxx"
+// Usage (PowerShell — ARGOS must be running on :7799):
 //   node scripts/gmail-auth.mjs
+// The script PROMPTS for the Client ID + secret (paste into the prompt — the
+// secret is masked and never touches shell history), opens the consent URL,
+// catches the loopback redirect, mints the token, and stores it encrypted.
 //
-// Optional: $env:ARGOS_BASE="http://127.0.0.1:7799" (default), and
-//           $env:ARGOS_OAUTH_PORT="7733" (the local redirect port; must match
-//           an Authorized redirect URI http://127.0.0.1:7733 on the client).
+// Env vars are still honored for automation: ARGOS_GMAIL_CLIENT_ID,
+// ARGOS_GMAIL_CLIENT_SECRET, ARGOS_BASE (default http://127.0.0.1:7799),
+// ARGOS_OAUTH_PORT (default 7733; a Desktop-app client auto-allows the loopback
+// redirect, so no redirect URI needs registering).
 
 import http from "node:http";
+import readline from "node:readline";
 
-const CLIENT_ID = process.env.ARGOS_GMAIL_CLIENT_ID;
-const CLIENT_SECRET = process.env.ARGOS_GMAIL_CLIENT_SECRET;
+// Prompt on stdin. `hidden` mutes the echo so a pasted secret never shows on
+// screen or lands in shell history (the env-var paste path is gone).
+function prompt(question, hidden = false) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  return new Promise((res) => {
+    if (hidden) {
+      rl._writeToOutput = (s) => {
+        // Echo the question text; mask everything the user types.
+        if (s.includes(question) || s === "\n" || s === "\r\n") rl.output.write(s);
+        else rl.output.write("*");
+      };
+    }
+    rl.question(question, (ans) => { rl.close(); if (hidden) process.stdout.write("\n"); res(ans.trim()); });
+  });
+}
+
 const ARGOS_BASE = process.env.ARGOS_BASE ?? "http://127.0.0.1:7799";
+// Credentials: interactive prompt by default (paste into the prompt, not the
+// shell — never echoed, never in history). Env vars still honored for automation.
+const CLIENT_ID = process.env.ARGOS_GMAIL_CLIENT_ID || (await prompt("Paste the OAuth Client ID: "));
+const CLIENT_SECRET = process.env.ARGOS_GMAIL_CLIENT_SECRET || (await prompt("Paste the OAuth Client secret (hidden): ", true));
 const PORT = parseInt(process.env.ARGOS_OAUTH_PORT ?? "7733", 10);
 const REDIRECT = `http://127.0.0.1:${PORT}`;
 const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
@@ -31,7 +52,7 @@ const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error("Set ARGOS_GMAIL_CLIENT_ID and ARGOS_GMAIL_CLIENT_SECRET first.");
+  console.error("Both the OAuth Client ID and Client secret are required.");
   process.exit(1);
 }
 
