@@ -315,14 +315,18 @@ REM  Resolve via netstat: kill whoever is listening on 7799.
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":%NEXT_PORT% " ^| findstr "LISTENING"') do (
   taskkill /F /PID %%P >NUL 2>&1
 )
-REM  Ollama gets the title-match path; if our launcher started it the
-REM  title sticks because ollama serve does not rename its window.
-taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
-REM  Backup for an orphan Ollama child started by THIS launcher. Note:
-REM  this also kills any host-installed Ollama tray daemon - known
-REM  cost for the USB-isolated scenario where ARGOS owns Ollama
-REM  exclusively. See launchers/README.md.
-taskkill /F /IM ollama.exe >NUL 2>&1
+REM v2.4.2: only stop Ollama if WE started it. When REUSE_OLLAMA=1 the launcher
+REM borrowed the operator's already-running host daemon — the old blanket
+REM `taskkill /F /IM ollama.exe` tore that host Ollama down on every ARGOS exit,
+REM so the next launch found 11434 empty and could no longer reuse it. A
+REM reused daemon is not ours to kill: leave it running.
+if not "%REUSE_OLLAMA%"=="1" (
+  REM  Ollama gets the title-match path; if our launcher started it the
+  REM  title sticks because ollama serve does not rename its window.
+  taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
+  REM  Backup for an orphan Ollama child started by THIS launcher.
+  taskkill /F /IM ollama.exe >NUL 2>&1
+)
 
 REM --- Stop tool integration (post-Phase-1 patch) ---
 REM  Idempotent: stop.bat's docker compose down is safe if tool wasn't running.
