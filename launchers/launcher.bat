@@ -70,17 +70,28 @@ if defined OLLAMA_HOST (
   REM Parse port from caller-set OLLAMA_HOST (format host:port; IPv4 only).
   for /f "tokens=2 delims=:" %%P in ("!OLLAMA_HOST!") do set "OLLAMA_PORT=%%P"
 ) else (
+  REM v2.4.2: prefer REUSING a healthy host Ollama already on 11434 over spinning
+  REM a second bundled instance on 11435 (which would read a possibly-incomplete
+  REM payload model store). Health-probe 11434 first (curl /api/tags, the same
+  REM check the wait-loop uses). Only fall back to the port-occupancy logic if NO
+  REM healthy Ollama answers there.
   set "OLLAMA_PORT=11434"
-  call :PORT_IN_USE 11434
+  set "REUSE_OLLAMA=0"
+  curl -fs --max-time 2 http://127.0.0.1:11434/api/tags >NUL 2>&1
   if !errorlevel!==0 (
-    echo [INFO] Port 11434 in use; falling back to 11435.
-    set "OLLAMA_PORT=11435"
-    call :PORT_IN_USE 11435
+    set "REUSE_OLLAMA=1"
+  ) else (
+    call :PORT_IN_USE 11434
     if !errorlevel!==0 (
-      echo [ERROR] Both Ollama ports 11434 and 11435 are in use.
-      echo         Free one of them and re-run.
-      pause
-      exit /b 1
+      echo [INFO] Port 11434 in use by a non-Ollama process; falling back to 11435.
+      set "OLLAMA_PORT=11435"
+      call :PORT_IN_USE 11435
+      if !errorlevel!==0 (
+        echo [ERROR] Both Ollama ports 11434 and 11435 are in use.
+        echo         Free one of them and re-run.
+        pause
+        exit /b 1
+      )
     )
   )
   set "OLLAMA_HOST=127.0.0.1:!OLLAMA_PORT!"
@@ -109,7 +120,10 @@ if "%OLLAMA_BIN%"=="" (
     if not defined OLLAMA_BIN set "OLLAMA_BIN=%%I"
   )
 )
-if "%OLLAMA_BIN%"=="" (
+REM v2.4.2: a missing bundled binary is only fatal when we actually need to
+REM START Ollama. When reusing a healthy host Ollama (REUSE_OLLAMA=1) we never
+REM spawn the binary, so skip this guard entirely.
+if "%OLLAMA_BIN%"=="" if not "%REUSE_OLLAMA%"=="1" (
   echo [ERROR] Ollama binary not found.
   echo Expected one of:
   echo   %ARGOS_ROOT%\bin\ollama.exe                  ^(bundled - shipped by migrate-to-usb^)
@@ -159,6 +173,13 @@ REM starts. The Phase C investigation on 2026-05-20 confirmed the
 REM underlying ollama binary works (binds 127.0.0.1:11435 in 105ms
 REM via PowerShell Start-Process); the failure was always at the
 REM cmd /c wrapper layer.
+REM v2.4.2: when reusing a healthy host Ollama (already answered /api/tags above),
+REM do NOT spawn the bundled daemon — just proceed. Skips the second-instance
+REM spin-up on 11435 and the redundant wait loop.
+if "%REUSE_OLLAMA%"=="1" (
+  echo [1/4] Reusing host Ollama on 127.0.0.1:%OLLAMA_PORT% ^(skipping bundled start^).
+  goto OLLAMA_READY
+)
 echo [1/4] Starting Ollama on 127.0.0.1:%OLLAMA_PORT%...
 start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
 
