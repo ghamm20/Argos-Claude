@@ -130,6 +130,11 @@ const OLLAMA_CHAT = `${OLLAMA_BASE}/api/chat`;
 const KNOWN_TOOL_IDS = toolSummaries().map((t) => t.id);
 
 export async function handleChat(req: NextRequest): Promise<Response> {
+  // Phase 9 (2026-06-10) — Oculus fusion. When the request arrives via the
+  // Oculus assistant proxy it carries x-oculus-origin; ARGOS records it in the
+  // chat.inference audit so an Oculus query is provably attributed in the
+  // SINGLE (ARGOS-owned) audit chain. Absent header → normal ARGOS turn.
+  const oculusOrigin = req.headers.get("x-oculus-origin");
   // Phase 11 — bump the in-flight counter so the scheduler skips
   // ticking while a chat is being processed. Decremented in the
   // stream's close/cancel/error paths AND in every early-return
@@ -1533,6 +1538,9 @@ export async function handleChat(req: NextRequest): Promise<Response> {
             completion_tokens: auditCompletion,
             total_tokens: auditTotal,
             fallback_reason: fallbackReason,
+            // Phase 9 — provenance: Oculus map-pane queries are attributed here
+            // so the single ARGOS audit chain proves the proxy fusion.
+            ...(oculusOrigin ? { origin: "oculus", oculusOrigin } : {}),
           });
         } catch {
           /* audit is best-effort; never break the chat stream */

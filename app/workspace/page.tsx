@@ -25,9 +25,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSessionToken } from "@/lib/auth-client";
 
-const PILLARS_KEY = "argos_pillars_v1";
-const PILLAR_IDS = ["bart", "parascope", "jenna", "cortex", "sentry"] as const;
+// Phase 9 (2026-06-10) — "oculus" map pane added. Bump the storage key so a
+// stored 5-pillar order from Phase 6 gets the new pane appended (loadPrefs
+// also backfills any missing id, so this is belt-and-braces).
+const PILLARS_KEY = "argos_pillars_v2";
+const PILLAR_IDS = ["bart", "parascope", "jenna", "cortex", "sentry", "oculus"] as const;
 type PillarId = (typeof PILLAR_IDS)[number];
+
+// Oculus map standalone URL. Phase 9 spec says the map pane port is 3010; the
+// ARGOS-managed compose currently publishes 3011 — configurable, default 3010
+// per the locked spec (flagged in the Phase 9 report).
+const OCULUS_MAP_URL =
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_OCULUS_URL) || "http://127.0.0.1:3010";
 
 interface PillarPrefs {
   order: PillarId[];
@@ -292,6 +301,26 @@ export default function WorkspacePage() {
                 {calibration.n < 30 && <span className="text-neutral-600"> (trend surfaces at n≥30)</span>}
               </div>
             ) : <Notice text={authed ? "No predictions scored yet." : "Operator session required for calibration."} />}
+          </Pillar>
+        );
+      case "oculus":
+        return (
+          <Pillar key={id} id={id} title="OCULUS — Map" sub="geospatial pane (Oculus standalone; assistant proxied to ARGOS)" {...common}>
+            <div className="text-[11px] text-neutral-500 mb-2">
+              Live map from the Oculus standalone. Its analyst assistant is fused — it proxies to ARGOS (single model + audit chain).
+            </div>
+            <iframe
+              data-testid="oculus-map"
+              src={OCULUS_MAP_URL}
+              title="Oculus map"
+              className="w-full rounded border border-neutral-800/70 bg-black"
+              style={{ height: 360 }}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+            <div className="text-[10px] text-neutral-600 mt-1">
+              source: <span className="font-mono">{OCULUS_MAP_URL}</span> — if blank, start the Oculus stack.
+            </div>
           </Pillar>
         );
       case "sentry":
