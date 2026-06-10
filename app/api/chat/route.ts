@@ -6,6 +6,7 @@ import type { Confidence, RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
 import { getOllamaBase, KEEP_ALIVE_CONVERSATIONAL } from "@/lib/ollama-config";
+import { resolveNumCtx } from "@/lib/model-ctx";
 // Vision Phase 1 (2026-06-02) — image turns route to the multimodal model
 // (gemma4-turbo) regardless of persona; text turns stay on the persona model.
 // The persona system prompt is still injected, so the reply stays in
@@ -1175,6 +1176,11 @@ export async function POST(req: NextRequest) {
       // gemma4 model that emits ALL output via message.thinking (and nothing
       // into message.content) when think:true. Text turns keep the persona flag.
       const personaThink = !visionTurn && persona.think === true;
+      // Phase 1.5 (2026-06-10): floor the context window for models whose
+      // modelfile sets no num_ctx — the ~4.1k-token operator prompt saturates
+      // Ollama's 4096 default and generation dies after 1 token. Models that
+      // declare their own num_ctx (gemma-4: 131072) are untouched.
+      const numCtx = await resolveNumCtx(effectiveModel);
       upstream = await fetch(OLLAMA_CHAT, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1192,6 +1198,7 @@ export async function POST(req: NextRequest) {
           options: {
             think: personaThink,
             ...(maxTokens != null ? { num_predict: maxTokens } : {}),
+            ...(numCtx != null ? { num_ctx: numCtx } : {}),
           },
         }),
         signal: controller.signal,
@@ -1571,6 +1578,9 @@ export async function POST(req: NextRequest) {
                 // Continuation: feed the result back so Bart finishes his
                 // answer with it in hand. Best-effort, single round.
                 try {
+                  // Same num_ctx floor as the main call — the continuation
+                  // carries the full prompt PLUS the tool result.
+                  const contNumCtx = await resolveNumCtx(effectiveModel);
                   const cont = await fetch(OLLAMA_CHAT, {
                     method: "POST",
                     headers: { "content-type": "application/json" },
@@ -1584,7 +1594,11 @@ export async function POST(req: NextRequest) {
                       stream: true,
                       think: false,
                       keep_alive: KEEP_ALIVE_CONVERSATIONAL,
-                      options: { think: false, num_predict: maxTokens ?? 250 },
+                      options: {
+                        think: false,
+                        num_predict: maxTokens ?? 250,
+                        ...(contNumCtx != null ? { num_ctx: contNumCtx } : {}),
+                      },
                     }),
                   });
                   if (cont.ok && cont.body) {

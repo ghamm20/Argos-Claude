@@ -42,7 +42,7 @@ An **overnight autonomous run** (driven by now-superseded directives) shipped 22
 ## 5. OPEN DECISIONS / things the owner still owes (surface these, don't guess)
 1. **Push approval** — 2 local commits (`e4d1812`, `40d98cc`) are unpushed. Origin is 2 behind. Owner decides when to push.
 2. **Phase 1 release** — awaiting `Phase 1 accepted. Begin Phase 2.`
-3. **Rule 8 divergence (real debt):** `/api/tools/execute` + `/api/tools/approve` have NO `requireValidSession` gate (removed v2.4.1 to fix a bootstrap deadlock; no client sends a token). Phase 1's "session-gated" write is enforced via the **operator-only chat path**, not the raw tool endpoint — which is reachable un-sessioned on loopback. Documented in CLAUDE.md Rule 8. Needs an owner decision (re-add a working gate vs accept loopback-only).
+3. **Rule 8 divergence — RESOLVED (Phase 1.5, 2026-06-10):** `/api/tools/execute` + `/api/tools/approve` are now gated by `requireToolSession()` — operator session bearer OR local runtime token (`x-argos-runtime-token`, issued create-or-load at `ARGOS_ROOT/state/runtime-token`). Unconditional, no bootstrap deadlock, rejections audited as `auth_denied`. Proof: `scripts/proof-phase15-gate.mjs` 16/16.
 4. **Rule 6 already resolved:** owner ruled "correct the rule" — bindings stay on the working `aratan/gemma-4-E4B-q8-it-heretic` for Bart+Sage. `wild-gemma4:e4b` (Sage's old "final" binding) **CRASHES llama-server** (`GGML_ASSERT`/`0xc0000409`); `Orchestrator` is retired. Do NOT restore either without an explicit owner override.
 5. **Email is DORMANT** — `gmail.readonly` only, no token minted. All email features built + proven against a SYNTHETIC fixture mailbox; live steps audit `email_gate_deferred`. Owner runs `node scripts/gmail-auth.mjs` someday to go live; then run the live read + live adversarial gate.
 6. Integrity catch-rate 83.3% — 4 named guard-coverage gaps tracked as follow-up.
@@ -53,7 +53,7 @@ cd C:\Users\Gordy\dev\Argos-Claude
 npm run typecheck                       # fast
 Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue; npm run build   # clean build (REQUIRED before any `next start` smoke/proof)
 npm run check:full                      # 11 gates (lint,typecheck,build,verify-argos,2 audits,smoke-launcher,smoke-h2,smoke-settings,smoke-vault,smoke-retrieval). Its LIVE stage runs `next dev` which CLOBBERS .next → rebuild after.
-node scripts/auth-smoke.mjs             # needs a prod build present (next start). 18/18 normally; the chronic 1 fail = operator-chat-1-char MODEL-content flake (not auth).
+node scripts/auth-smoke.mjs             # needs a prod build present (next start). 18/18 REQUIRED — operator-chat-1-char was root-caused in Phase 1.5 (num_ctx 4096 saturation on modelfile-silent models; fixed via lib/model-ctx.ts floor) and the excusal is RETIRED: 17/18 is a red number.
 node scripts/tool-call-harness.mjs --verify-production   # gate is `production-executable === 3/3` (strict-clean is wrapper variance)
 node scripts/proof-phase1.mjs           # Phase 1 gate proof (10/10)
 ```
