@@ -14,6 +14,7 @@ import {
   Repeat,
   Settings,
   Globe,
+  Columns3,
 } from "lucide-react";
 
 interface NavItem {
@@ -41,6 +42,9 @@ const NAV: NavItem[] = [
   { id: "tools", label: "Tools", icon: Wrench, active: true, route: "/tools" },
   // Web Capability (2026-06-02) — tool & source discovery dashboard (35 tools).
   { id: "sources", label: "Sources", icon: Globe, active: true, route: "/tools/sources" },
+  // Phase 6 (2026-06-10) — Workspace Pillars: the operator console
+  // (proposals queue, workflows, overnight, integrity, calibration).
+  { id: "workspace", label: "Workspace", icon: Columns3, active: true, route: "/workspace" },
   // Overnight Engine (2026-06-02) — task queue + runner + morning brief.
   { id: "tasks", label: "Tasks", icon: ListChecks, active: true, route: "/tasks" },
   // Self-Evolving Loop Suite (2026-06-02) — 20 improvement loops + eval gates.

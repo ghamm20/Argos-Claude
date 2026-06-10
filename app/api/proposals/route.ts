@@ -11,9 +11,12 @@
 // only; nothing executes here (see /api/proposals/decide).
 
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fsp } from "node:fs";
+import path from "node:path";
 import { requireToolSession } from "@/lib/auth";
 import { listProposals } from "@/lib/proposer/store";
 import { generateProposals } from "@/lib/proposer/propose";
+import { proposerDir } from "@/lib/proposer/predict";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +25,14 @@ export async function GET(req: NextRequest) {
   const auth = await requireToolSession(req);
   if (auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const listing = await listProposals();
-  return NextResponse.json({ ok: true, ...listing });
+  // Phase 6 — surface the prediction calibration for the Cortex pillar.
+  let calibration: unknown = null;
+  try {
+    calibration = JSON.parse(await fsp.readFile(path.join(proposerDir(), "calibration.json"), "utf8"));
+  } catch {
+    /* no calibration yet */
+  }
+  return NextResponse.json({ ok: true, ...listing, calibration });
 }
 
 export async function POST(req: NextRequest) {
