@@ -495,6 +495,19 @@ if (existsSync(path.join(ROOT, "methodology"))) {
   );
 }
 
+// tools/oculus integration glue (Phase 9, 2026-06-10). The migrate previously
+// copied NO part of tools/, so the Oculus launcher glue (start/stop/compose,
+// with the OCULUS_DIR constant + 3011 port) never reached the deploy — the
+// launcher's Oculus auto-start silently failed on a fresh redeploy. Copy ONLY
+// tools/oculus (additive) — never the whole tools/ tree, to avoid clobbering
+// operator-supplied voice binaries under tools/voice.
+if (existsSync(path.join(ROOT, "tools", "oculus"))) {
+  sizes.toolsOculus = await copyTree(
+    path.join(ROOT, "tools", "oculus"),
+    path.join(ABS_TARGET, "tools", "oculus")
+  );
+}
+
 // README.txt
 const readme = [
   "ARGOS - local-first AI workstation",
