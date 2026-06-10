@@ -36,6 +36,11 @@ export type AuditKind =
   // Phase 8 (2026-06-10) — vault self-heal: manifest rebuilt from chunks
   // after a missing/corrupt manifest (silent-loss recovery, never silent).
   | "vault.manifest_recovered"
+  // Phase 9 rider (2026-06-10) — self-heal trust boundary: a chunk that fails
+  // provenance/hash verification at heal is quarantined, not indexed; and the
+  // provenance-less fallback (legacy/copied vault) is recorded.
+  | "vault.chunk_quarantined"
+  | "vault.heal_unverified"
   | "settings.changed"
   | "persona.switched"
   // Phase 5: voice I/O

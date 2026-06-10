@@ -14,7 +14,7 @@ import {
 import { extractText } from "./extract";
 import { chunkText, pickChunkOpts } from "./chunk";
 import { embedText } from "./embed";
-import { appendAudit } from "../audit";
+import { appendAudit, readChain } from "../audit";
 import type {
   Chunk,
   ChunksFile,
@@ -78,6 +78,38 @@ async function recoverManifestIfChunksExist(reason: string): Promise<Manifest> {
   if (chunkNames.length === 0) {
     return { version: MANIFEST_VERSION, documents: [] };
   }
+
+  // ---- Phase 9 rider (2026-06-10): the SELF-HEAL TRUST BOUNDARY ----
+  // The manifest rebuilds from whatever chunk files are on disk — so a PLANTED
+  // chunk would become canon after a heal. Anchor trust in the hash-chained
+  // audit log (which survives manifest loss + is tamper-evident): build the
+  // provenance map docId → recorded chunkSha256 from vault.ingested entries.
+  //   - chunk WITH a recorded hash that MATCHES   → recognized, indexed.
+  //   - chunk WITH a recorded hash that MISMATCHES → TAMPERED → quarantined.
+  //   - chunk with a vault.ingested entry but NO recorded hash (legacy ingest,
+  //       pre-rider) → recognized (can't verify; existence-of-provenance
+  //       trusted), indexed.
+  //   - chunk with NO vault.ingested entry at all → PLANTED → quarantined,
+  //       UNLESS there is zero provenance in the whole chain (a copied vault
+  //       with no state/ — then fall back to legacy trust + a heal_unverified
+  //       audit, so a provenance-less copy isn't wholesale quarantined).
+  // Quarantined chunks are MOVED to vault/index/quarantine/ and audited; they
+  // are NEVER silently indexed.
+  const provenance = new Map<string, { ingested: boolean; chunkSha256: string | null }>();
+  try {
+    for (const e of await readChain()) {
+      if (e.kind !== "vault.ingested") continue;
+      const p = e.payload as { docId?: string; chunkSha256?: string };
+      if (typeof p.docId === "string") {
+        provenance.set(p.docId, { ingested: true, chunkSha256: typeof p.chunkSha256 === "string" ? p.chunkSha256 : null });
+      }
+    }
+  } catch {
+    /* no audit chain — provenance stays empty (handled below) */
+  }
+  const hasAnyProvenance = provenance.size > 0;
+  const quarantineDir = path.join(indexDir(), "quarantine");
+
   // Map docs/ originals (<docId>-<filename>) for filename + byteSize recovery.
   let docEntries: string[] = [];
   try {
@@ -86,12 +118,45 @@ async function recoverManifestIfChunksExist(reason: string): Promise<Manifest> {
     docEntries = [];
   }
   const documents: DocumentMeta[] = [];
+  const quarantined: Array<{ docId: string; why: string }> = [];
+  let healUnverified = false;
   for (const cn of chunkNames) {
     const docId = cn.replace(/\.json$/, "");
+    const chunkPath = path.join(chunksDir(), cn);
     try {
-      const cf = JSON.parse(await fsp.readFile(path.join(chunksDir(), cn), "utf8")) as ChunksFile;
+      const rawChunk = await fsp.readFile(chunkPath, "utf8");
+      const cf = JSON.parse(rawChunk) as ChunksFile;
       const chunkCount = Array.isArray(cf.chunks) ? cf.chunks.length : 0;
       if (chunkCount === 0) continue;
+
+      // ---- trust check ----
+      const prov = provenance.get(docId);
+      const actualHash = sha256OfBuffer(Buffer.from(rawChunk, "utf8"));
+      let trusted = true;
+      let quarantineWhy = "";
+      if (!hasAnyProvenance) {
+        // Provenance-less vault (e.g. copied without state/). Legacy trust.
+        trusted = true;
+        healUnverified = true;
+      } else if (!prov) {
+        trusted = false;
+        quarantineWhy = "no vault.ingested provenance for this docId (planted/unknown chunk)";
+      } else if (prov.chunkSha256 && prov.chunkSha256 !== actualHash) {
+        trusted = false;
+        quarantineWhy = `chunk sha256 mismatch (recorded ${prov.chunkSha256.slice(0, 12)}…, on-disk ${actualHash.slice(0, 12)}…) — tampered`;
+      }
+      if (!trusted) {
+        // Quarantine: move out of chunks/ so retrieval can never reach it.
+        try {
+          await fsp.mkdir(quarantineDir, { recursive: true });
+          await fsp.rename(chunkPath, path.join(quarantineDir, cn));
+        } catch {
+          /* best-effort move; if it fails the chunk simply isn't indexed below */
+        }
+        quarantined.push({ docId, why: quarantineWhy });
+        continue;
+      }
+
       const origName = docEntries.find((d) => d.startsWith(`${docId}-`));
       const filename = origName ? origName.slice(docId.length + 1) : `${docId}.recovered`;
       let byteSize = 0;
@@ -107,7 +172,7 @@ async function recoverManifestIfChunksExist(reason: string): Promise<Manifest> {
       }
       let ingestedAt = Date.now();
       try {
-        ingestedAt = (await fsp.stat(path.join(chunksDir(), cn))).mtimeMs;
+        ingestedAt = (await fsp.stat(chunkPath)).mtimeMs;
       } catch {
         /* keep now() */
       }
@@ -123,9 +188,20 @@ async function recoverManifestIfChunksExist(reason: string): Promise<Manifest> {
     reason,
     recoveredDocs: documents.length,
     docIds: documents.map((d) => d.id),
+    quarantinedCount: quarantined.length,
+    provenanceVerified: hasAnyProvenance && !healUnverified,
   }).catch(() => {});
+  for (const q of quarantined) {
+    await appendAudit("vault.chunk_quarantined", { docId: q.docId, reason: q.why }).catch(() => {});
+  }
+  if (healUnverified) {
+    await appendAudit("vault.heal_unverified", {
+      reason: "no audit provenance available — chunks indexed on operator-local-disk trust (no hash verification possible)",
+      indexedDocs: documents.length,
+    }).catch(() => {});
+  }
   // eslint-disable-next-line no-console
-  console.warn(`[vault] manifest recovered from chunks (${reason}): ${documents.length} document(s) restored`);
+  console.warn(`[vault] manifest recovered from chunks (${reason}): ${documents.length} restored, ${quarantined.length} quarantined`);
   return rebuilt;
 }
 
@@ -240,11 +316,16 @@ export async function ingest(
   }
   const embeddingDurationMs = performance.now() - embedStart;
 
-  // Persist chunks JSON
+  // Persist chunks JSON. Phase 9 rider (2026-06-10) — record the sha256 of the
+  // chunk-file bytes so the self-heal can VERIFY a chunk at recovery time (see
+  // recoverManifestIfChunksExist). The hash is anchored in the hash-chained
+  // audit log (survives manifest loss, tamper-evident).
   const chunksFile: ChunksFile = { version: CHUNKS_VERSION, chunks };
+  const chunksJson = JSON.stringify(chunksFile);
+  const chunkSha256 = sha256OfBuffer(Buffer.from(chunksJson, "utf8"));
   await fsp.writeFile(
     chunkFilePath(docId),
-    JSON.stringify(chunksFile),
+    chunksJson,
     "utf8"
   );
 
@@ -283,6 +364,7 @@ export async function ingest(
       docId,
       filename,
       sha256,
+      chunkSha256, // Phase 9 rider — chunk-file integrity anchor for self-heal.
       byteSize: buf.length,
       chunkCount: chunks.length,
       durationMs: Math.round(result.durationMs),
