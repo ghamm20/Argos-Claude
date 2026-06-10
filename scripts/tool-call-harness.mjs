@@ -430,6 +430,22 @@ async function main() {
     process.exit(cleanBatch >= 2 ? 0 : 1);
   }
 
+  // --probe-model <model>: run N trials of an arbitrary model against the
+  // CURRENT production block (informational — reports clean + executable counts,
+  // never gates). Used by Stage 4.2 to measure Bobby's rebound model.
+  const probeIdx = process.argv.indexOf("--probe-model");
+  if (probeIdx >= 0) {
+    const MODEL = process.argv[probeIdx + 1];
+    const prompt = assembleProductionCurrent(parts);
+    console.log(`[harness] PROBE: ${MODEL} vs current production block (${prompt.length} chars), ${TRIALS} trials`);
+    const records = [];
+    await runTrials(MODEL, "probe", "PROBE", prompt, records);
+    const clean = records.filter((r) => r.clean).length;
+    const executable = records.filter((r) => r.checks?.prodLenientOk).length;
+    console.log(`\n[harness] probe ${MODEL}: ${clean}/${TRIALS} strict-clean, ${executable}/${TRIALS} production-executable`);
+    process.exit(0);
+  }
+
   const promptA = assemblePromptA(parts);
   const promptB = assemblePromptB(parts);
   console.log(`[harness] PROMPT A (verbatim production): ${promptA.length} chars`);

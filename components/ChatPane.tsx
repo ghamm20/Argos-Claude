@@ -468,6 +468,10 @@ interface OllamaStreamLine {
   // recalled this turn; injected = whether a recall block was added.
   factsFound?: number;
   injected?: boolean;
+  // Stage 4 — backend event (leading frame). backend = local|nous; model is
+  // declared above; fallbackReason = any silent-fallback reason.
+  backend?: string;
+  fallbackReason?: string | null;
   // Tools Phase — tool_result + tool_approval_required frames. (`error` is
   // already declared above for Ollama errors; reuse it.)
   ok?: boolean;
@@ -952,6 +956,17 @@ export function ChatPane() {
               useArgos.getState().setMemory({
                 factsFound: data.factsFound ?? 0,
                 injected: data.injected === true,
+              });
+              continue;
+            }
+            if (data?.type === "backend") {
+              // Stage 4 — record the LIVE inference source (backend + exact
+              // model + any fallback) so the HUD "Model" row shows what actually
+              // answered, not the static persona binding.
+              useArgos.getState().setInference({
+                backend: typeof data.backend === "string" ? data.backend : "local",
+                model: typeof data.model === "string" ? data.model : "",
+                fallbackReason: typeof data.fallbackReason === "string" ? data.fallbackReason : null,
               });
               continue;
             }

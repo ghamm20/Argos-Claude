@@ -109,6 +109,8 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
   const modelStatusMessage = useArgos((s) => s.modelStatusMessage);
   // Vision Phase 1 — model used for the most recent image turn (else null).
   const lastVisionModel = useArgos((s) => s.lastVisionModel);
+  // Stage 4 — live inference source for the most recent turn (else null).
+  const lastInference = useArgos((s) => s.lastInference);
   // Memory Phase — cross-session recall for the most recent turn.
   const lastMemory = useArgos((s) => s.lastMemory);
 
@@ -364,7 +366,31 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
       </div>
 
       <Section title="Model">
-        <Row label="Model" value={model} />
+        {/* Stage 4 — the LIVE model that answered the most recent turn (from
+            the chat route's backend frame: tool-model reroutes, Nous echoes,
+            and silent fallbacks all show here). Falls back to the static
+            persona binding before the first turn of a session. */}
+        <Row
+          label="Model"
+          value={lastInference?.model || model}
+          accent={lastInference?.backend === "nous" ? "#38bdf8" : undefined}
+          title={
+            lastInference
+              ? `backend: ${lastInference.backend}${lastInference.fallbackReason ? ` · fallback: ${lastInference.fallbackReason}` : ""}`
+              : "persona binding (no turn yet this session)"
+          }
+        />
+        {lastInference?.backend === "nous" && (
+          <Row label="Backend" value="API (Nous)" accent="#38bdf8" />
+        )}
+        {lastInference?.fallbackReason && (
+          <Row
+            label="Fallback"
+            value={lastInference.fallbackReason}
+            accent="#f59e0b"
+            title="The requested backend fell back; this is the honest reason (from the chat.inference audit)."
+          />
+        )}
         {/* Phase 2-RB: visible swap state. The store sets these during
             switchPersona → /api/model/warm → idle. Shown only when not
             "idle" so it doesn't permanently occupy a row. */}

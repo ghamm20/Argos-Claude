@@ -218,6 +218,12 @@ interface ArgosState {
    *  found + whether injected). Drives the HUD "Memory" row. Reset on
    *  clearChat. */
   lastMemory: { factsFound: number; injected: boolean } | null;
+  /** Stage 4 (2026-06-09) — the LIVE inference source for the most recent turn,
+   *  from the chat route's `backend` frame: the backend (local|nous), the EXACT
+   *  model that answered (incl. tool-model reroutes + Nous echoes), and any
+   *  silent-fallback reason. The HUD "Model" row reads THIS (the truth the chat
+   *  path resolved) rather than the static persona binding. Reset on clearChat. */
+  lastInference: { backend: string; model: string; fallbackReason: string | null } | null;
 
   switchPersona: (id: PersonaId) => Promise<void>;
   setModel: (m: string) => void;
@@ -238,6 +244,7 @@ interface ArgosState {
   setRoutingSuggestion: (s: RoutingHudState) => void;
   setVisionModel: (m: string | null) => void;
   setMemory: (m: { factsFound: number; injected: boolean } | null) => void;
+  setInference: (m: { backend: string; model: string; fallbackReason: string | null } | null) => void;
   setCurrentSessionId: (id: string | null) => void;
   /** Replace the entire in-memory chat with a loaded persisted session. */
   loadSession: (id: string, messages: ChatMessage[], personaId: PersonaId, model: string) => void;
@@ -267,6 +274,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   routingSuggestion: EMPTY_ROUTING_STATE,
   lastVisionModel: null,
   lastMemory: null,
+  lastInference: null,
 
   // Phase 2-RB: persona-bound model with visible swap state. Steps:
   //   1. If persona is not_configured, set modelStatus=not_configured
@@ -428,6 +436,8 @@ export const useArgos = create<ArgosState>((set, get) => ({
       lastVisionModel: null,
       // Memory Phase — drop any stale recall indicator.
       lastMemory: null,
+      // Stage 4 — drop any stale inference-source indicator.
+      lastInference: null,
     }),
 
   setVaultCounts: (docs, chunks) =>
@@ -440,6 +450,7 @@ export const useArgos = create<ArgosState>((set, get) => ({
   setRoutingSuggestion: (s) => set({ routingSuggestion: s }),
   setVisionModel: (m) => set({ lastVisionModel: m }),
   setMemory: (m) => set({ lastMemory: m }),
+  setInference: (m) => set({ lastInference: m }),
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   loadSession: (id, messages, personaId, model) =>

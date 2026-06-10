@@ -260,7 +260,13 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // into "full".
   cloudDataPolicy: {},
   nousApiKey: null,
-  useReboundModels: false,
+  // Stage 4 (2026-06-09): flipped ON by operator ruling. Rebinds Juniper +
+  // Bobby from their own bindings to the proven gemma-4-heretic (already
+  // resident for Bart/Sage) — gemma-4 emits the tool format far more reliably
+  // than notmythos (Bobby's prior binding), improving IMPLICIT tool use, and
+  // collapses model swaps on the lean 8GB tier (all four personas share one
+  // resident model). Explicit tool turns route to hermes3 regardless (Stage 1).
+  useReboundModels: true,
   // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
   // (round 2, prompt B: 3/3 clean, ~0.7s warm, 4.7 GB — fits VRAM whole).
   toolExecutionModel: "hermes3:8b",
