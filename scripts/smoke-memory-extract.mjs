@@ -21,6 +21,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 
@@ -31,6 +32,13 @@ const BASE_PORT = portArg >= 0 ? parseInt(process.argv[portArg + 1], 10) : 7823;
 
 const FACTS_PATH = join(repoRoot, "data", "memory", "shared", "operator_facts.jsonl");
 const MD_PATH = join(repoRoot, "memory", "MEMORY.md");
+// R1 test-side fix (Phase 7, 2026-06-10): memory recall is an OPERATOR
+// feature — the step-5 chat must authenticate, or the turn runs as guest and
+// recall is (correctly) suppressed. Set a known PIN, mint a token, send the
+// bearer. settings.json is snapshotted/restored so the dev tree is untouched.
+const SETTINGS_PATH = join(repoRoot, "config", "settings.json");
+const TEST_PIN = "1234";
+const hashPin = (pin) => createHash("sha256").update(`ARGOS_OPERATOR_${pin.length}`).update(pin).digest("hex");
 
 let pass = 0,
   fail = 0;
@@ -103,18 +111,20 @@ function jreq(base, path, opts = {}) {
 // POST /api/chat and collect leading NDJSON frames until the memory frame is
 // seen (or a few model tokens arrive), then abort. We only need the leading
 // {type:"memory"} frame, not the full generation.
-function chatLeadingFrames(base, payload, timeoutMs = 120_000) {
+function chatLeadingFrames(base, payload, timeoutMs = 120_000, token = null) {
   return new Promise((res) => {
     const url = new URL("/api/chat", base);
     const body = Buffer.from(JSON.stringify(payload));
     const frames = [];
+    const headers = { "content-type": "application/json", "content-length": body.length };
+    if (token) headers["authorization"] = `Bearer ${token}`;
     const r = http.request(
       {
         method: "POST",
         hostname: url.hostname,
         port: url.port,
         path: url.pathname,
-        headers: { "content-type": "application/json", "content-length": body.length },
+        headers,
         timeout: timeoutMs,
       },
       (resp) => {
@@ -200,11 +210,27 @@ const SAMPLE_ASSISTANT =
 
 const snapFacts = snapshot(FACTS_PATH);
 const snapMd = snapshot(MD_PATH);
+const snapSettings = snapshot(SETTINGS_PATH);
 
 try {
   await withServer("memory", BASE_PORT, async (base) => {
     // Start from a clean slate (restored from snapshot in finally).
     await jreq(base, "/api/memory/facts", { method: "DELETE" });
+
+    // R1: configure operator auth so the step-5 chat can authenticate. Set a
+    // known PIN + requirePin (valid under the settings-guard), mint a token.
+    await jreq(base, "/api/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operatorPinHash: hashPin(TEST_PIN), requirePin: true }),
+    });
+    const verify = await jreq(base, "/api/auth/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinHash: hashPin(TEST_PIN) }),
+    });
+    const OPERATOR_TOKEN = verify.json?.token ?? null;
+    check("operator token minted for the recall chat", typeof OPERATOR_TOKEN === "string" && /^[a-f0-9]{32}$/i.test(OPERATOR_TOKEN), OPERATOR_TOKEN ? "(ok)" : `(verify ${verify.status})`);
 
     // ===== 1. extraction =====
     console.log("\n=== 1. fact extraction (Bobby) ===");
@@ -268,7 +294,7 @@ try {
       messages: [{ role: "user", content: "Remind me what Marcus handles in Jordan." }],
       personaId: "bobby",
       model: "CyberCrew/notmythos-8b:latest",
-    });
+    }, 120_000, OPERATOR_TOKEN);
     const memFrame = ch.frames?.find((f) => f.type === "memory");
     check("chat stream emitted a memory frame", !!memFrame);
     check(
@@ -297,7 +323,8 @@ try {
 } finally {
   restore(FACTS_PATH, snapFacts);
   restore(MD_PATH, snapMd);
-  console.log("\n[cleanup] restored operator_facts.jsonl + MEMORY.md to pre-test state");
+  restore(SETTINGS_PATH, snapSettings);
+  console.log("\n[cleanup] restored operator_facts.jsonl + MEMORY.md + settings.json to pre-test state");
 }
 
 console.log(`\nsmoke-memory-extract: ${pass} passed, ${fail} failed — ${fail === 0 ? "PASS" : "FAIL"}`);

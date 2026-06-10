@@ -535,6 +535,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const next = await writeSettings(patch);
+  // R1 settings-guard (Phase 7, 2026-06-10): writeSettings throws on the
+  // unreachable-operator state (requirePin=true with no PIN). Surface it as a
+  // clean 400 with the explanatory message — never a 500.
+  let next;
+  try {
+    next = await writeSettings(patch);
+  } catch (e) {
+    return Response.json({ error: (e as Error).message }, { status: 400 });
+  }
   return Response.json(next);
 }

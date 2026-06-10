@@ -39,20 +39,115 @@ async function ensureDirs(): Promise<void> {
 }
 
 async function readManifest(): Promise<Manifest> {
+  let raw: string;
   try {
-    const raw = await fsp.readFile(manifestPath(), "utf8");
-    return JSON.parse(raw) as Manifest;
+    raw = await fsp.readFile(manifestPath(), "utf8");
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: MANIFEST_VERSION, documents: [] };
+      // Phase 8 vault-integrity fix (2026-06-10): a MISSING manifest with
+      // chunk files still on disk is the silent-loss case — the vault would
+      // report empty while every document sits orphaned. Rebuild from the
+      // chunks instead of silently returning empty.
+      return recoverManifestIfChunksExist("manifest missing (ENOENT)");
     }
     throw e;
   }
+  try {
+    return JSON.parse(raw) as Manifest;
+  } catch {
+    // Truncated / corrupt manifest (e.g. a USB yank mid-write before the
+    // atomic-write fix below, or external damage). The chunks are the source
+    // of truth — rebuild rather than throw or report empty.
+    return recoverManifestIfChunksExist("manifest unparseable (corrupt/truncated)");
+  }
+}
+
+/** Phase 8 vault-integrity (2026-06-10) — THE SELF-HEAL. A vault must never
+ *  silently lose files: the chunk files (and stored originals) are the source
+ *  of truth, the manifest is a derived index. When the manifest is missing or
+ *  corrupt, rebuild it from the orphaned chunks on disk, persist it atomically,
+ *  and audit the recovery (never silent). Returns an empty manifest only when
+ *  there genuinely are no chunks. */
+async function recoverManifestIfChunksExist(reason: string): Promise<Manifest> {
+  let chunkNames: string[] = [];
+  try {
+    chunkNames = (await fsp.readdir(chunksDir())).filter((n) => n.endsWith(".json"));
+  } catch {
+    chunkNames = [];
+  }
+  if (chunkNames.length === 0) {
+    return { version: MANIFEST_VERSION, documents: [] };
+  }
+  // Map docs/ originals (<docId>-<filename>) for filename + byteSize recovery.
+  let docEntries: string[] = [];
+  try {
+    docEntries = await fsp.readdir(docsDir());
+  } catch {
+    docEntries = [];
+  }
+  const documents: DocumentMeta[] = [];
+  for (const cn of chunkNames) {
+    const docId = cn.replace(/\.json$/, "");
+    try {
+      const cf = JSON.parse(await fsp.readFile(path.join(chunksDir(), cn), "utf8")) as ChunksFile;
+      const chunkCount = Array.isArray(cf.chunks) ? cf.chunks.length : 0;
+      if (chunkCount === 0) continue;
+      const origName = docEntries.find((d) => d.startsWith(`${docId}-`));
+      const filename = origName ? origName.slice(docId.length + 1) : `${docId}.recovered`;
+      let byteSize = 0;
+      let sha256 = "";
+      if (origName) {
+        try {
+          const buf = await fsp.readFile(path.join(docsDir(), origName));
+          byteSize = buf.length;
+          sha256 = sha256OfBuffer(buf);
+        } catch {
+          /* original gone — chunks still retrievable; meta best-effort */
+        }
+      }
+      let ingestedAt = Date.now();
+      try {
+        ingestedAt = (await fsp.stat(path.join(chunksDir(), cn))).mtimeMs;
+      } catch {
+        /* keep now() */
+      }
+      documents.push({ id: docId, filename, ingestedAt, chunkCount, sha256, byteSize });
+    } catch {
+      /* skip an unreadable chunk file — recover the rest */
+    }
+  }
+  const rebuilt: Manifest = { version: MANIFEST_VERSION, documents };
+  // Persist the rebuilt manifest atomically so the recovery is durable.
+  await writeManifest(rebuilt).catch(() => {});
+  await appendAudit("vault.manifest_recovered", {
+    reason,
+    recoveredDocs: documents.length,
+    docIds: documents.map((d) => d.id),
+  }).catch(() => {});
+  // eslint-disable-next-line no-console
+  console.warn(`[vault] manifest recovered from chunks (${reason}): ${documents.length} document(s) restored`);
+  return rebuilt;
 }
 
 async function writeManifest(m: Manifest): Promise<void> {
   await ensureDirs();
-  await fsp.writeFile(manifestPath(), JSON.stringify(m, null, 2), "utf8");
+  // Phase 8 vault-integrity fix (2026-06-10): ATOMIC write. The old plain
+  // fsp.writeFile truncates-then-writes, so a USB yank or crash mid-write left
+  // a 0-byte/partial manifest — the silent-loss root cause. Write to a per-pid
+  // temp file, fsync, then rename over the target (same posture as settings.ts
+  // and the audit chain). A yank mid-write leaves either the previous valid
+  // manifest or the new one — never a corrupt one.
+  const finalPath = manifestPath();
+  const tmpPath = `${finalPath}.${process.pid}.tmp`;
+  const payload = JSON.stringify(m, null, 2);
+  const fh = await fsp.open(tmpPath, "w");
+  try {
+    await fh.writeFile(payload, "utf8");
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fsp.rename(tmpPath, finalPath);
 }
 
 function sha256OfBuffer(buf: Buffer): string {
@@ -204,6 +299,30 @@ export async function ingest(
 export async function listDocuments(): Promise<DocumentMeta[]> {
   const manifest = await readManifest();
   return [...manifest.documents].sort((a, b) => b.ingestedAt - a.ingestedAt);
+}
+
+// Phase 8 (2026-06-10) — canon-corpus presence. The Bartimaeus canon-name
+// suppression (Option E) exists because the vault USED to mislead the model on
+// canon characters when it held no canon. Once the Stroud trilogy is indexed,
+// that rationale inverts: canon queries SHOULD retrieve from the authoritative
+// corpus. This lets the orchestrator suppress only when the corpus is absent.
+const CANON_FILENAME_RE = /amulet|golem|ptolemy|plotemy|samarkand|bartimaeus|stroud/i;
+let canonCorpusCache: { at: number; present: boolean } | null = null;
+
+export async function canonCorpusIndexed(): Promise<boolean> {
+  // 30s cache — this is consulted on every Bartimaeus canon-name turn; the
+  // corpus changes only on ingest/delete (rare relative to chat).
+  const now = Date.now();
+  if (canonCorpusCache && now - canonCorpusCache.at < 30_000) return canonCorpusCache.present;
+  let present = false;
+  try {
+    const manifest = await readManifest();
+    present = manifest.documents.some((d) => CANON_FILENAME_RE.test(d.filename ?? ""));
+  } catch {
+    present = false;
+  }
+  canonCorpusCache = { at: now, present };
+  return present;
 }
 
 /**

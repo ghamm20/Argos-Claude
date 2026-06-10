@@ -314,15 +314,41 @@ export function detectMisrepresentation(content: string, negatives: ToolResultLi
 // found nothing and the model says so; that's the safe direction the
 // retrieval-block instructions explicitly push toward.
 //
-// KNOWN UNCOVERED CHANNEL (owner rider R2, 2026-06-10): unattributed factual
-// fabrication — the same false content WITHOUT a "vault states" attribution
-// ("The lunar budget is $48B.") — is NOT caught here. Candidate fix rides
-// with Phase 8 vault/canon work: claims about vault content get checked
-// against retrieval hits regardless of attribution phrasing.
+// PHRASING-INDEPENDENT EXTENSION (Phase 8, owner rider from Phase 3 R2,
+// 2026-06-10): the original guard only fired on "the vault states …". This
+// widens the net to ANY phrasing that reports stored/source content — the
+// SOURCE noun (vault/archive/corpus/index/record/document/text/passage/
+// source/book/trilogy/canon) under ANY reporting verb, plus "according to /
+// per the <source>". So the $48B-style fabrication is caught whether it's
+// "the vault states", "the records show", "according to the document", or
+// "per the archive".
+//
+// HONEST RESIDUAL (documented, not a defect): a TRULY unattributed factual
+// claim ("The lunar budget is $48B.") is left UNFLAGGED on purpose — with no
+// source-reporting phrasing it is indistinguishable from the persona answering
+// from its own knowledge, which the retrieval block EXPLICITLY instructs Bart
+// to do on a zero-hit turn ("answer from your own knowledge; do NOT claim a
+// topic doesn't exist"). Flagging those would break legitimate canon answers.
+// The guard catches CONTENT-ATTRIBUTION fabrication of any phrasing; it does
+// not (and cannot soundly) police the model's own-knowledge claims.
 // ─────────────────────────────────────────────────────────────────────────
 
-const VAULT_ATTRIBUTION_RE =
-  /\b(?:the\s+(?:vault|archive|corpus)\s+(?:state|states|stated|say|says|said|show|shows|showed|record|records|recorded|contain|contains|contained|indicate|indicates|indicated|confirm|confirms|confirmed|note|notes|noted|list|lists|listed|document|documents|documented)|according\s+to\s+the\s+(?:vault|archive|corpus)|per\s+the\s+(?:vault|archive|corpus))\b/i;
+const SOURCE_NOUN = "vault|archive|corpus|index|records?|documents?|text|passage|source|book|trilogy|canon";
+const REPORT_VERB =
+  "state|states|stated|say|says|said|show|shows|showed|record|records|recorded|contain|contains|contained|" +
+  "indicate|indicates|indicated|confirm|confirms|confirmed|note|notes|noted|list|lists|listed|" +
+  "document|documents|documented|describe|describes|described|mention|mentions|mentioned|read|reads";
+
+const VAULT_ATTRIBUTION_RE = new RegExp(
+  `\\b(?:` +
+    // "the <source> <verb>" e.g. the records show, the document indicates
+    `the\\s+(?:${SOURCE_NOUN})\\s+(?:${REPORT_VERB})` +
+    `|` +
+    // "according to / per / based on / as stated in the <source>"
+    `(?:according\\s+to|per|based\\s+on|as\\s+(?:stated|written|recorded|noted)\\s+in)\\s+the\\s+(?:${SOURCE_NOUN})` +
+  `)\\b`,
+  "i"
+);
 
 const ABSENCE_CLAIM_RE =
   /\b(?:no\s+(?:records?|entries|entry|documents?|information|mention|data)|nothing|not\s+(?:contain|cover|mention|include)|doesn'?t|does\s+not|contains?\s+no)\b/i;

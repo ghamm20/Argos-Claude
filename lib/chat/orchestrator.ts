@@ -14,7 +14,7 @@
 import { NextRequest } from "next/server";
 import { isPersonaSelectable } from "@/lib/personas";
 import { resolvePersona } from "@/lib/persona-server";
-import { retrieve } from "@/lib/vault/store";
+import { retrieve, canonCorpusIndexed } from "@/lib/vault/store";
 import type { RetrievalHit } from "@/lib/vault/types";
 import { AVAILABLE_MODELS, isAvailableModel } from "@/lib/store";
 import { getAvailableModelsAdditions } from "@/lib/persona-overrides";
@@ -334,14 +334,24 @@ export async function handleChat(req: NextRequest): Promise<Response> {
     body.personaId,
     lastUserText(body.messages) ?? ""
   );
-  const wantsRetrieval = requestedRetrieval && !canonHit;
-  if (canonHit && requestedRetrieval) {
+  // Phase 8 (2026-06-10) — canon-suppression reconciliation. The Option-E
+  // suppression existed because the vault MISLED the model on canon characters
+  // when it held no canon corpus. Now that the Stroud trilogy can be indexed,
+  // that inverts: when the canon corpus IS present, a canon-name query SHOULD
+  // retrieve from it (the whole point of Phase 8 — Bart citing passages). So
+  // suppress ONLY when the canon corpus is absent.
+  const canonCorpusPresent = canonHit ? await canonCorpusIndexed().catch(() => false) : false;
+  const suppressCanon = canonHit && !canonCorpusPresent;
+  const wantsRetrieval = requestedRetrieval && !suppressCanon;
+  if (suppressCanon && requestedRetrieval) {
     // Operator-visible diagnostic — appears in server logs when the
-    // suppression fires. The audit chain doesn't record this
-    // currently; consider adding a "retrieval.suppressed" event kind
-    // if forensic visibility becomes important.
+    // suppression fires (canon name + NO canon corpus indexed).
     console.info(
-      `[chat] canon-name suppression: bartimaeus query matched a canon name → retrieval skipped this turn`
+      `[chat] canon-name suppression: bartimaeus query matched a canon name AND no canon corpus is indexed → retrieval skipped this turn`
+    );
+  } else if (canonHit && canonCorpusPresent && requestedRetrieval) {
+    console.info(
+      `[chat] canon corpus indexed → retrieving for canon-name query (Phase 8 reconciliation)`
     );
   }
   const topK =

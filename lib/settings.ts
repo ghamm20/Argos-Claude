@@ -497,6 +497,29 @@ export async function writeSettings(
     version: SETTINGS_VERSION,
     updatedAt: Date.now(),
   };
+
+  // R1 settings-guard (Phase 7 ruling, 2026-06-10): requirePin=true with NO
+  // operatorPinHash configured is an UNREACHABLE-OPERATOR state — every chat
+  // is forced to guest (isOperator = !requirePin || validToken, and no token
+  // can ever be minted without a PIN to verify against), so memory/operator
+  // mode are silently dead. Reject the TRANSITION INTO that state.
+  //
+  // Scope (fixed 2026-06-10): only guard when THIS patch touches the auth
+  // fields (requirePin or operatorPinHash). A pre-existing bad state on disk
+  // must NOT block unrelated writes (e.g. changing defaultPersona) — otherwise
+  // the settings endpoint bricks until the operator happens to fix auth, and
+  // they can't even change other settings to do it. The guard stops the
+  // operator from CREATING the bad state, not from editing around one.
+  const touchesAuth =
+    patch.requirePin !== undefined || patch.operatorPinHash !== undefined;
+  const willRequirePin = next.requirePin === true;
+  const willHavePin =
+    typeof next.operatorPinHash === "string" && next.operatorPinHash.length > 0;
+  if (touchesAuth && willRequirePin && !willHavePin) {
+    throw new Error(
+      "requirePin=true requires an operatorPinHash to be set — without a PIN no operator session can ever be minted and every turn runs as guest (unreachable-operator state). Set a PIN, or leave requirePin=false."
+    );
+  }
   await fsp.mkdir(configDir(), { recursive: true });
   // Atomic write: write to a per-pid temp file in the same dir, fsync,
   // then rename over the target. If the process is killed (or the USB

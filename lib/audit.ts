@@ -33,6 +33,9 @@ export type AuditKind =
   | "vault.ingested"
   | "vault.deleted"
   | "vault.auto-ingest"
+  // Phase 8 (2026-06-10) — vault self-heal: manifest rebuilt from chunks
+  // after a missing/corrupt manifest (silent-loss recovery, never silent).
+  | "vault.manifest_recovered"
   | "settings.changed"
   | "persona.switched"
   // Phase 5: voice I/O
