@@ -123,6 +123,13 @@ export default function DashboardPage() {
           <KV k="parity" v={String(t.mirrors.parity)} accent={t.mirrors.parity === "DRIFT" ? "#ef4444" : t.mirrors.parity === "in-parity" ? "#10b981" : "#a3a3a3"} />
           <KV k="configured roots" v={(t.mirrors.roots as unknown[])?.length ?? 0} />
         </Tile>
+
+        <Tile title="GPU" source={String(t.gpu.source)} accent={t.gpu.tier === "ample" ? "#38bdf8" : t.gpu.tier === "mid" ? "#eab308" : "#10b981"}>
+          <KV k="card" v={String(t.gpu.name)} />
+          <KV k="VRAM" v={`${t.gpu.vramGb} GB`} />
+          <KV k="tier" v={String(t.gpu.tier)} accent={t.gpu.tier === "ample" ? "#38bdf8" : undefined} />
+          {t.gpu.forced ? <KV k="profile" v="FORCED (test)" accent="#f59e0b" /> : null}
+        </Tile>
       </div>
 
       <div className="mt-6 mb-2 text-[11px] uppercase tracking-[0.18em] text-neutral-600">Off-box systems (stubs)</div>

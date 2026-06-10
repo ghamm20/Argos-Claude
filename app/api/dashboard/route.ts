@@ -16,6 +16,7 @@ import { computeRollingMetrics } from "@/lib/integrity/stress";
 import { readChain } from "@/lib/audit";
 import { toolStats } from "@/lib/tools/audit";
 import { taskCounts } from "@/lib/tasks/store";
+import { getGpuProfile } from "@/lib/gpu/detect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,13 +30,14 @@ async function readBuildId(root: string): Promise<string | null> {
 }
 
 export async function GET() {
-  const [rt, settings, integrity, chain, tstats, tasks] = await Promise.all([
+  const [rt, settings, integrity, chain, tstats, tasks, gpu] = await Promise.all([
     getRuntimeInfo(),
     readSettings(),
     computeRollingMetrics(),
     readChain().catch(() => []),
     toolStats().catch(() => ({})),
     taskCounts().catch(() => ({ open: 0, completed: 0, cancelled: 0, overdue: 0 })),
+    getGpuProfile().catch(() => null),
   ]);
 
   // Audit-chain kind counts (traceable greps).
@@ -122,6 +124,15 @@ export async function GET() {
         currentBuildId: buildId,
         parity: mirrorParity,
         roots: mirrors,
+      },
+      gpu: {
+        live: true,
+        source: "lib/gpu/detect (reuses detectHardware nvidia-smi) + gpu.profile_detected audit",
+        name: gpu?.name ?? "unknown",
+        vramGb: gpu?.vramGb ?? 0,
+        tier: gpu?.tier ?? "lean",
+        forced: gpu?.forced ?? false,
+        detectionSource: gpu?.source ?? "fallback",
       },
     },
     // Off-box systems — STUBS from static config. Status is NOT live; we do not
