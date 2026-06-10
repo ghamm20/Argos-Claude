@@ -137,6 +137,12 @@ set "LAUNCHER_LOG=%ARGOS_ROOT%\logs\launcher.log"
 set "OLLAMA_LOG=%ARGOS_ROOT%\logs\ollama.log"
 set "NEXT_LOG=%ARGOS_ROOT%\logs\next.log"
 
+REM Phase 2.x rider (2026-06-10): Ollama watchdog stop-flag. Created at
+REM cleanup to tell ollama-supervisor.bat to exit; stale flag from a hard
+REM exit is cleared here so the new watchdog actually runs.
+set "OLLAMA_STOPFLAG=%ARGOS_ROOT%\tmp\ollama-watchdog.stop"
+if exist "%OLLAMA_STOPFLAG%" del /F /Q "%OLLAMA_STOPFLAG%" >NUL 2>&1
+
 REM --- Log rotation (Phase 1) ---------------------------------
 REM  Roll each log if it exceeds 10 MB. Keep 3 generations (.1 .2 .3).
 REM  Done before daemons start so the rename can succeed (no open handles).
@@ -176,12 +182,19 @@ REM cmd /c wrapper layer.
 REM v2.4.2: when reusing a healthy host Ollama (already answered /api/tags above),
 REM do NOT spawn the bundled daemon — just proceed. Skips the second-instance
 REM spin-up on 11435 and the redundant wait loop.
+REM Phase 2.x rider (2026-06-10): Ollama SURVIVAL MODE. Both 24h crashes were
+REM session teardown of a session-bound Ollama (Winlogon logoff 22:29:09 vs
+REM managed-server exit 0x40010004 at 22:29:08; no fault events, no OOM — see
+REM PHASE15 rider evidence). The watchdog (launchers/ollama-supervisor.bat)
+REM owns serve with restart-on-exit AND adopts a reused host daemon: it
+REM probes /api/tags and only starts serve when the port goes dead, so the
+REM REUSE path below gains recovery too. Spawned for BOTH paths.
+start "ARGOS-OLLAMA-WD" /MIN cmd /c """%SCRIPT_DIR%\ollama-supervisor.bat"" ""%OLLAMA_BIN%"" %OLLAMA_PORT% ""%OLLAMA_LOG%"" ""%OLLAMA_STOPFLAG%"" < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
 if "%REUSE_OLLAMA%"=="1" (
-  echo [1/4] Reusing host Ollama on 127.0.0.1:%OLLAMA_PORT% ^(skipping bundled start^).
+  echo [1/4] Reusing host Ollama on 127.0.0.1:%OLLAMA_PORT% ^(watchdog attached^).
   goto OLLAMA_READY
 )
-echo [1/4] Starting Ollama on 127.0.0.1:%OLLAMA_PORT%...
-start "ARGOS-OLLAMA" /MIN cmd /c """%OLLAMA_BIN%"" serve < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
+echo [1/4] Starting Ollama on 127.0.0.1:%OLLAMA_PORT% ^(via watchdog^)...
 
 set /a TRIES=0
 :WAIT_OLLAMA
@@ -309,6 +322,11 @@ pause >NUL
 
 :CLEANUP
 echo Shutting down...
+REM Phase 2.x rider: signal the Ollama watchdog FIRST (flag), then F-kill its
+REM window as belt-and-braces — otherwise it would restart the daemon we are
+REM about to stop. On the REUSE path the borrowed daemon itself is left alone.
+echo stop > "%OLLAMA_STOPFLAG%" 2>NUL
+taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA-WD*" >NUL 2>&1
 REM  Next.js renames its cmd-window title to "next-server (vX.Y.Z)" once
 REM  the server is up, so taskkill by ARGOS-NEXT title misses it.
 REM  Resolve via netstat: kill whoever is listening on 7799.
@@ -345,6 +363,7 @@ exit /b 0
 
 :CLEANUP_FAIL
 echo Attempting cleanup of any started daemons...
+echo stop > "%OLLAMA_STOPFLAG%" 2>NUL
 taskkill /F /FI "WINDOWTITLE eq ARGOS-NEXT*" >NUL 2>&1
 taskkill /F /FI "WINDOWTITLE eq ARGOS-OLLAMA*" >NUL 2>&1
 pause
