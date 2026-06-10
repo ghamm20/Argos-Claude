@@ -80,6 +80,21 @@ export interface GmailConfig {
   refreshToken: string | null;
 }
 
+// Stage 10 (2026-06-09) — fleet (remote tailnet executor) endpoints. Each is a
+// remote Ollama on the tailnet. `policy` governs what local context may leave
+// the ARGOS box to that endpoint — "redacted" (default) keeps vault/memory home
+// (tailnet is trusted-ER, not trusted); "full" sends everything. Email content
+// NEVER leaves regardless. Default: no endpoints configured.
+export interface FleetEndpoint {
+  id: string;
+  /** Remote Ollama base URL, e.g. http://100.x.y.z:11434 (tailnet). */
+  baseUrl: string;
+  policy: "redacted" | "full";
+}
+export interface FleetConfig {
+  endpoints: FleetEndpoint[];
+}
+
 export type InferenceBackendChoice = "local" | "nous";
 export type PersonaBackendChoice = "local" | "nous" | "default";
 // Gate 2 (2026-06-09) — per-persona cloud data policy. Governs what local
@@ -166,6 +181,9 @@ export interface PersistedSettings {
   /** v2.4.2 Phase A — feature flag (SEPARATE from the backend switch): rebind
    *  Juniper + Bobby to the local gemma-4 model. Default false → unchanged. */
   useReboundModels: boolean;
+  /** Stage 10 (2026-06-09) — fleet remote-executor endpoints (tailnet Ollama).
+   *  Default: none configured. */
+  fleet: FleetConfig;
   /** G2 (2026-06-09) — optional per-role GPU tier override. Lets the operator
    *  PIN a role below the detected tier (testing / VRAM-sharing). Keys are model
    *  roles ("tool-execution", "judge", "research", "persona:<id>"); values are a
@@ -276,6 +294,9 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
   // (round 2, prompt B: 3/3 clean, ~0.7s warm, 4.7 GB — fits VRAM whole).
   toolExecutionModel: "hermes3:8b",
+  // Stage 10: no fleet endpoints by default (the Ubuntu rig is configured by
+  // the operator when it's on the tailnet).
+  fleet: { endpoints: [] },
   // G2: no per-role tier overrides by default → every role follows the
   // detected GPU tier (lean on the 3060 Ti).
   perRoleTierOverride: {},
@@ -436,6 +457,12 @@ export async function readSettings(): Promise<PersistedSettings> {
       // Tool-call enablement forward-compat: missing/blank/retired → default
       // (hermes3:8b). Older settings.json files load cleanly.
       toolExecutionModel: normalizeToolExecutionModel(parsed.toolExecutionModel),
+      // Stage 10 forward-compat: missing → no endpoints. Older files load cleanly.
+      fleet: {
+        endpoints: Array.isArray(parsed.fleet?.endpoints)
+          ? parsed.fleet.endpoints
+          : DEFAULT_SETTINGS.fleet.endpoints,
+      },
       // G2 forward-compat: missing → {} (every role follows detected tier).
       perRoleTierOverride:
         parsed.perRoleTierOverride && typeof parsed.perRoleTierOverride === "object"

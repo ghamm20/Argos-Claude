@@ -64,7 +64,12 @@ export async function judgeClaim(claim: Claim, opts: { generate?: JudgeGenerate 
   }
 }
 
-const stubJudge: JudgeGenerate = async (_m, prompt) => (/did NOT|never happened|false/i.test(prompt) ? "FAILED" : "VERIFIED");
+// Deterministic stub: FAILED only when the CLAIM itself reads as a negation /
+// fabrication (these phrases appear in a false assertion, NOT in the instruction
+// template — which is why bare "false" is excluded: it occurs in "FAILED if
+// false").
+const stubJudge: JudgeGenerate = async (_m, prompt) =>
+  /did not|never happened|fabricat|does not exist|no such/i.test(prompt) ? "FAILED" : "VERIFIED";
 
 export async function judgeClaims(claims: Claim[], opts: { generate?: JudgeGenerate } = {}): Promise<Outcome[]> {
   return Promise.all(claims.map((c) => judgeClaim(c, opts)));

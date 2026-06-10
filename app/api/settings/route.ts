@@ -7,6 +7,7 @@ import {
   type SettingsPatch,
   type PerPersonaBackend,
   type PerPersonaCloudPolicy,
+  type FleetEndpoint,
 } from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
 
@@ -100,6 +101,8 @@ interface SettingsPostBody {
   // Stage 3 (2026-06-09) — Gmail read-only OAuth creds. clientSecret +
   // refreshToken arrive PLAINTEXT, encrypted server-side before storage.
   gmail?: { clientId?: string | null; clientSecret?: string | null; refreshToken?: string | null };
+  // Stage 10 (2026-06-09) — fleet endpoints (tailnet Ollama).
+  fleet?: { endpoints?: Array<{ id?: string; baseUrl?: string; policy?: string }> };
   nousApiKey?: string | null;
   useReboundModels?: boolean;
   // Tool-call enablement (2026-06-09) — dedicated tool-emission model for
@@ -458,6 +461,19 @@ export async function POST(req: NextRequest) {
       else delete (merged as Record<string, string>)[k];
     }
     patch.cloudDataPolicy = merged;
+  }
+  if (body.fleet !== undefined) {
+    if (typeof body.fleet !== "object" || body.fleet === null || !Array.isArray(body.fleet.endpoints)) {
+      return Response.json({ error: "fleet.endpoints must be an array" }, { status: 400 });
+    }
+    const eps = [];
+    for (const e of body.fleet.endpoints) {
+      if (!e || typeof e.id !== "string" || typeof e.baseUrl !== "string") {
+        return Response.json({ error: "each fleet endpoint needs id + baseUrl" }, { status: 400 });
+      }
+      eps.push({ id: e.id.trim(), baseUrl: e.baseUrl.trim(), policy: e.policy === "full" ? "full" : "redacted" } as FleetEndpoint);
+    }
+    patch.fleet = { endpoints: eps };
   }
   if (body.gmail !== undefined) {
     if (typeof body.gmail !== "object" || body.gmail === null) {
