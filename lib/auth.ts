@@ -17,6 +17,7 @@
 import type { NextRequest } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readSettings } from "./settings";
+import { isRuntimeTokenValid } from "./runtime-token";
 
 /** Lifetime of a single operator session token. 12 hours per directive.
  *  Tokens are also invalidated on server restart (Set is in-memory). */
@@ -149,6 +150,31 @@ export type AuthFailure = { ok: false; status: number; error: string };
  *   const auth = await requireValidSession(req);
  *   if (auth) return NextResponse.json(auth.body, { status: auth.status });
  */
+/** Phase 1.5 (2026-06-10) — Rule 8 restoration: the gate for the raw tool
+ * endpoints (/api/tools/execute, /api/tools/approve), which are reachable
+ * over Tailscale, not just loopback.
+ *
+ * UNCONDITIONALLY active — unlike requireValidSession() below there is no
+ * "PIN not configured" exemption, because that exemption would leave the
+ * tool surface open to any Tailscale peer on a fresh/un-PINed install.
+ * Authorized callers are:
+ *   (a) a PIN-unlocked operator session (Authorization: Bearer <token>), or
+ *   (b) a local process holding the runtime token (x-argos-runtime-token
+ *       header; token lives at ARGOS_ROOT/state/runtime-token — local disk
+ *       only, never served).
+ * No bootstrap deadlock: these endpoints are not on the PIN-setup path
+ * (/api/settings keeps its own gate), and the runtime token is self-issued
+ * with no operator input. See lib/runtime-token.ts for the full frame.
+ */
+export async function requireToolSession(req: NextRequest): Promise<AuthFailure | null> {
+  const bearer = parseBearer(req.headers.get("authorization"));
+  if (isTokenValid(bearer)) return null;
+  if (await isRuntimeTokenValid(req.headers.get("x-argos-runtime-token"))) {
+    return null;
+  }
+  return { ok: false, status: 401, error: "ACCESS DENIED" };
+}
+
 export async function requireValidSession(req: NextRequest): Promise<AuthFailure | null> {
   const settings = await readSettings().catch(() => null);
   const requirePin = settings?.requirePin === true;

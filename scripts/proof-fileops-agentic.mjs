@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import http from "node:http";
+import { runtimeTokenHeader } from "./lib/runtime-token.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
@@ -40,7 +41,7 @@ function jsonReq(method, path, body) {
     const u = new URL(path, BASE);
     const r = http.request(
       { method, hostname: u.hostname, port: u.port, path: u.pathname,
-        headers: { "content-type": "application/json", ...(payload ? { "content-length": payload.length } : {}) }, timeout: 120000 },
+        headers: { "content-type": "application/json", ...runtimeTokenHeader(ROOT), ...(payload ? { "content-length": payload.length } : {}) }, timeout: 120000 },
       (resp) => { const c = []; resp.on("data", (x) => c.push(x));
         resp.on("end", () => { try { res({ status: resp.statusCode, json: JSON.parse(Buffer.concat(c).toString("utf8")) }); } catch { res({ status: resp.statusCode, json: null }); } }); });
     r.on("error", () => res({ status: 0, json: null }));

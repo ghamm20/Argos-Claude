@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import http from "node:http";
+import { runtimeTokenHeader } from "./lib/runtime-token.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
@@ -16,7 +17,7 @@ function req(base, path, opts = {}) {
     const url = new URL(path, base);
     const body = opts.body ? Buffer.from(JSON.stringify(opts.body)) : null;
     const r = http.request({ method: opts.method || "GET", hostname: url.hostname, port: url.port, path: url.pathname + url.search,
-      headers: body ? { "content-type": "application/json", "content-length": body.length } : {}, timeout: 90000 },
+      headers: body ? { "content-type": "application/json", ...runtimeTokenHeader(ROOT), "content-length": body.length } : {}, timeout: 90000 },
       (resp) => { const c = []; resp.on("data", (x) => c.push(x)); resp.on("end", () => { let j = null; try { j = JSON.parse(Buffer.concat(c).toString("utf8")); } catch {} res(j); }); });
     r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res(null); });
     if (body) r.write(body); r.end();

@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import http from "node:http";
+import { runtimeTokenHeader } from "./lib/runtime-token.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
@@ -39,7 +40,7 @@ function run(toolId, params) {
   return new Promise((res) => {
     const body = Buffer.from(JSON.stringify({ toolId, params }));
     const url = new URL("/api/tools/execute", `http://127.0.0.1:${PORT}`);
-    const r = http.request({ method: "POST", hostname: url.hostname, port: url.port, path: url.pathname, headers: { "content-type": "application/json", "content-length": body.length }, timeout: 45000 },
+    const r = http.request({ method: "POST", hostname: url.hostname, port: url.port, path: url.pathname, headers: { "content-type": "application/json", ...runtimeTokenHeader(ROOT), "content-length": body.length }, timeout: 45000 },
       (resp) => { const c = []; resp.on("data", (x) => c.push(x)); resp.on("end", () => { try { res(JSON.parse(Buffer.concat(c).toString("utf8"))); } catch { res(null); } }); });
     r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res({ _timeout: true }); }); r.write(body); r.end();
   });

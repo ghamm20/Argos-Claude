@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import http from "node:http";
+import { runtimeTokenHeader } from "./lib/runtime-token.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
@@ -36,7 +37,7 @@ function exec(base, toolId, params) {
     const url = new URL("/api/tools/execute", base);
     const r = http.request(
       { method: "POST", hostname: url.hostname, port: url.port, path: url.pathname,
-        headers: { "content-type": "application/json", "content-length": body.length }, timeout: 60000 },
+        headers: { "content-type": "application/json", ...runtimeTokenHeader(ROOT), "content-length": body.length }, timeout: 60000 },
       (resp) => {
         const chunks = [];
         resp.on("data", (c) => chunks.push(c));

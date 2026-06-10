@@ -137,7 +137,9 @@ export interface ToolAuditEntry {
   // the model emitted that the parser could not execute. Logged so a tool-call
   // attempt is never silently lost. Optional for back-compat (older entries are
   // executions). `rawText` carries what the model actually emitted.
-  event?: "execution" | "parse_failed";
+  // "auth_denied" (Phase 1.5, 2026-06-10): an un-sessioned POST to a gated
+  // tool endpoint was REJECTED by requireToolSession() — Rule 8 audit trail.
+  event?: "execution" | "parse_failed" | "auth_denied";
   rawText?: string | null;
 }
 

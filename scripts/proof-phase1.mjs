@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import http from "node:http";
+import { runtimeTokenHeader } from "./lib/runtime-token.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dir, "..");
@@ -29,7 +30,7 @@ const OUTSIDE = join(base2, "outside");
 let pass = 0, fail = 0;
 const check = (n, c, d = "") => { if (c) { pass++; console.log(`  [ok ] ${n}${d ? "  " + d : ""}`); } else { fail++; console.log(`  [FAIL] ${n}${d ? "  " + d : ""}`); } };
 // /api/tools/execute returns PLAIN JSON (not a stream) — read the whole body.
-function reqJson(method, path, body) { return new Promise((res) => { const p = body ? Buffer.from(JSON.stringify(body)) : null; const u = new URL(path, BASE); const r = http.request({ method, hostname: u.hostname, port: u.port, path: u.pathname, headers: { "content-type": "application/json", ...(p ? { "content-length": p.length } : {}) }, timeout: 120000 }, (resp) => { const c = []; resp.on("data", (x) => c.push(x)); resp.on("end", () => { try { res(JSON.parse(Buffer.concat(c).toString("utf8"))); } catch { res(null); } }); }); r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res(null); }); if (p) r.write(p); r.end(); }); }
+function reqJson(method, path, body) { return new Promise((res) => { const p = body ? Buffer.from(JSON.stringify(body)) : null; const u = new URL(path, BASE); const r = http.request({ method, hostname: u.hostname, port: u.port, path: u.pathname, headers: { "content-type": "application/json", ...runtimeTokenHeader(ROOT), ...(p ? { "content-length": p.length } : {}) }, timeout: 120000 }, (resp) => { const c = []; resp.on("data", (x) => c.push(x)); resp.on("end", () => { try { res(JSON.parse(Buffer.concat(c).toString("utf8"))); } catch { res(null); } }); }); r.on("error", () => res(null)); r.on("timeout", () => { r.destroy(); res(null); }); if (p) r.write(p); r.end(); }); }
 async function ready(maxSec = 60) { for (let i = 0; i < maxSec; i++) { const ok = await new Promise((res) => { http.get(new URL("/api/runtime", BASE), (r) => { r.resume(); res(r.statusCode === 200); }).on("error", () => res(false)); }); if (ok) return true; await new Promise((rs) => setTimeout(rs, 1000)); } return false; }
 function toolAudit() { try { return fs.readFileSync(join(ROOT, "state", "tool-audit.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } }
 

@@ -613,9 +613,16 @@ export function ChatPane() {
         return;
       }
       try {
+        // Phase 1.5 — /api/tools/approve is session-gated (Rule 8): attach
+        // the operator bearer, same as the chat request path.
+        const approveHeaders: Record<string, string> = {
+          "content-type": "application/json",
+        };
+        const sessTok = getSessionToken();
+        if (sessTok) approveHeaders["authorization"] = `Bearer ${sessTok}`;
         const r = await fetch("/api/tools/approve", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: approveHeaders,
           body: JSON.stringify({ approvalId: req.approvalId, decision: "approve" }),
         });
         const j = (await r.json()) as { result?: ToolResultCard | null };

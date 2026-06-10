@@ -29,6 +29,10 @@ const BASE_PORT = portArg >= 0 ? parseInt(process.argv[portArg + 1], 10) : 7824;
 
 const AUDIT_PATH = join(repoRoot, "state", "tool-audit.jsonl");
 
+// Phase 1.5 — tools endpoints are session-gated; local scripts authenticate
+// with the runtime token (same ARGOS_ROOT as the spawned server: repoRoot).
+const { runtimeTokenHeader } = await import("./lib/runtime-token.mjs");
+
 let pass = 0,
   fail = 0;
 function check(name, cond, detail = "") {
@@ -52,6 +56,7 @@ function jreq(base, path, opts = {}) {
         port: url.port,
         path: url.pathname + url.search,
         headers: {
+          ...runtimeTokenHeader(repoRoot),
           ...(body ? { "content-type": "application/json", "content-length": body.length } : {}),
         },
         timeout: opts.timeoutMs || 60_000,
