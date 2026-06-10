@@ -49,6 +49,7 @@ import { pumpTaskQueue } from "./task-scheduler";
 // 2AM). Idempotent per window; fire-and-forget so it never blocks the tick.
 import { pumpScheduledLoops } from "./loops/scheduler-hook";
 import { pumpIntegrityStressIfDue } from "./integrity/stress";
+import { pumpNightCycleIfDue } from "./night/cycle";
 
 // ----- constants -----
 
@@ -301,6 +302,9 @@ export async function runHeartbeatTick(
   // reusing this heartbeat tick (no new scheduler). Idempotent + graceful;
   // never blocks the heartbeat.
   void pumpIntegrityStressIfDue().catch(() => {});
+  // Stage 8 — run the night cycle once per day at/after the configured hour,
+  // reusing this tick (no new scheduler). Idempotent + graceful.
+  void pumpNightCycleIfDue().catch(() => {});
   runningTick = (async () => {
     const start = Date.now();
     const source = opts.source ?? "manual";
