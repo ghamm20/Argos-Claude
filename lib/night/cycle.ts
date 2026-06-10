@@ -18,6 +18,8 @@ import { wrapUntrustedEmails } from "../email/guards";
 import * as fileOps from "../tools/file-ops";
 import { listTasks, createTask, taskCounts, type Task } from "../tasks/store";
 import { runStress } from "../integrity/stress";
+import { makeClaim, recordClaim, recordOutcome, type Claim } from "../verifier/schema";
+import { judgeClaims } from "../verifier/judge";
 
 export interface NightRule {
   id: string;
@@ -62,6 +64,7 @@ export interface NightCycleReport {
   files: { rulesPresent: boolean; scanned: number; autoExecuted: Array<{ op: string; path: string; dest?: string }>; queued: Array<{ op: string; path: string; dest?: string; reason: string }>; batchOk: boolean | null };
   tasks: { open: number; overdue: Array<{ id: string; title: string; due: string | null }>; tomorrow: Array<{ id: string; title: string }>; proposedCompletions: Array<{ taskId: string; evidenceMsgId: string }> };
   integrity: { catchRate: number; missed: string[] };
+  verification: { total: number; verified: number; failed: number; unverified: number; outcomes: Array<{ claimId: string; assertion: string; verdict: string; evidence: string }> };
   briefPath: string;
 }
 
@@ -182,9 +185,33 @@ export async function runNightCycle(opts: RunNightOpts = {}): Promise<NightCycle
     } catch { /* graceful */ }
   }
 
+  // ---- 4b. JUDGE PASS (Stage 9) — every night-cycle action becomes a Claim;
+  // the Judge validates it against ground truth (mechanical first). A claim that
+  // FAILS verification is a headline item in the brief, not a footnote. ----
+  const claims: Claim[] = [];
+  for (const o of files.autoExecuted) {
+    if ((o.op === "move" || o.op === "copy") && o.dest) {
+      claims.push(makeClaim("night.file_pass", `${o.op} ${o.path} → ${o.dest}`, { type: "file_exists", path: o.dest }, at));
+      if (o.op === "move") claims.push(makeClaim("night.file_pass", `source removed: ${o.path}`, { type: "file_absent", path: o.path }, at));
+    }
+  }
+  for (const tid of mail.proposedTaskIds) {
+    claims.push(makeClaim("night.mail_sweep", `proposed task ${tid} exists and is open`, { type: "task_status", taskId: tid, expected: "open" }, at));
+  }
+  for (const c of claims) await recordClaim(c);
+  const outcomes = await judgeClaims(claims);
+  for (const o of outcomes) await recordOutcome(o);
+  const verification: NightCycleReport["verification"] = {
+    total: outcomes.length,
+    verified: outcomes.filter((o) => o.verdict === "verified").length,
+    failed: outcomes.filter((o) => o.verdict === "failed").length,
+    unverified: outcomes.filter((o) => o.verdict === "unverified").length,
+    outcomes: outcomes.map((o, i) => ({ claimId: o.claimId, assertion: claims[i].assertion, verdict: o.verdict, evidence: o.evidence })),
+  };
+
   // ---- 5. MORNING BRIEF (every line evidence-cited) ----
   const counts = await taskCounts(at);
-  const brief = buildBrief({ at, dateUtc, mail, files, tasks: { overdue, tomorrow, proposedCompletions }, integrity, counts });
+  const brief = buildBrief({ at, dateUtc, mail, files, tasks: { overdue, tomorrow, proposedCompletions }, integrity, verification, counts });
   const bp = briefPath(dateUtc);
   await fsp.mkdir(path.dirname(bp), { recursive: true });
   await fsp.writeFile(bp, brief, "utf8");
@@ -192,7 +219,7 @@ export async function runNightCycle(opts: RunNightOpts = {}): Promise<NightCycle
   const report: NightCycleReport = {
     at, dateUtc, mail, files,
     tasks: { open: open.length, overdue, tomorrow, proposedCompletions },
-    integrity, briefPath: bp,
+    integrity, verification, briefPath: bp,
   };
 
   // ---- 6. NIGHT LEDGER (single hash-chained entry) ----
@@ -231,6 +258,7 @@ function buildBrief(d: {
   files: NightCycleReport["files"];
   tasks: { overdue: Array<{ id: string; title: string; due: string | null }>; tomorrow: Array<{ id: string; title: string }>; proposedCompletions: Array<{ taskId: string; evidenceMsgId: string }> };
   integrity: { catchRate: number; missed: string[] };
+  verification: NightCycleReport["verification"];
   counts: { open: number; completed: number; cancelled: number; overdue: number };
 }): string {
   const L: string[] = [];
@@ -261,6 +289,15 @@ function buildBrief(d: {
   L.push("");
 
   L.push("## Integrity", `Catch rate ${(d.integrity.catchRate * 100).toFixed(1)}%, ${d.integrity.missed.length} miss(es)${d.integrity.missed.length ? ` (${d.integrity.missed.join(", ")})` : ""}. ${ev("audit", "state/integrity-metrics.jsonl")}`);
+  L.push("");
+
+  // Stage 9 — VERIFICATION. Every night-cycle action judged against ground
+  // truth. FAILED verifications are headline items, not footnotes.
+  L.push("## Verification", `${d.verification.verified}/${d.verification.total} claims verified · ${d.verification.failed} FAILED · ${d.verification.unverified} unverified. ${ev("audit", "verifier.outcome")}`);
+  for (const o of d.verification.outcomes) {
+    const tag = o.verdict === "failed" ? "❌ FAILED" : o.verdict === "verified" ? "✓" : "? unverified";
+    L.push(`- ${tag} — ${o.assertion} ${ev("claim", o.claimId)} (${o.evidence})`);
+  }
   L.push("");
   L.push("---", `*Autonomous night cycle. Read-and-propose biased: out-of-rules file ops and all deletes are queued, never executed unattended. ${ev("audit", "night.cycle_complete")}*`);
   return L.join("\n");
