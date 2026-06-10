@@ -21,6 +21,10 @@ import { loopsBriefSection } from "./loops/brief";
 // hash-chain verification lines for the audit + observation chains.
 import { verifyChain } from "./audit";
 import { verifyObservationChain } from "./observation";
+// Phase 5 rider — PROPOSALS section (pending queue with predicted-ask
+// classes + probabilities) and the D2 Brier trend line (n ≥ 30 only).
+import { listProposals } from "./proposer/store";
+import { brierTrendLine } from "./proposer/predict";
 
 const BRIEF_SYSTEM =
   "You are Bartimaeus. Write a morning operational brief for the operator " +
@@ -189,12 +193,38 @@ export async function generateMorningBrief(
     (e) => `## VERDICT BLOCK\n\n- RED    verdict computation threw — ${(e as Error).message}`
   );
 
+  // Phase 5 rider — PROPOSALS section: the pending queue with predicted-ask
+  // classes + probabilities. Nothing here has executed; every line awaits an
+  // operator decision via /api/proposals/decide.
+  let proposalsSection = "";
+  try {
+    const { pending } = await listProposals();
+    const lines = ["## PROPOSALS (pending — nothing executed; decide via the proposals queue)", ""];
+    if (pending.length === 0) {
+      lines.push("- (queue empty)");
+    } else {
+      for (const p of pending) {
+        const pred = p.predictedAsk
+          ? `predicted ${p.predictedAsk.topicClass}/${p.predictedAsk.queryType} p=${(p.confidence ?? 0).toFixed(2)}`
+          : "workspace context";
+        lines.push(`- [${p.type}] "${p.title}" — ${pred}  [proposal:state/proposals/pending/${p.id}.json]`);
+      }
+    }
+    const brierLine = await brierTrendLine().catch(() => null);
+    if (brierLine) lines.push(brierLine); // D2: only surfaces once n ≥ 30
+    proposalsSection = lines.join("\n");
+  } catch (e) {
+    proposalsSection = `## PROPOSALS\n\n- (section failed: ${(e as Error).message})`;
+  }
+
   const md = [
     `# Morning Brief — ${date}`,
     "",
     `_Generated ${now.toISOString()} · ${completed.length} complete · ${failed.length} failed_`,
     "",
     verdictBlock,
+    "",
+    proposalsSection,
     "",
     brief.trim(),
     "",

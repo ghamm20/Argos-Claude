@@ -137,7 +137,10 @@ export async function pumpTaskQueue(): Promise<void> {
   }
 }
 
-/** Fire the morning brief once per day at/after the configured time. */
+/** Fire the morning brief once per day at/after the configured time.
+ *  Phase 5 rider (owner, 2026-06-10): a scheduled PROPOSER PASS runs first —
+ *  PROPOSALS ONLY (the proposer cannot execute by construction), preflight-
+ *  gated like every other night task. The brief then lists the queue. */
 export async function maybeRunMorningBrief(now = new Date()): Promise<boolean> {
   try {
     const today = now.toISOString().slice(0, 10);
@@ -148,6 +151,26 @@ export async function maybeRunMorningBrief(now = new Date()): Promise<boolean> {
     const target = new Date(now);
     target.setHours(h, m, 0, 0);
     if (now.getTime() < target.getTime()) return false;
+
+    // ---- scheduled proposer pass (proposals only, preflight-gated) ----
+    if (await ollamaPreflight()) {
+      const { generateProposals } = await import("./proposer/propose");
+      const r = await generateProposals().catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[task-scheduler] scheduled proposer pass failed (non-fatal): ${(e as Error).message}`);
+        return null;
+      });
+      if (r) {
+        await appendAudit("proposal.scheduled_pass", {
+          created: r.created.length,
+          types: [...new Set(r.created.map((p) => p.type))],
+          predictions: r.predictions.length,
+          skippedBelowThreshold: r.skippedBelowThreshold,
+        }).catch(() => {});
+      }
+    } else {
+      await appendAudit("proposal.scheduled_pass", { skipped: "ollama_preflight_failed" }).catch(() => {});
+    }
 
     await generateMorningBrief({ now });
     state.lastBriefDate = today;

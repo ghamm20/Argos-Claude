@@ -167,6 +167,7 @@ export async function generateProposals(opts: PredictOptions = {}): Promise<Gene
         reasoning: pred.reasoning,
         confidence: pred.probability,
         predictionClaimId: pred.claimId,
+        predictedAsk: { topicClass: pred.topicClass, queryType: pred.queryType },
       })
     );
     pendingTitles.add(input.title);

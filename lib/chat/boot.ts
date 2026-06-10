@@ -8,6 +8,7 @@
 
 import { initMemoryStore } from "@/lib/memory/store";
 import { ensureSchedulerStarted } from "@/lib/research/scheduler";
+import { resumeInterruptedWorkflows } from "@/lib/workflow/engine";
 import { ensureHeartbeatStarted } from "@/lib/heartbeat";
 import { ensureTaskSchedulerStarted } from "@/lib/task-scheduler";
 import { ensureLoopSchedulerStarted } from "@/lib/loops/scheduler";
@@ -54,4 +55,17 @@ void ensureTaskSchedulerStarted().catch((e) => {
 void ensureLoopSchedulerStarted().catch((e) => {
   // eslint-disable-next-line no-console
   console.warn(`[chat] loop scheduler boot failed: ${(e as Error).message}`);
+});
+
+// Phase 5 (2026-06-10) — workflow recovery: any workflow persisted as
+// "running" was interrupted by a process exit; resume it from its cursor.
+// Halted/terminal workflows are left exactly as persisted. Fire-and-forget.
+void resumeInterruptedWorkflows().then((n) => {
+  if (n > 0) {
+    // eslint-disable-next-line no-console
+    console.info(`[chat] resumed ${n} interrupted workflow(s) after restart`);
+  }
+}).catch((e) => {
+  // eslint-disable-next-line no-console
+  console.warn(`[chat] workflow resume failed (non-fatal): ${(e as Error).message}`);
 });

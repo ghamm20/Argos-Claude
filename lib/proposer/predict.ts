@@ -342,5 +342,37 @@ export async function scorePredictions(): Promise<Calibration> {
   const cal: Calibration = { n, brier: n > 0 ? sum / n : 0, hits, lastUpdated: new Date().toISOString() };
   await fsp.mkdir(proposerDir(), { recursive: true });
   await fsp.writeFile(calibrationPath(), JSON.stringify(cal, null, 2), "utf8");
+  // D2 ruling (2026-06-10): weights change on EVIDENCE — keep a calibration
+  // history so the morning brief can surface the Brier trend once n ≥ 30.
+  if (scoredAny) {
+    await fsp.appendFile(
+      path.join(proposerDir(), "calibration-history.jsonl"),
+      JSON.stringify({ at: cal.lastUpdated, n: cal.n, brier: cal.brier, hits: cal.hits }) + "\n",
+      "utf8"
+    );
+  }
   return cal;
+}
+
+/** D2 ruling — Brier trend line for the morning brief, only once n ≥ 30
+ *  scored predictions exist. Returns null below that threshold. */
+export async function brierTrendLine(): Promise<string | null> {
+  let cal: Calibration | null = null;
+  try {
+    cal = JSON.parse(await fsp.readFile(calibrationPath(), "utf8")) as Calibration;
+  } catch {
+    return null;
+  }
+  if (!cal || cal.n < 30) return null;
+  let history: Array<{ at: string; brier: number; n: number }> = [];
+  try {
+    history = (await fsp.readFile(path.join(proposerDir(), "calibration-history.jsonl"), "utf8"))
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    /* no history yet */
+  }
+  const baseline = history.length > 8 ? history[history.length - 8] : history[0];
+  const delta = baseline ? cal.brier - baseline.brier : 0;
+  const dir = delta < -0.005 ? "improving" : delta > 0.005 ? "degrading" : "flat";
+  return `- prediction calibration: n=${cal.n}, Brier=${cal.brier.toFixed(4)} (${dir}, Δ=${delta >= 0 ? "+" : ""}${delta.toFixed(4)} vs ${baseline ? baseline.at.slice(0, 10) : "n/a"})  [cal:state/proposer/calibration.json]`;
 }

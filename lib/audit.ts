@@ -44,7 +44,16 @@ export type AuditKind =
   | "proposal.created"
   | "proposal.applied"
   | "proposal.rejected"
+  // Phase 5 rider — the scheduled nightly proposer pass (proposals only).
+  | "proposal.scheduled_pass"
   | "workflow.executed"
+  // Phase 5 (2026-06-10) — workflow engine lifecycle.
+  | "workflow.created"
+  | "workflow.step"
+  | "workflow.halted"
+  | "workflow.resumed"
+  | "workflow.completed"
+  | "workflow.aborted"
   // Phase 3 (2026-06-10) — overnight engine: every task action is chained.
   | "task.claimed"
   | "task.step"

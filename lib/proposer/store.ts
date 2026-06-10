@@ -51,6 +51,10 @@ export interface Proposal {
   confidence: number | null;
   /** Claim id of the prediction behind this proposal, when there is one. */
   predictionClaimId: string | null;
+  /** Phase 5 rider — the predicted ask class behind a pre-fetch proposal
+   *  (null for workspace-context proposals). Drives the morning brief's
+   *  PROPOSALS section. */
+  predictedAsk: { topicClass: string; queryType: string } | null;
   /** The action that runs ONLY on operator approval. */
   action: ProposalAction;
   status: ProposalStatus;
@@ -80,6 +84,7 @@ export async function createProposal(input: {
   reasoning: Proposal["reasoning"];
   confidence: number | null;
   predictionClaimId: string | null;
+  predictedAsk?: { topicClass: string; queryType: string } | null;
   action: ProposalAction;
 }): Promise<Proposal> {
   await ensureDirs();
@@ -90,6 +95,7 @@ export async function createProposal(input: {
     decidedAt: null,
     result: null,
     ...input,
+    predictedAsk: input.predictedAsk ?? null,
   };
   await fsp.writeFile(path.join(pendingDir(), `${p.id}.json`), JSON.stringify(p, null, 2), "utf8");
   await appendAudit("proposal.created", {

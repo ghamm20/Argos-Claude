@@ -35,6 +35,26 @@ changing them mid-phase falls under gate immutability (doctrine Rule 11).
    PROPOSALS — approval-queue rules apply, zero autonomous execution
    (existing Phase 4 gate 3 covers this).
 
+## Phase 4 design rulings (owner, 2026-06-10 — at gate review)
+
+- **D1 — Class-level predictions: RATIFIED as PERMANENT posture.** The
+  observation corpus stays content-free. Content-bearing proposals come from
+  workspace scans only. Content storage is not to be raised again; a future
+  phase needing it requires a dedicated decision doc, not a rider.
+- **D2 — Fusion weights + renormalization: accepted.** Revisit only with
+  calibration evidence — when n ≥ 30 scored predictions, the morning brief
+  surfaces a Brier trend line; weights change on evidence, not intuition.
+- **D3 — Approve-executes-immediately: accepted.** The operator decision IS
+  the approval.
+
+## Phase 5 rider — scheduled proposer pass (owner, 2026-06-10)
+
+- The night cycle generates **PROPOSALS ONLY** (no pre-fetch execution
+  overnight — already structural: nothing in the proposer executes).
+- The morning brief gains a **PROPOSALS section**: the pending queue with
+  predicted-ask classes + probabilities.
+- The pass is **preflight-gated** like every other night task.
+
 ## Implementation notes (recorded at intake, non-binding)
 
 - `topic_class` / `query_type` classification: the keyword classifier in
