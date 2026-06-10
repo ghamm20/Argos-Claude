@@ -65,3 +65,6 @@ _diag_*.log
 tools/voice/bart-reference/*.wav
 tools/voice/bart-reference/*.mp3
 tools/voice/bart-reference/*.flac
+
+# Asset staging drop zone (source PDFs / audio; never committed)
+_intake/

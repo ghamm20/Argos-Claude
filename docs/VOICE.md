@@ -271,9 +271,15 @@ Both writers are best-effort — a failed audit append never blocks the underlyi
 
 ---
 
-## Phase 7-C — ElevenLabs TTS for Bartimaeus (Cassius), Piper fallback
+## Phase 7-C — ElevenLabs TTS for Bartimaeus (Sael), Piper fallback
 
-Bartimaeus speaks in his ElevenLabs **Cassius** voice when an API key is
+> **Voice decision (2026-06-10):** Bart's voice is locked to ElevenLabs
+> **Sael** (voice id `aGv5jHWKBy8K5xKvYeSX`, model `eleven_multilingual_v2`,
+> stability 0.50, similarity_boost 0.77). Earlier docs and code comments
+> mislabeled this same id as "Cassius" — the id was always correct; only the
+> name was wrong. Owner confirmed the id is Sael's on 2026-06-10.
+
+Bartimaeus speaks in his ElevenLabs **Sael** voice when an API key is
 configured; on any failure he falls back to **Piper silently**. The other
 personas (Juniper, Sage, Bobby) are unchanged — always Piper.
 
@@ -285,7 +291,7 @@ error → Bart uses Piper. ElevenLabs is an upgrade, never a requirement.
 | key | default | notes |
 |-----|---------|-------|
 | `elevenlabs.apiKey` | `null` | ElevenLabs API key. **Encrypted at rest** (AES-256-GCM, same as `apiKeys`); the GET `/api/settings` response returns only `{configured, hint}`, never the key. `null`/`""` disables ElevenLabs. |
-| `elevenlabs.bartVoiceId` | `aGv5jHWKBy8K5xKvYeSX` | Cassius voice id. |
+| `elevenlabs.bartVoiceId` | `aGv5jHWKBy8K5xKvYeSX` | Sael voice id (confirmed 2026-06-10). |
 | `elevenlabs.model` | `eleven_multilingual_v2` | ElevenLabs model id. |
 
 Set these in **Settings → Voice → ElevenLabs**: a masked API-key field, the
@@ -332,5 +338,5 @@ ElevenLabs served the turn). The response also sets `x-voice-engine`
 read-back, raw key never echoed); Bart + key set → audio (fake key 401s →
 **silent Piper fallback**, no 503 — the doctrine path); Bart + no key → Piper
 audio (not 503); Juniper (key set) → Piper, ElevenLabs never used. A real
-ElevenLabs key (→ real Cassius audio) is validated by the operator via the
+ElevenLabs key (→ real Sael audio) is validated by the operator via the
 Settings **Test voice** button.

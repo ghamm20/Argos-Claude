@@ -18,7 +18,7 @@ import { Mic, Volume2, RefreshCw, CheckCircle2, AlertCircle, Sparkles, Play } fr
 const ELEVENLABS_TEST_TEXT = "I am Bartimaeus. Try not to waste my time.";
 
 /**
- * Phase 7-C — ElevenLabs (Cassius) voice for Bartimaeus, with Piper as the
+ * Phase 7-C — ElevenLabs (Sael, locked 2026-06-10) voice for Bartimaeus, with Piper as the
  * offline fallback. API key is masked (password field) and only ever sent to
  * the server; the GET response returns a hint, never the key.
  */
@@ -103,7 +103,7 @@ function ElevenLabsCard() {
       await audio.play();
       setTestMsg(
         engine === "elevenlabs"
-          ? "Spoke via ElevenLabs (Cassius)."
+          ? "Spoke via ElevenLabs (Sael)."
           : `Spoke via ${engine} (ElevenLabs not used — set a key, or it fell back).`
       );
     } catch (e) {
@@ -119,7 +119,7 @@ function ElevenLabsCard() {
         <div className="flex items-center gap-2">
           <Sparkles size={14} strokeWidth={1.8} className="text-neutral-400" />
           <span className="text-[13px] font-medium text-neutral-100">
-            ElevenLabs — Bartimaeus voice (Cassius)
+            ElevenLabs — Bartimaeus voice (Sael)
           </span>
         </div>
         <StatusPill available={configured} label={configured ? "Key set" : "No key"} />

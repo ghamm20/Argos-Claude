@@ -771,8 +771,10 @@ export interface SynthesizeResult {
 
 // ----- ElevenLabs (Phase 7-C) -----------------------------------
 //
-// Bartimaeus speaks in his ElevenLabs "Cassius" voice when an API key is
-// configured. Network-OPTIONAL: no key (or any failure) → silent fall-through
+// Bartimaeus speaks in his ElevenLabs "Sael" voice when an API key is
+// configured (locked to Sael, owner decision 2026-06-10 — the id
+// aGv5jHWKBy8K5xKvYeSX was previously mislabeled "Cassius" in comments).
+// Network-OPTIONAL: no key (or any failure) → silent fall-through
 // to F5/Piper. The key is read+decrypted at call time and NEVER logged.
 
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1/text-to-speech";
@@ -925,7 +927,7 @@ export async function synthesizeText(
     );
   }
 
-  // Phase 7-C: Bartimaeus's voice chain — ElevenLabs (Cassius) → F5 clone →
+  // Phase 7-C: Bartimaeus's voice chain — ElevenLabs (Sael) → F5 clone →
   // Piper. Each tier is network-/tool-OPTIONAL; ANY failure falls silently to
   // the next so the voice path never breaks (doctrine).
   if (opts.personaId === "bartimaeus") {
