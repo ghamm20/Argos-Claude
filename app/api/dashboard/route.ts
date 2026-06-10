@@ -17,6 +17,7 @@ import { readChain } from "@/lib/audit";
 import { toolStats } from "@/lib/tools/audit";
 import { taskCounts } from "@/lib/tasks/store";
 import { getGpuProfile } from "@/lib/gpu/detect";
+import { powerModeStatus } from "@/lib/power/mode";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -133,6 +134,11 @@ export async function GET() {
         tier: gpu?.tier ?? "lean",
         forced: gpu?.forced ?? false,
         detectionSource: gpu?.source ?? "fallback",
+      },
+      powerMode: {
+        live: true,
+        source: "lib/power/mode (detected tier === ample) + gpu.power_mode_available audit",
+        ...powerModeStatus(gpu),
       },
     },
     // Off-box systems — STUBS from static config. Status is NOT live; we do not

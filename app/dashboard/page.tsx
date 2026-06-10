@@ -130,6 +130,14 @@ export default function DashboardPage() {
           <KV k="tier" v={String(t.gpu.tier)} accent={t.gpu.tier === "ample" ? "#38bdf8" : undefined} />
           {t.gpu.forced ? <KV k="profile" v="FORCED (test)" accent="#f59e0b" /> : null}
         </Tile>
+
+        <Tile title="Power Mode" source={String(t.powerMode.source)} accent={t.powerMode.available ? "#38bdf8" : "#737373"}>
+          <KV k="status" v={t.powerMode.available ? "AVAILABLE" : "unavailable"} accent={t.powerMode.available ? "#38bdf8" : "#a3a3a3"} />
+          <div className="text-[10px] text-neutral-500 mt-1 leading-relaxed">{String(t.powerMode.reason)}</div>
+          {!t.powerMode.available && (
+            <div className="text-[9px] text-neutral-600 mt-1.5">Activates automatically when an ample-tier GPU is detected — seat card, restart, pull ample models.</div>
+          )}
+        </Tile>
       </div>
 
       <div className="mt-6 mb-2 text-[11px] uppercase tracking-[0.18em] text-neutral-600">Off-box systems (stubs)</div>
