@@ -61,6 +61,9 @@ import {
   buildMisrepresentationWarning,
   buildRecentToolResultsBlock,
   buildMisrepCorrectionNote,
+  // Phase 3 gate 5 — uncited-claim guard (Layer 2d).
+  detectUncitedVaultClaim,
+  buildUncitedClaimWarning,
 } from "@/lib/tool-integrity";
 import { appendIntegrityViolation } from "@/lib/integrity-log";
 // Forced current-facts grounding (2026-06-02).
@@ -111,6 +114,8 @@ import {
   lastUserText,
   priorUserText,
 } from "@/lib/chat/wire";
+// Phase 3 — observation corpus (capture-only, hash-chained).
+import { appendObservation } from "@/lib/observation";
 import {
   TRUTH_MODE_CLAUSE,
   type CitedHit,
@@ -1451,6 +1456,37 @@ export async function handleChat(req: NextRequest): Promise<Response> {
           /* misrepresentation guard must never break the chat stream */
         }
 
+        // ---- Uncited-claim guard (Phase 3 gate 5, 2026-06-10, Layer 2d) ----
+        // A vault/canon attribution ("the vault states X") with no citation
+        // backed by a real retrieval hit is flagged in-stream and audited —
+        // same family as the misrepresentation guard. Catches the Phase 2
+        // $48B-lunar-budget shape: zero hits, confident vault attribution.
+        try {
+          const hitCount = retrievalEvent.hits?.length ?? 0;
+          const uncited = detectUncitedVaultClaim(assistantBuf, hitCount);
+          if (uncited.violation && uncited.sentence) {
+            const warning = buildUncitedClaimWarning(uncited.sentence, hitCount);
+            assistantBuf += warning; // persisted + visible next turn
+            controllerInner.enqueue(
+              encoder.encode(`${JSON.stringify({ message: { content: warning } })}\n`)
+            );
+            controllerInner.enqueue(
+              encoder.encode(
+                `${JSON.stringify({ type: "integrity_warning", reason: "uncited_claim", patterns: [`vault attribution without backing hit: ${uncited.sentence}`] })}\n`
+              )
+            );
+            await appendIntegrityViolation({
+              type: "uncited_claim",
+              persona: body.personaId ?? null,
+              patterns: [`uncited vault attribution (hits=${hitCount}): ${uncited.sentence}`],
+              missingTool: null,
+              content: assistantBuf,
+            });
+          }
+        } catch {
+          /* uncited-claim guard must never break the chat stream */
+        }
+
         // Tail the stream with our retrieval set so the client can render pills.
         controllerInner.enqueue(
           encoder.encode(`${JSON.stringify(retrievalEvent)}\n`)
@@ -1507,6 +1543,23 @@ export async function handleChat(req: NextRequest): Promise<Response> {
         // operator's memory store with strangers' "I am" / "I prefer"
         // statements — those would surface back to the operator's
         // next prompt and create cross-session contamination.
+        // Phase 3 (2026-06-10) — observation corpus capture. Every operator↔
+        // persona exchange lands one hash-chained entry (classes only, no
+        // content) in state/observation.jsonl. Fire-and-forget AFTER the
+        // stream closed: zero latency on the chat path, failures swallowed.
+        if (isOperator && userText.length > 0) {
+          const seqPos = body.messages.filter((m) => m.role === "user").length;
+          void appendObservation({
+            persona: body.personaId,
+            userText,
+            sessionId: typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null,
+            sequencePosition: seqPos,
+          }).catch((e) => {
+            // eslint-disable-next-line no-console
+            console.warn(`[chat] observation capture failed (non-fatal): ${(e as Error).message}`);
+          });
+        }
+
         const finalAssistant = assistantBuf.trim();
         if (isOperator && finalAssistant.length > 0 && userText.length > 0) {
           void (async () => {

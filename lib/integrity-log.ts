@@ -10,7 +10,9 @@ import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { argosRoot } from "./vault/paths";
 
-export type IntegrityViolationType = "fabrication" | "misrepresentation";
+// "uncited_claim" (Phase 3 gate 5, 2026-06-10): a vault/canon assertion with
+// no citation backed by a real retrieval hit (the $48B-lunar-budget shape).
+export type IntegrityViolationType = "fabrication" | "misrepresentation" | "uncited_claim";
 
 export interface IntegrityViolation {
   at: string; // ISO timestamp

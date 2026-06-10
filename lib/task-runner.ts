@@ -22,6 +22,8 @@ import { callModel } from "./tools/util";
 import { PERSONA_BY_ID } from "./personas";
 import { pushoverSend } from "./research/alerts";
 import { runnerLogPath, type TaskFile } from "./task-queue";
+// Phase 3 (2026-06-10) — per-step hash-chained audit entries.
+import { appendAudit } from "./audit";
 
 const MAX_RETRIES = 3;
 const PLAN_TIMEOUT_MS = 120_000;
@@ -164,11 +166,13 @@ export async function runTask(
       const n = i + 1;
       if (!tool) {
         await appendLog(task.id, `SKIP step ${n} ${step.tool_id} — unknown tool`);
+        await appendAudit("task.step", { taskId: task.id, step: n, toolId: step.tool_id, ok: false, skipped: true, reason: "unknown tool" }).catch(() => {});
         steps.push(stepSkip(n, step, "unknown tool"));
         continue;
       }
       if (tool.dangerous && !task.dangerous_tools_allowed) {
         await appendLog(task.id, `SKIP step ${n} ${step.tool_id} — dangerous tool, not allowed for this task`);
+        await appendAudit("task.step", { taskId: task.id, step: n, toolId: step.tool_id, ok: false, skipped: true, reason: "dangerous tool not allowed" }).catch(() => {});
         steps.push(stepSkip(n, step, "dangerous tool not allowed"));
         continue;
       }
@@ -196,6 +200,16 @@ export async function runTask(
         task.id,
         `step ${n} ${step.tool_id} ${ok ? "OK" : `FAILED after ${MAX_RETRIES} retries`}: ${result?.summary ?? ""}`
       );
+      // Phase 3 — every step lands in the hash-chained audit log (gate 3).
+      await appendAudit("task.step", {
+        taskId: task.id,
+        step: n,
+        toolId: step.tool_id,
+        ok,
+        attempts: ok ? attempts : MAX_RETRIES,
+        summary: (result?.summary ?? "").slice(0, 300),
+        error: ok ? null : (result?.error ?? "failed after retries").slice(0, 300),
+      }).catch(() => {});
       steps.push({
         step: n,
         tool_id: step.tool_id,

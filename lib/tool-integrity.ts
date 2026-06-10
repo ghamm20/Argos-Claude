@@ -296,6 +296,65 @@ export function detectMisrepresentation(content: string, negatives: ToolResultLi
   return { violation: true, summary: summaryText || "a negative result", toolId: neg.toolId ?? null };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Layer 2d — UNCITED-CLAIM guard (Phase 3 gate 5, 2026-06-10).
+//
+// The Phase 2 live proof surfaced the shape this catches: zero retrieval
+// hits, truth mode on, and the model fabricated "The vault states that the
+// Lunar Mining Colony allocated a total operating budget of $48 billion…"
+// with NO citation. The false-citation gate counts [N] against hits, so an
+// UNCITED vault attribution sailed through. This guard flags any sentence
+// that attributes content to the vault/archive/corpus when it is not backed
+// by a citation pointing at a real retrieval hit:
+//   - hitCount === 0 → ANY affirmative vault attribution is unbacked
+//   - hitCount  >  0 → the attributing sentence must carry an in-range [N]
+//
+// Judgment call (documented): honest ABSENCE statements ("the vault doesn't
+// cover this", "no records of X in the vault") are excluded — retrieval
+// found nothing and the model says so; that's the safe direction the
+// retrieval-block instructions explicitly push toward.
+// ─────────────────────────────────────────────────────────────────────────
+
+const VAULT_ATTRIBUTION_RE =
+  /\b(?:the\s+(?:vault|archive|corpus)\s+(?:state|states|stated|say|says|said|show|shows|showed|record|records|recorded|contain|contains|contained|indicate|indicates|indicated|confirm|confirms|confirmed|note|notes|noted|list|lists|listed|document|documents|documented)|according\s+to\s+the\s+(?:vault|archive|corpus)|per\s+the\s+(?:vault|archive|corpus))\b/i;
+
+const ABSENCE_CLAIM_RE =
+  /\b(?:no\s+(?:records?|entries|entry|documents?|information|mention|data)|nothing|not\s+(?:contain|cover|mention|include)|doesn'?t|does\s+not|contains?\s+no)\b/i;
+
+export interface UncitedClaimVerdict {
+  violation: boolean;
+  /** The attributing sentence that lacked a backing citation. */
+  sentence: string | null;
+  hitCount: number;
+}
+
+/** Detect a vault/canon attribution not backed by a real retrieval hit. */
+export function detectUncitedVaultClaim(content: string, hitCount: number): UncitedClaimVerdict {
+  if (!content) return { violation: false, sentence: null, hitCount };
+  const sentences = content.split(/(?<=[.!?])\s+|\n+/);
+  for (const s of sentences) {
+    if (!VAULT_ATTRIBUTION_RE.test(s)) continue;
+    if (ABSENCE_CLAIM_RE.test(s)) continue; // honest "vault has nothing" statement
+    const cites = [...s.matchAll(/\[(\d{1,2})\]/g)].map((m) => parseInt(m[1], 10));
+    const backed = cites.some((n) => n >= 1 && n <= hitCount);
+    if (!backed) {
+      return { violation: true, sentence: s.trim().slice(0, 240), hitCount };
+    }
+  }
+  return { violation: false, sentence: null, hitCount };
+}
+
+/** Operator-visible note for an uncited vault/canon claim (Layer 2d). */
+export function buildUncitedClaimWarning(sentence: string, hitCount: number): string {
+  return [
+    "",
+    "",
+    `⚠️ UNCITED CLAIM — This response attributes content to the vault ("${sentence.slice(0, 120)}…") ` +
+      `but no retrieval hit backs it (${hitCount} hit${hitCount === 1 ? "" : "s"} this turn).`,
+    "The vault may not contain this at all. Verify independently before trusting.",
+  ].join("\n");
+}
+
 /** Operator-visible note for a misrepresented negative result (Layer 2c §4). */
 export function buildMisrepresentationWarning(summary: string): string {
   return [

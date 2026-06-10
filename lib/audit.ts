@@ -44,7 +44,13 @@ export type AuditKind =
   | "proposal.created"
   | "proposal.applied"
   | "proposal.rejected"
-  | "workflow.executed";
+  | "workflow.executed"
+  // Phase 3 (2026-06-10) — overnight engine: every task action is chained.
+  | "task.claimed"
+  | "task.step"
+  | "task.completed"
+  | "task.failed"
+  | "task.preflight";
 
 /**
  * Single audit entry as persisted to JSONL. The `hash` field is the

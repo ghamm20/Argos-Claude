@@ -862,6 +862,8 @@ export function ChatPane() {
           model: modelAtSend,
           useRetrieval,
           truthMode: useArgos.getState().truthMode,
+          // Phase 3 — session id for the observation corpus (capture-only).
+          sessionId: useArgos.getState().currentSessionId,
         }),
         signal: controller.signal,
       });

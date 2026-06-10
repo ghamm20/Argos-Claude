@@ -41,6 +41,9 @@ export interface ChatRequestBody {
   useRetrieval?: boolean;
   topK?: number;
   truthMode?: boolean;
+  /** Phase 3 (2026-06-10) — chat session id for the observation corpus.
+   *  Optional + additive: older clients omit it and nothing changes. */
+  sessionId?: string | null;
 }
 
 export function jsonError(status: number, error: string, extra: Record<string, unknown> = {}) {

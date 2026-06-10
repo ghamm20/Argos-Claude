@@ -22,8 +22,64 @@ import {
 } from "./task-queue";
 import { runTask, notifyTaskResult } from "./task-runner";
 import { generateMorningBrief } from "./morning-brief";
+// Phase 3 (2026-06-10) — hash-chained audit per task action + Ollama preflight.
+import { appendAudit } from "./audit";
+import { getOllamaBase } from "./ollama-config";
 
 const TICK_MS = 60_000;
+
+// ---- Ollama preflight backstop (Phase 3, owner rider 2026-06-10) ----
+// The launcher watchdog (launchers/ollama-supervisor.bat) is the primary
+// survival mode; this is the engine-side backstop: before claiming a task,
+// health-check /api/tags. Dead → attempt ONE restart (PATH/OLLAMA_BIN ollama
+// serve, detached) and wait up to 20s. Still dead → skip this tick (the task
+// stays queued — never burned against a dead backend). Every preflight
+// action is audited.
+
+const PREFLIGHT_WAIT_S = 20;
+
+async function ollamaHealthy(timeoutMs = 3000): Promise<boolean> {
+  try {
+    const r = await fetch(`${getOllamaBase()}/api/tags`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function ollamaPreflight(): Promise<boolean> {
+  if (await ollamaHealthy()) return true;
+  await appendAudit("task.preflight", {
+    action: "ollama_down_restart_attempt",
+    base: getOllamaBase(),
+  }).catch(() => {});
+  try {
+    const { spawn } = await import("node:child_process");
+    const bin = process.env.OLLAMA_BIN || "ollama";
+    const child = spawn(bin, ["serve"], { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => {}); // ENOENT etc. — the wait loop reports the outcome
+    child.unref();
+  } catch {
+    /* spawn failed — wait loop decides */
+  }
+  for (let i = 0; i < PREFLIGHT_WAIT_S; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    if (await ollamaHealthy(2000)) {
+      await appendAudit("task.preflight", {
+        action: "ollama_restored",
+        afterSeconds: i + 1,
+      }).catch(() => {});
+      return true;
+    }
+  }
+  await appendAudit("task.preflight", {
+    action: "ollama_unreachable_tick_skipped",
+    waitedSeconds: PREFLIGHT_WAIT_S,
+  }).catch(() => {});
+  return false;
+}
 
 export function briefTime(): string {
   const v = (process.env.ARGOS_BRIEF_TIME || "06:00").trim();
@@ -40,14 +96,33 @@ export async function pumpTaskQueue(): Promise<void> {
   try {
     await ensureTaskDirs();
     await intakeQueue();
+    // Phase 3 — preflight backstop: never claim a task against a dead Ollama.
+    if (!(await ollamaPreflight())) return;
     const task = await claimNext();
     if (!task) return;
+    // Phase 3 — every task action lands in the hash-chained audit log.
+    await appendAudit("task.claimed", {
+      taskId: task.id,
+      goal: task.goal.slice(0, 200),
+      priority: task.priority,
+      dangerousAllowed: task.dangerous_tools_allowed,
+    }).catch(() => {});
     const r = await runTask(task);
     if (r.failed || !r.result) {
       await failTask(task, r.error ?? "unknown failure");
+      await appendAudit("task.failed", {
+        taskId: task.id,
+        error: (r.error ?? "unknown failure").slice(0, 500),
+      }).catch(() => {});
       await notifyTaskResult(task, "failed", r.error ?? "task failed");
     } else {
       await completeTask(task, r.result);
+      await appendAudit("task.completed", {
+        taskId: task.id,
+        summary: r.result.summary,
+        stepsPlanned: r.result.stepsPlanned,
+        stepsOk: r.result.stepsOk,
+      }).catch(() => {});
       await notifyTaskResult(task, "complete", r.result.summary);
     }
     const state = await readQueueState();
