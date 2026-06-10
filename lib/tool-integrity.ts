@@ -313,6 +313,12 @@ export function detectMisrepresentation(content: string, negatives: ToolResultLi
 // cover this", "no records of X in the vault") are excluded — retrieval
 // found nothing and the model says so; that's the safe direction the
 // retrieval-block instructions explicitly push toward.
+//
+// KNOWN UNCOVERED CHANNEL (owner rider R2, 2026-06-10): unattributed factual
+// fabrication — the same false content WITHOUT a "vault states" attribution
+// ("The lunar budget is $48B.") — is NOT caught here. Candidate fix rides
+// with Phase 8 vault/canon work: claims about vault content get checked
+// against retrieval hits regardless of attribution phrasing.
 // ─────────────────────────────────────────────────────────────────────────
 
 const VAULT_ATTRIBUTION_RE =
