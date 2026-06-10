@@ -59,7 +59,10 @@ export type AuditKind =
   | "task.step"
   | "task.completed"
   | "task.failed"
-  | "task.preflight";
+  | "task.preflight"
+  // Phase 7 (2026-06-10) — operator Power-Mode override + honest attempt-on failure.
+  | "gpu.power_override"
+  | "gpu.power_attempt_failed";
 
 /**
  * Single audit entry as persisted to JSONL. The `hash` field is the

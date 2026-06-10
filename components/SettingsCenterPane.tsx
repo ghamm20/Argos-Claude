@@ -12,6 +12,7 @@ import { AuthSection } from "./settings/AuthSection";
 import { HeartbeatSection } from "./settings/HeartbeatSection";
 import { TwilioSection } from "./settings/TwilioSection";
 import { ApiKeysSection } from "./settings/ApiKeysSection";
+import { HardwareSection } from "./settings/HardwareSection";
 import { TasksSection } from "./settings/TasksSection";
 import type { RuntimeInfo } from "@/lib/runtime-info";
 
@@ -26,6 +27,7 @@ type SectionId =
   | "apikeys"
   | "tasks"
   | "auth"
+  | "hardware"
   | "about";
 
 interface SectionProps {
@@ -51,6 +53,8 @@ const SECTIONS: SectionProps[] = [
   { id: "apikeys", label: "API Keys" },
   // Stage 2 (2026-06-09) — read-only task ledger view.
   { id: "tasks", label: "Tasks" },
+  // Phase 7 (2026-06-10) — GPU tier + Power Mode override.
+  { id: "hardware", label: "Hardware" },
   { id: "about", label: "About" },
 ];
 
@@ -105,6 +109,7 @@ export function SettingsCenterPane({
           {active === "apikeys" && <ApiKeysSection />}
           {active === "tasks" && <TasksSection />}
           {active === "auth" && <AuthSection />}
+          {active === "hardware" && <HardwareSection />}
           {active === "about" && <AboutSection runtimeInfo={runtimeInfo} />}
         </div>
       </div>
