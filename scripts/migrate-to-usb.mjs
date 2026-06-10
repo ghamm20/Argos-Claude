@@ -453,19 +453,28 @@ for (const d of [
 ]) {
   await ensureDir(path.join(ABS_TARGET, ...d));
 }
-// Default settings.json
+// Settings.json — PRESERVE an existing one (config-safe re-migration,
+// 2026-06-10). The old code unconditionally clobbered settings with a stale
+// default (resetting the operator PIN/requirePin AND pinning a now-uninstalled
+// default model), so a re-migrate silently turned AUTH off and broke the boot
+// model. A re-migrate must not nuke operator config any more than it nukes the
+// vault (Phase 8). Only WRITE the default when no settings.json exists yet.
+const targetSettingsPath = path.join(ABS_TARGET, "config", "settings.json");
 const defaultSettings = {
   version: 1,
   defaultPersona: "bartimaeus",
-  defaultModel: "llama3.1:8b-instruct-q4_K_M",
+  // Match the current persona binding (gemma-4), not the long-retired llama3.1.
+  defaultModel: "aratan/gemma-4-E4B-q8-it-heretic:latest",
   updatedAt: 0,
 };
 if (!DRY_RUN) {
-  await fsp.writeFile(
-    path.join(ABS_TARGET, "config", "settings.json"),
-    JSON.stringify(defaultSettings, null, 2),
-    "utf8"
-  );
+  if (existsSync(targetSettingsPath)) {
+    console.log("    [keep] existing config/settings.json preserved (operator config not clobbered)");
+  } else {
+    await fsp.writeFile(targetSettingsPath, JSON.stringify(defaultSettings, null, 2), "utf8");
+  }
+} else if (existsSync(targetSettingsPath)) {
+  console.log("    [dry-run] would PRESERVE existing config/settings.json");
 }
 
 // 9) docs/, methodology/, README.txt

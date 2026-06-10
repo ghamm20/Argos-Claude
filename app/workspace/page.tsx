@@ -32,11 +32,12 @@ const PILLARS_KEY = "argos_pillars_v2";
 const PILLAR_IDS = ["bart", "parascope", "jenna", "cortex", "sentry", "oculus"] as const;
 type PillarId = (typeof PILLAR_IDS)[number];
 
-// Oculus map standalone URL. Phase 9 spec says the map pane port is 3010; the
-// ARGOS-managed compose currently publishes 3011 — configurable, default 3010
-// per the locked spec (flagged in the Phase 9 report).
+// Oculus map standalone URL. The ARGOS-managed compose publishes the Oculus
+// app on 3011 (docker-compose.argos.yml: "3011:3000"), which is what the
+// launcher reports too — so 3011 is the ACTUAL bind (the spec's 3010 was
+// superseded). Override via NEXT_PUBLIC_OCULUS_URL.
 const OCULUS_MAP_URL =
-  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_OCULUS_URL) || "http://127.0.0.1:3010";
+  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_OCULUS_URL) || "http://127.0.0.1:3011";
 
 interface PillarPrefs {
   order: PillarId[];

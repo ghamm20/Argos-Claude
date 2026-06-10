@@ -286,7 +286,10 @@ REM  Skips silently if Docker Desktop isn't running.
 REM  See tools/registry.json for the full tool list and LAUNCHER_PATCH.bat
 REM  in the integration package for the canonical source of this block.
 REM ============================================================
-if not defined OCULUS_ROOT      set "OCULUS_ROOT=C:\Users\Gordy\Desktop\Oculus-osint-main"
+REM Oculus fork working copy (Phase 9, 2026-06-10) — canonical ghamm20/Oculus_Osint.
+REM Was C:\Users\Gordy\Desktop\Oculus-osint-main (deleted). D:\OCULUS is the
+REM Phase-10-sovereignty target once cloned there; until then use C:\AI copy.
+if not defined OCULUS_ROOT      set "OCULUS_ROOT=C:\AI\OCULUSBOUND\Oculus-osint-main"
 if not defined SUPERAGI_ROOT    set "SUPERAGI_ROOT=F:\AI\SuperAGI"
 if not defined LOOKINGGLASS_ROOT set "LOOKINGGLASS_ROOT=E:\AgenticLookingGlass"
 
