@@ -30,6 +30,8 @@ import {
   continuationPrompt,
 } from "@/lib/tools/chat-tools";
 import { callOriginatesFromEmail } from "@/lib/email/guards";
+import { getGpuProfile } from "@/lib/gpu/detect";
+import { resolveModelForRole, listInstalledModels, type ModelRole } from "@/lib/models/registry";
 import { requestTool } from "@/lib/tools/executor";
 import { appendParseFailureAudit } from "@/lib/tools/audit";
 import { toolSummaries } from "@/lib/tools/registry";
@@ -506,9 +508,28 @@ export async function POST(req: NextRequest) {
   //     persona. The Nous CALL happens later (after the message list is built).
   const settings = await readSettings().catch(() => null);
   const useReboundModels = settings?.useReboundModels === true;
+  // ---- G2: tiered model resolution ----
+  // The persona's conversational model is now a FUNCTION of the detected GPU
+  // tier. On the lean 3060 Ti this returns the operator's requested body.model
+  // byte-for-byte (leanOverride); on ample hardware it upgrades from the
+  // registry, falling back to body.model if the upgrade isn't pulled. Identity/
+  // voice is unchanged across tiers — only the underlying model scales.
+  const gpuProfile = await getGpuProfile().catch(() => null);
+  const installedModels = await listInstalledModels().catch(() => new Set<string>());
+  const tierOverride = (role: string) =>
+    settings?.perRoleTierOverride?.[role];
+  let tieredPersonaModel = body.model;
+  if (gpuProfile) {
+    const r = await resolveModelForRole(`persona:${body.personaId}` as ModelRole, gpuProfile, {
+      leanOverride: body.model,
+      installed: installedModels,
+      tierOverride: tierOverride(`persona:${body.personaId}`),
+    });
+    tieredPersonaModel = r.model;
+  }
   const reboundLocalModel = resolveLocalModel(
     body.personaId,
-    body.model,
+    tieredPersonaModel,
     useReboundModels
   );
   const requestedBackend = resolveBackend(body.personaId, settings);
@@ -755,7 +776,18 @@ export async function POST(req: NextRequest) {
   // detector the integrity guard already trusts (no new classifier). Implicit
   // mid-conversation tool use stays on the persona model; the prompt schema +
   // the file_ops "action" alias cover that path.
-  const toolExecutionModel = settings?.toolExecutionModel ?? "";
+  // G2: the tool-execution model is tier-resolved too. Lean → exactly
+  // settings.toolExecutionModel (hermes3:8b); ample → the registry upgrade
+  // (qwen3-64k), falling back to the lean value until it's pulled.
+  let toolExecutionModel = settings?.toolExecutionModel ?? "";
+  if (gpuProfile && toolExecutionModel.length > 0) {
+    const r = await resolveModelForRole("tool-execution", gpuProfile, {
+      leanOverride: toolExecutionModel,
+      installed: installedModels,
+      tierOverride: tierOverride("tool-execution"),
+    });
+    toolExecutionModel = r.model;
+  }
   const toolModelTurn =
     toolsEnabled &&
     toolExecutionModel.length > 0 &&

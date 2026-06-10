@@ -166,6 +166,12 @@ export interface PersistedSettings {
   /** v2.4.2 Phase A — feature flag (SEPARATE from the backend switch): rebind
    *  Juniper + Bobby to the local gemma-4 model. Default false → unchanged. */
   useReboundModels: boolean;
+  /** G2 (2026-06-09) — optional per-role GPU tier override. Lets the operator
+   *  PIN a role below the detected tier (testing / VRAM-sharing). Keys are model
+   *  roles ("tool-execution", "judge", "research", "persona:<id>"); values are a
+   *  tier. Absent → the role follows the detected tier. The resolver never lets
+   *  an override raise a role ABOVE the detected hardware. */
+  perRoleTierOverride: Record<string, "lean" | "mid" | "ample">;
   /** Stage 3 (2026-06-09) — Gmail read-only OAuth credentials. clientSecret +
    *  refreshToken are ciphertext at rest; clientId is a non-secret identifier.
    *  All null until the operator mints a refresh token (scripts/gmail-auth.mjs).
@@ -270,6 +276,9 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   // Tool-call enablement (2026-06-09): hermes3:8b won the emission harness
   // (round 2, prompt B: 3/3 clean, ~0.7s warm, 4.7 GB — fits VRAM whole).
   toolExecutionModel: "hermes3:8b",
+  // G2: no per-role tier overrides by default → every role follows the
+  // detected GPU tier (lean on the 3060 Ti).
+  perRoleTierOverride: {},
   // Stage 3: Gmail read-only — unconfigured until the operator mints a token.
   gmail: { clientId: null, clientSecret: null, refreshToken: null },
 };
@@ -427,6 +436,11 @@ export async function readSettings(): Promise<PersistedSettings> {
       // Tool-call enablement forward-compat: missing/blank/retired → default
       // (hermes3:8b). Older settings.json files load cleanly.
       toolExecutionModel: normalizeToolExecutionModel(parsed.toolExecutionModel),
+      // G2 forward-compat: missing → {} (every role follows detected tier).
+      perRoleTierOverride:
+        parsed.perRoleTierOverride && typeof parsed.perRoleTierOverride === "object"
+          ? (parsed.perRoleTierOverride as Record<string, "lean" | "mid" | "ample">)
+          : DEFAULT_SETTINGS.perRoleTierOverride,
       // Stage 3 forward-compat: missing → no creds. Older files load cleanly.
       gmail: {
         clientId: parsed.gmail?.clientId ?? DEFAULT_SETTINGS.gmail.clientId,
