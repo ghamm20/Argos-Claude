@@ -1,0 +1,45 @@
+# ARGOS-managed Oculus compose override
+# Remaps app to port 3011. Postgres stays internal.
+# Drop this file in the Oculus root — start.bat copies it automatically.
+
+services:
+  wwv:
+    build: .
+    ports:
+      - "3011:3000"
+    volumes:
+      - wwv-data:/app/data
+    environment:
+      - "AUTH_SECRET=${AUTH_SECRET:-argos_local_secret}"
+      - "DATABASE_URL=postgresql://postgres:postgres@db:5432/worldwideview?schema=public"
+      - "NODE_ENV=production"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: worldwideview
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d worldwideview"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  wwv-data:
+  postgres-data:
