@@ -61,8 +61,11 @@ try {
   check("injection attempt detected + audited", (d2?.injectionAttempts ?? 0) >= 1 && audit("email.injection_attempt").some((e) => e.payload?.messageId === "evil"));
   check("adversarial draft also NOT sent", d2?.draft?.sent === false);
 
-  console.log("\n=== PERMANENT CEILING: zero send/compose scope or send path in code ===");
-  const grep = ss("git", ["grep", "-niE", "gmail\\.(send|compose|modify)|users\\.messages\\.send|sendMessage|/messages/send"], { cwd: repoRoot, encoding: "utf8" });
+  console.log("\n=== PERMANENT CEILING: zero send/compose scope or send path in RUNTIME code ===");
+  // Scope to lib/ + app/ (runtime). scripts/ is excluded so this check can't
+  // match its OWN search-pattern string (a self-referential false positive once
+  // this proof is committed — Stage-16 finding).
+  const grep = ss("git", ["grep", "-niE", "gmail\\.(send|compose|modify)|users\\.messages\\.send|sendMessage|/messages/send", "--", "lib/", "app/"], { cwd: repoRoot, encoding: "utf8" });
   const hits = (grep.stdout || "").split("\n").filter((l) => l.trim() && !/\/\/|never|no send|drafts-only|cannot send|comment/i.test(l));
   check("NO Gmail send/compose/modify scope or send path (drafts-only ceiling holds)", hits.length === 0, hits.length ? hits.slice(0, 3).join(" | ") : "clean");
   check("OAuth scope is still gmail.readonly only", (ss("git", ["grep", "-c", "gmail.readonly", "scripts/gmail-auth.mjs"], { cwd: repoRoot, encoding: "utf8" }).stdout || "").trim() !== "0");
