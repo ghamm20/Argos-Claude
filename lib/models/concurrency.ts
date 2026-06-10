@@ -147,6 +147,6 @@ export async function auditConcurrencyPolicyOnce(profile: GpuProfile, reserveMb?
  * This switch encodes that DETECTED decision; nothing consumes it yet (Stage 12
  * will). Returns true when the lean tool-frame SHOULD apply.
  */
-export function useLeanToolFrame(tier: GpuTier): boolean {
+export function shouldUseLeanToolFrame(tier: GpuTier): boolean {
   return tier !== "ample";
 }

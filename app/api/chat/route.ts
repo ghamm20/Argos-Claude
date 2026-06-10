@@ -32,6 +32,7 @@ import {
 import { callOriginatesFromEmail } from "@/lib/email/guards";
 import { getGpuProfile } from "@/lib/gpu/detect";
 import { resolveModelForRole, listInstalledModels, type ModelRole } from "@/lib/models/registry";
+import { shouldUseLeanToolFrame } from "@/lib/models/concurrency";
 import { requestTool } from "@/lib/tools/executor";
 import { appendParseFailureAudit } from "@/lib/tools/audit";
 import { toolSummaries } from "@/lib/tools/registry";
@@ -990,6 +991,23 @@ export async function POST(req: NextRequest) {
   }
   const systemPrompt = systemParts.join("\n\n");
 
+  // ---- Stage 12: tier-conditional LEAN TOOL FRAME ----
+  // The Stage-1 finding: a heavy persona prompt (Bart's full "*" set + identity +
+  // doctrine) drowned hermes3's tool emission on lean. On lean/mid tier
+  // (shouldUseLeanToolFrame), an EXPLICIT tool turn gets a LEAN system prompt — brief
+  // identity for voice + a one-line integrity reminder + the tool-awareness block
+  // — instead of the full persona prompt. On ample the full prompt is tolerated
+  // (the stub returns false), so the richer frame applies there. DETECTED
+  // decision, same code. Non-tool turns and the lean CHAT path are untouched.
+  let toolModelFrame: string | null = null;
+  if (toolModelTurn && gpuProfile && shouldUseLeanToolFrame(gpuProfile.tier)) {
+    toolModelFrame = [
+      `You are ${persona.name}.`,
+      "INTEGRITY: never claim a tool ran or report a result you did not actually receive.",
+      buildToolAwarenessBlock(persona.id === "bartimaeus" ? undefined : personaToolIds),
+    ].join("\n\n");
+  }
+
   // ---- Response-length governance (2026-06-02) ----
   // Bartimaeus is brief by default (a max-tokens cap via Ollama's num_predict).
   // The operator can request a long answer by leading their message with
@@ -1025,7 +1043,9 @@ export async function POST(req: NextRequest) {
     content: string;
     images?: string[];
   }> = [
-    { role: "system", content: systemPrompt },
+    // Stage 12: an explicit tool turn on lean/mid uses the lean frame; every
+    // other turn (including the lean CHAT path) uses the full systemPrompt.
+    { role: "system", content: toolModelFrame ?? systemPrompt },
     ...body.messages.map((m, i) => {
       const content =
         i === lastUserIdx && deepMode
