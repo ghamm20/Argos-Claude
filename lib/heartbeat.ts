@@ -48,6 +48,7 @@ import { pumpTaskQueue } from "./task-scheduler";
 // scheduled improvement loops (nightly 2AM, Sun 3AM, Sun 4AM, Fri 11PM, Sat
 // 2AM). Idempotent per window; fire-and-forget so it never blocks the tick.
 import { pumpScheduledLoops } from "./loops/scheduler-hook";
+import { pumpIntegrityStressIfDue } from "./integrity/stress";
 
 // ----- constants -----
 
@@ -296,6 +297,10 @@ export async function runHeartbeatTick(
   void pumpTaskQueue().catch(() => {});
   // Self-Evolving Loop Suite — pump due scheduled loops (idempotent per day).
   pumpScheduledLoops();
+  // Stage 5 / v2.4.3 — run the integrity stress corpus once per UTC day,
+  // reusing this heartbeat tick (no new scheduler). Idempotent + graceful;
+  // never blocks the heartbeat.
+  void pumpIntegrityStressIfDue().catch(() => {});
   runningTick = (async () => {
     const start = Date.now();
     const source = opts.source ?? "manual";

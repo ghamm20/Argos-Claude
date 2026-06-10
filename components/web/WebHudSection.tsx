@@ -14,17 +14,30 @@ interface Stats {
   integrityViolations?: number;
 }
 
+// Stage 5 / v2.4.3 — rolling integrity measurement (from /api/integrity/metrics).
+interface IntegrityMetrics {
+  runs: number;
+  lastAt: string | null;
+  lastCatchRate: number | null;
+  catchRate7d: number | null;
+  lastMissedIds: string[];
+  anyMissLastRun: boolean;
+}
+
 export function WebHudSection() {
   const [s, setS] = useState<Stats | null>(null);
+  const [im, setIm] = useState<IntegrityMetrics | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const r = await fetch("/api/web/stats", { cache: "no-store" });
-        if (!r.ok) return;
-        const j = (await r.json()) as Stats;
-        if (!cancelled) setS(j);
+        const [r, ri] = await Promise.all([
+          fetch("/api/web/stats", { cache: "no-store" }),
+          fetch("/api/integrity/metrics", { cache: "no-store" }),
+        ]);
+        if (r.ok && !cancelled) setS((await r.json()) as Stats);
+        if (ri.ok && !cancelled) setIm((await ri.json()) as IntegrityMetrics);
       } catch {
         /* offline */
       }
@@ -38,6 +51,9 @@ export function WebHudSection() {
   const hit = Math.round((s?.audit?.cacheHitRate ?? 0) * 100);
   const errs = s?.audit?.errors24h ?? 0;
   const integrity = s?.integrityViolations ?? 0;
+  const catchPct = im?.catchRate7d != null ? Math.round(im.catchRate7d * 100) : null;
+  const missCount = im?.lastMissedIds?.length ?? 0;
+  const lastRun = im?.lastAt ? new Date(im.lastAt).toLocaleString() : "never";
 
   return (
     <div className="mb-4">
@@ -55,10 +71,22 @@ export function WebHudSection() {
           <span className="uppercase tracking-[0.16em] text-neutral-500">Errors 24h</span>
           <span className="font-mono text-[11px]" style={{ color: errs > 0 ? "#ef4444" : "#a3a3a3" }}>{errs}</span>
         </div>
-        {/* v2.3.8 doctrine — a non-zero count means the model claimed tool use
-            that did not occur. Red + bold; this is operator-critical. */}
+        {/* Stage 5 / v2.4.3 — integrity MEASUREMENT (rolling, from the
+            adversarial stress corpus) replaces a bare assertion. Catch rate is
+            the 7-day mean; a non-zero last-run miss count red-flags a guard gap.
+            The live-turn violation count stays as a secondary signal. */}
+        <div className="flex items-center justify-between text-[11px] py-1.5 border-b border-neutral-800/50">
+          <span className="uppercase tracking-[0.16em] text-neutral-500" title={`last stress run: ${lastRun} · ${im?.runs ?? 0} runs`}>Catch rate 7d</span>
+          <span className="font-mono text-[11px]" style={{ color: catchPct == null ? "#737373" : catchPct >= 90 ? "#10b981" : catchPct >= 75 ? "#eab308" : "#ef4444" }}>
+            {catchPct == null ? "—" : `${catchPct}%`}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-[11px] py-1.5 border-b border-neutral-800/50">
+          <span className="uppercase tracking-[0.16em]" style={{ color: missCount > 0 ? "#ef4444" : "#737373" }} title={missCount > 0 ? `missed: ${im?.lastMissedIds?.join(", ")}` : "no guard misses in the last run"}>Guard misses</span>
+          <span className="font-mono text-[11px] font-bold" style={{ color: missCount > 0 ? "#ef4444" : "#a3a3a3" }}>{missCount}</span>
+        </div>
         <div className="flex items-center justify-between text-[11px] py-1.5">
-          <span className="uppercase tracking-[0.16em]" style={{ color: integrity > 0 ? "#ef4444" : "#737373" }}>Integrity violations</span>
+          <span className="uppercase tracking-[0.16em]" style={{ color: integrity > 0 ? "#ef4444" : "#737373" }}>Live violations</span>
           <span className="font-mono text-[11px] font-bold" style={{ color: integrity > 0 ? "#ef4444" : "#a3a3a3" }}>{integrity}</span>
         </div>
       </div>
