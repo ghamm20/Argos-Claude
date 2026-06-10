@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Download, History, Trash2, Radio } from "lucide-react";
 import { Eye } from "./Eye";
+import { BartAvatar } from "./BartAvatar";
+import { useVoiceActivity } from "@/lib/voice-tap";
 import { CitationPill } from "./CitationPill";
 import { SessionList } from "./SessionList";
 import { SpeechMicButton } from "./voice/SpeechMicButton";
@@ -1190,6 +1192,11 @@ export function ChatPane() {
 
   const empty = messages.length === 0;
 
+  // BartAvatar (2026-06-10): `talking` tracks the shared voice tap —
+  // true while either TTS playback path (PlayButton or conversation-mode
+  // speakText) is audible. ElevenLabs/F5/Piper all flow through it.
+  const voiceActive = useVoiceActivity();
+
   return (
     <section className="flex-1 flex flex-col min-w-0">
       <div
@@ -1198,7 +1205,18 @@ export function ChatPane() {
           (empty ? "pt-10 pb-6" : "pt-5 pb-3 scale-75 origin-top")
         }
       >
-        <Eye />
+        {currentPersonaId === "bartimaeus" ? (
+          // Bart's living-orb presence. `toolRunning` and `alert` are
+          // intentionally dormant — no global store state exposes them
+          // today (deferred; see BartAvatar phase report).
+          <BartAvatar
+            talking={voiceActive}
+            thinking={isStreaming}
+            listening={conversation.phase === "listening"}
+          />
+        ) : (
+          <Eye />
+        )}
         {empty && (
           <div className="mt-4 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
             {personaName}

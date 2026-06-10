@@ -12,6 +12,7 @@
 // "use client" components only.
 
 import { synthesizeToBlob, getPersistedSpeakerId } from "./voice-client";
+import { tapDestination, notifyVoicePlay, notifyVoiceEnded } from "./voice-tap";
 
 // ---------- Web Speech API (STT) ----------
 
@@ -214,9 +215,12 @@ export async function speakText(
   return new Promise<void>((resolve) => {
     const src = ctx.createBufferSource();
     src.buffer = audioBuf;
-    src.connect(ctx.destination);
+    // BartAvatar voice tap: analyser passthrough to ctx.destination —
+    // audibility and setSinkId routing are unchanged.
+    src.connect(tapDestination(ctx));
     src.onended = () => {
       if (currentSource === src) currentSource = null;
+      notifyVoiceEnded();
       resolve();
     };
     currentSource = src;
@@ -229,5 +233,6 @@ export async function speakText(
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
     src.start(0);
+    notifyVoicePlay(ctx);
   });
 }

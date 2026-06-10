@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Volume2, Pause, Loader2, AlertCircle } from "lucide-react";
 import { synthesizeToBlob, getPersistedSpeakerId } from "@/lib/voice-client";
+import { tapDestination, notifyVoicePlay, notifyVoiceEnded } from "@/lib/voice-tap";
 
 // Module-scope flag to suppress repeated "setSinkId unsupported"
 // console warnings — log it once per page load, not once per click.
@@ -149,6 +150,8 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
         /* idempotent best-effort */
       }
       sourceRef.current = null;
+      // BartAvatar voice tap — playback is over (stop or pre-emption).
+      notifyVoiceEnded();
     }
     if (currentlyPlaying && currentlyPlaying.stop === hardStop) {
       currentlyPlaying = null;
@@ -232,7 +235,9 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
 
         const source = ctx.createBufferSource();
         source.buffer = audioBuf;
-        source.connect(ctx.destination);
+        // BartAvatar voice tap: analyser passthrough to ctx.destination —
+        // audibility and setSinkId routing are unchanged.
+        source.connect(tapDestination(ctx));
         source.onended = () => {
           // Natural finish — only clean up if this is still the
           // active source (a new start() may have replaced us).
@@ -240,6 +245,7 @@ export function PlayButton({ text, accent, sessionId, personaId }: PlayButtonPro
         };
         sourceRef.current = source;
         source.start(0);
+        notifyVoicePlay(ctx);
         setState("playing");
       } catch (e) {
         // AbortError is a controlled stop — not a UI error.
