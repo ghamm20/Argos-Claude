@@ -62,7 +62,7 @@ function chat(messages) {
       { method: "POST", hostname: u.hostname, port: u.port, path: u.pathname,
         headers: { "content-type": "application/json", "content-length": payload.length }, timeout: 120000 },
       (resp) => {
-        let buf = "", content = "", approval = null, backendModel = null;
+        let buf = "", content = "", approval = null, backendModel = null, toolResult = null;
         resp.on("data", (x) => {
           buf += x.toString("utf8");
           let nl;
@@ -74,13 +74,14 @@ function chat(messages) {
               if (d?.message?.content) content += d.message.content;
               if (d?.type === "backend") backendModel = d.model;
               if (d?.type === "tool_approval_required") approval = d;
+              if (d?.type === "tool_result" && d?.toolId === "file_ops") toolResult = d;
             } catch { /* partial */ }
           }
         });
-        resp.on("end", () => res({ content, approval, backendModel }));
+        resp.on("end", () => res({ content, approval, backendModel, toolResult }));
       });
-    r.on("error", () => res({ content: "", approval: null, backendModel: null }));
-    r.on("timeout", () => { r.destroy(); res({ content: "", approval: null, backendModel: null }); });
+    r.on("error", () => res({ content: "", approval: null, backendModel: null, toolResult: null }));
+    r.on("timeout", () => { r.destroy(); res({ content: "", approval: null, backendModel: null, toolResult: null }); });
     r.write(payload); r.end();
   });
 }
@@ -116,40 +117,30 @@ try {
   if (!(await ready())) throw new Error("server not ready");
   console.log("[ready] proof-fileops-agentic\n");
 
-  // ---- 1+2: multi-step request → batch emission → approval manifest ----
+  // ---- 1+2: multi-step request → batch emission → SESSION-GATED auto-execute ----
+  // Phase 1 locked tiers: a mkdir+move batch (no delete) is SESSION-GATED — it
+  // auto-executes in the operator session, no approval pause. (Approval +
+  // manifest are exercised on the delete below.)
   console.log("=== multi-step request through hermes3 (tool model) ===");
-  let approval = null, emission = "", backendModel = null;
-  for (let attempt = 1; attempt <= 3 && !approval; attempt++) {
+  const beforeAudit = toolAudit().length;
+  let toolResult = null, emission = "", backendModel = null;
+  for (let attempt = 1; attempt <= 3 && !toolResult; attempt++) {
     const r = await chat([
       { role: "user",
         content: "Use file_ops to do BOTH in one step: create the folder workspace/reports/2026, and move workspace/harness-test.txt into it." },
     ]);
-    approval = r.approval; emission = r.content; backendModel = r.backendModel;
-    if (!approval) console.log(`  (attempt ${attempt}: backend=${r.backendModel}; no approval frame; retrying)`);
+    toolResult = r.toolResult; emission = r.content; backendModel = r.backendModel;
+    if (!toolResult) console.log(`  (attempt ${attempt}: backend=${r.backendModel}; no tool_result; retrying)`);
   }
   console.log(`  answering model (backend frame): ${backendModel}`);
   check("turn routed to the tool model (hermes3:8b)", backendModel === "hermes3:8b", `model=${backendModel}`);
   console.log("  model emission (excerpt):", (emission.match(/<tool>[\s\S]*?<\/tool>/i)?.[0] ?? emission).replace(/\s+/g, " ").slice(0, 220));
-  check("a tool_approval_required frame was emitted", !!approval, approval ? `approvalId=${approval.approvalId}` : "none");
-  if (!approval) {
-    console.log("\n[halt] no approval frame — cannot proceed to approve/execute. Reporting honestly.");
-    throw new Error("tool emission did not produce an approval frame");
+  check("batch AUTO-EXECUTED (session-gated, no approval pause)", !!toolResult && toolResult.ok === true,
+    toolResult ? toolResult.summary : "none");
+  if (!toolResult) {
+    console.log("\n[halt] no tool_result — cannot verify execution. Reporting honestly.");
+    throw new Error("tool emission did not produce a tool_result");
   }
-  const plan = approval?.plan ?? [];
-  console.log("  approval manifest:", JSON.stringify(plan));
-  check("manifest has 2 steps (mkdir + move)",
-    plan.length === 2 && plan[0]?.op === "mkdir" && plan[1]?.op === "move",
-    plan.map((s) => s.op).join("+"));
-  check("manifest paths are correct",
-    plan[0]?.path === "workspace/reports/2026" && /harness-test\.txt$/.test(plan[1]?.dest ?? ""),
-    JSON.stringify(plan.map((s) => ({ op: s.op, path: s.path, dest: s.dest }))));
-
-  // ---- 3: approve → execute ----
-  console.log("\n=== operator approves the batch ===");
-  const beforeAudit = toolAudit().length;
-  const approveRes = await jsonReq("POST", "/api/tools/approve", { approvalId: approval.approvalId, decision: "approve" });
-  check("approve → ok", approveRes.json?.status === "approved" && approveRes.json?.result?.ok === true,
-    JSON.stringify(approveRes.json?.result?.summary ?? approveRes.json));
 
   // ---- 4: verify the tree ----
   console.log("\n=== resulting tree ===");

@@ -23,8 +23,20 @@ export const ID = "file_ops";
 
 // Single-step operations (everything except the batch wrapper itself).
 const SINGLE_OPS = new Set(["read", "write", "move", "list", "delete", "mkdir", "copy"]);
-// Write-tier = requires operator approval.
+// GOVERNANCE TIERS (Phase 1 locked spec):
+//   read / list        → low friction (no gate beyond the operator session).
+//   write/copy/move/mkdir → SESSION-GATED: allowed within a valid operator
+//                        session (the chat path runs file_ops only when
+//                        isOperator) and AUDITED — but NOT routed to the
+//                        approval queue. This lets a persona autonomously save
+//                        a file in-session.
+//   delete             → APPROVAL QUEUE ONLY, never direct; a restore point is
+//                        taken first.
+// WRITE_OPS = the session-gated + audited write tier (used for validation +
+// batch restore math). APPROVAL_OPS = the subset that ADDITIONALLY needs the
+// operator approval queue (delete only).
 const WRITE_OPS = new Set(["write", "move", "delete", "mkdir", "copy"]);
+const APPROVAL_OPS = new Set(["delete"]);
 // Operations needing a destination path.
 const DEST_OPS = new Set(["move", "copy"]);
 // Hard cap on a single batch so one approval can't smuggle an unbounded plan.
@@ -110,16 +122,14 @@ export function validate(params: Record<string, unknown>): { ok: boolean; error?
   return validateSingle(params);
 }
 
-function isWriteOp(operation: string): boolean {
-  return WRITE_OPS.has(operation);
-}
-
 export function requiresApproval(params: Record<string, unknown>): boolean {
   const operation = op(params);
   if (operation === "batch") {
-    return (batchOps(params) ?? []).some((o) => isWriteOp(normOp(o)));
+    // A batch needs approval iff it CONTAINS a delete (a chain cannot launder a
+    // delete past the queue — every delete, even inside a batch, is gated).
+    return (batchOps(params) ?? []).some((o) => APPROVAL_OPS.has(normOp(o)));
   }
-  return isWriteOp(operation);
+  return APPROVAL_OPS.has(operation);
 }
 
 export function requiresRestore(params: Record<string, unknown>): boolean {
