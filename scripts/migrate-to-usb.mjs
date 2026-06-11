@@ -337,7 +337,11 @@ await ensureDir(ABS_TARGET);
 // 2) Launchers at root
 console.log("[1/11] Copying launchers...");
 sizes.launchers = 0;
-for (const name of ["launcher.bat", "launcher.command", "launcher.sh"]) {
+// ollama-supervisor.bat: launcher.bat spawns it from %SCRIPT_DIR% (the deploy
+// root). It was never in this list, so every cold-start on a deploy without a
+// pre-running host Ollama died in the wait-loop ("not recognized" in
+// ollama.log) — masked for months by the v2.4.2 REUSE path. 2026-06-11.
+for (const name of ["launcher.bat", "ollama-supervisor.bat", "launcher.command", "launcher.sh"]) {
   const src = path.join(ROOT, "launchers", name);
   if (existsSync(src)) {
     sizes.launchers += await copyTree(src, path.join(ABS_TARGET, name));
