@@ -189,7 +189,13 @@ REM PHASE15 rider evidence). The watchdog (launchers/ollama-supervisor.bat)
 REM owns serve with restart-on-exit AND adopts a reused host daemon: it
 REM probes /api/tags and only starts serve when the port goes dead, so the
 REM REUSE path below gains recovery too. Spawned for BOTH paths.
-start "ARGOS-OLLAMA-WD" /MIN cmd /c """%SCRIPT_DIR%\ollama-supervisor.bat"" ""%OLLAMA_BIN%"" %OLLAMA_PORT% ""%OLLAMA_LOG%"" ""%OLLAMA_STOPFLAG%"" < NUL 1>>""%OLLAMA_LOG%"" 2>&1"
+REM Cold-start fix (2026-06-11): do NOT redirect the watchdog's stdout into
+REM OLLAMA_LOG here. cmd's >> holds the file open with NO write sharing for
+REM the watchdog's whole lifetime, so every append the supervisor itself makes
+REM to the same file — INCLUDING the `ollama serve >>log` line — failed with
+REM "being used by another process": serve never started and the wait-loop
+REM timed out. The supervisor owns its log (arg %3); this wrapper stays quiet.
+start "ARGOS-OLLAMA-WD" /MIN cmd /c """%SCRIPT_DIR%\ollama-supervisor.bat"" ""%OLLAMA_BIN%"" %OLLAMA_PORT% ""%OLLAMA_LOG%"" ""%OLLAMA_STOPFLAG%"" < NUL >NUL 2>&1"
 if "%REUSE_OLLAMA%"=="1" (
   echo [1/4] Reusing host Ollama on 127.0.0.1:%OLLAMA_PORT% ^(watchdog attached^).
   goto OLLAMA_READY
