@@ -13,6 +13,14 @@ services:
       - "AUTH_SECRET=${AUTH_SECRET:-argos_local_secret}"
       - "DATABASE_URL=postgresql://postgres:postgres@db:5432/worldwideview?schema=public"
       - "NODE_ENV=production"
+      # Phase 9 runtime-gate fix: inside the container 127.0.0.1 is the
+      # container itself, so the proxy's loopback default can never reach the
+      # host's ARGOS — Gate A failed 503 until this was set. host.docker.internal
+      # resolves to the host on Docker Desktop; extra_hosts keeps it working on
+      # plain Linux engines too.
+      - "ARGOS_CHAT_URL=${ARGOS_CHAT_URL:-http://host.docker.internal:7799/api/chat}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
