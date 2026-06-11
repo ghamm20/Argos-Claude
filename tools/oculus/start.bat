@@ -29,8 +29,14 @@ if errorlevel 1 (
 )
 
 REM --- Copy ARGOS-managed compose override if it doesn't exist ---
+REM 2026-06-11: the copy failure was swallowed by >nul and compose then died
+REM on the missing file. Verify the file actually landed; fail LOUDLY if not.
 if not exist "%OCULUS_DIR%\docker-compose.argos.yml" (
-    copy "%~dp0docker-compose.argos.yml" "%OCULUS_DIR%\docker-compose.argos.yml" >nul
+    copy "%~dp0docker-compose.argos.yml" "%OCULUS_DIR%\docker-compose.argos.yml" >nul 2>&1
+)
+if not exist "%OCULUS_DIR%\docker-compose.argos.yml" (
+    echo [OCULUS] ERROR: compose override missing and copy from %~dp0 failed.
+    exit /b 1
 )
 
 REM --- Boot Oculus ---
@@ -53,7 +59,9 @@ if !attempts! gtr 12 (
     echo [OCULUS] WARNING: Health check timed out after 60s. May still be starting.
     goto :done
 )
-timeout /t 5 /nobreak >nul
+REM ping, not timeout: timeout.exe hard-fails ("Input redirection is not
+REM supported") under the < NUL stdin the launcher spawns this script with.
+ping -n 6 127.0.0.1 >nul
 curl -s -o nul -w "%%{http_code}" http://127.0.0.1:3011/api/health 2>nul | findstr "200" >nul
 if not errorlevel 1 (
     echo [OCULUS] Ready at http://127.0.0.1:3011

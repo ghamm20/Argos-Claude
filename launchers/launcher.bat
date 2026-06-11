@@ -320,6 +320,25 @@ echo  Tools booting in background. Status in the ARGOS Tools dock.
 echo  Oculus:   http://127.0.0.1:3011
 echo  SuperAGI: http://127.0.0.1:3002
 
+REM Oculus HUD health line (2026-06-11): the silent-skip + background boot
+REM meant a dead pane was only discovered by eyeballing the workspace. Probe
+REM 3011 for up to 90s and print an unambiguous verdict either way.
+set /a OCTRIES=0
+:WAIT_OCULUS
+set /a OCTRIES+=1
+curl -fs --max-time 2 http://127.0.0.1:3011/api/health >NUL 2>&1
+if %errorlevel%==0 (
+  echo [OCULUS] HEALTHY on http://127.0.0.1:3011 - map pane live.
+  goto :skip_tools
+)
+if %OCTRIES% GEQ 30 (
+  echo [OCULUS] *** NOT HEALTHY after 90s *** - map pane will be blank.
+  echo [OCULUS] Check logs\oculus.log; is Docker Desktop running?
+  goto :skip_tools
+)
+timeout /t 3 /nobreak >NUL
+goto WAIT_OCULUS
+
 :skip_tools
 
 echo.
