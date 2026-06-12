@@ -10,6 +10,7 @@ import {
   type FleetEndpoint,
 } from "@/lib/settings";
 import { encryptSecret, maskSecret } from "@/lib/web/secrets";
+import { requireValidSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,7 +112,7 @@ interface SettingsPostBody {
 }
 
 export async function POST(req: NextRequest) {
-  // NOTE — POST /api/settings is intentionally NOT auth-gated.
+  // NOTE — POST /api/settings is NOT auth-gated AS A WHOLE.
   //
   // It is the bootstrap surface for operator auth itself: the PIN hash and the
   // requirePin toggle are SET via this endpoint. Gating it (commit 5a335b9)
@@ -124,13 +125,40 @@ export async function POST(req: NextRequest) {
   //      every settings save 401'd. Every release through v2.4.0 — and both
   //      smoke-settings + auth-smoke — rely on this endpoint being reachable.
   // The real auth boundary lives in /api/chat (guest vs operator prompt +
-  // memory suppression), which is unchanged. Do NOT re-add a gate here without
-  // first plumbing the operator token through every settings client call site.
+  // memory suppression), which is unchanged.
+  //
+  // EXCEPTION — the backend SWITCH is session-authed (2026-06-12 owner
+  // directive: "the flip is session-authed and audited old→new"). A patch
+  // touching the cloud-posture fields (inferenceBackend / perPersonaBackend /
+  // cloudDataPolicy / nousApiKey) requires a PIN-unlocked operator session
+  // when auth is enforceable. requireValidSession() keeps the unconfigured-
+  // PIN exemption, so bootstrap is untouched, and InferenceSection attaches
+  // the operator token (the only settings client that needs to). Flipping the
+  // switch IS the operator's consent to Nous egress — which is exactly why a
+  // guest or unauthenticated Tailscale peer must not be able to flip it.
   let body: SettingsPostBody;
   try {
     body = (await req.json()) as SettingsPostBody;
   } catch {
     return Response.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+
+  const touchesCloudPosture =
+    body.inferenceBackend !== undefined ||
+    body.perPersonaBackend !== undefined ||
+    body.cloudDataPolicy !== undefined ||
+    body.nousApiKey !== undefined;
+  if (touchesCloudPosture) {
+    const auth = await requireValidSession(req);
+    if (auth) {
+      return Response.json(
+        {
+          error:
+            "Backend/cloud-posture changes require a PIN-unlocked operator session. Unlock with your PIN and retry — the flip is session-authed and audited (2026-06-12 directive).",
+        },
+        { status: auth.status }
+      );
+    }
   }
 
   const patch: SettingsPatch = {};

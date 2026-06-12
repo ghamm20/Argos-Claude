@@ -487,7 +487,79 @@ export type SettingsPatch = Partial<
   Omit<PersistedSettings, "version" | "updatedAt">
 >;
 
-export async function writeSettings(
+// ---- POSTURE RULE (owner ruling, 2026-06-12) -------------------------------
+// Self-heal targets SILENT DRIFT only — a persisted pointer at a retired/
+// broken model (normalizeDefaultModel / normalizeToolExecutionModel above) is
+// repaired because no operator chose it. DELIBERATE, AUTHENTICATED operator
+// changes STAND: backend/cloud-posture fields (inferenceBackend,
+// perPersonaBackend, cloudDataPolicy, nousApiKey) are session-authed at the
+// API route, audited old→new below, and warned about in the UI (the FULL
+// policy keeps its orange banner) — they are NEVER silently reverted or
+// "normalized" by readSettings. If a posture value on disk is wrong, the
+// adjudication evidence is the settings.changed value log, not a guess.
+// -----------------------------------------------------------------------------
+
+// Keys whose VALUES are recorded old→new in the settings.changed audit entry.
+// Posture-relevant enums/flags must be value-adjudicable from the chain (the
+// 2026-06-08/11 drift incident was unadjudicable because only key NAMES were
+// logged). Secret-bearing keys are NEVER value-logged — they record a
+// configured/cleared transition instead.
+const VALUE_LOGGED_KEYS = new Set<string>([
+  "inferenceBackend",
+  "perPersonaBackend",
+  "cloudDataPolicy",
+  "useReboundModels",
+  "requirePin",
+  "defaultPersona",
+  "defaultModel",
+  "toolExecutionModel",
+]);
+const SECRET_KEYS = new Set<string>([
+  "nousApiKey",
+  "operatorPinHash",
+  "operatorPushoverUserKey",
+  "operatorPushoverApiToken",
+  "twilioAccountSid",
+  "twilioAuthToken",
+  "apiKeys",
+  "elevenlabs",
+  "gmail",
+]);
+
+function describeChange(
+  key: string,
+  from: unknown,
+  to: unknown
+): { from: unknown; to: unknown } {
+  if (SECRET_KEYS.has(key)) {
+    // Presence transition only — never the value (even ciphertext).
+    const state = (v: unknown) =>
+      v === null || v === undefined || v === "" ? "unset" : "configured";
+    return { from: state(from), to: state(to) };
+  }
+  if (VALUE_LOGGED_KEYS.has(key)) {
+    return { from: from ?? null, to: to ?? null };
+  }
+  // Non-posture, non-secret structured config (fleet, researchSchedule, …):
+  // key-level record only, values elided to keep entries small.
+  return { from: "(value elided)", to: "(value elided)" };
+}
+
+// In-process write mutex. writeSettings is read-modify-write; two concurrent
+// saves (the Settings UI fires one POST per click) could interleave and drop
+// one patch — the suspected mechanism behind the 2026-06-11 lost
+// perPersonaBackend correction. Serialize like appendAudit (lib/audit.ts).
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+export function writeSettings(patch: SettingsPatch): Promise<PersistedSettings> {
+  const run = writeQueue.then(() => writeSettingsUnlocked(patch));
+  writeQueue = run.catch(() => {
+    /* keep the queue alive past a failed write */
+  });
+  return run;
+}
+
+async function writeSettingsUnlocked(
   patch: SettingsPatch
 ): Promise<PersistedSettings> {
   const current = await readSettings();
@@ -548,9 +620,22 @@ export async function writeSettings(
   // Phase 4 audit: record settings change. Best-effort — audit append
   // failure does NOT roll back the settings write (settings is the
   // authoritative store; audit is the receipt).
+  //
+  // 2026-06-12 (owner ruling): the entry records old→new VALUES for
+  // posture-relevant keys (see VALUE_LOGGED_KEYS) so drift is adjudicable
+  // from the chain. Secrets record configured/unset transitions only.
   try {
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const key of Object.keys(patch)) {
+      changes[key] = describeChange(
+        key,
+        (current as unknown as Record<string, unknown>)[key],
+        (next as unknown as Record<string, unknown>)[key]
+      );
+    }
     await appendAudit("settings.changed", {
       changed: Object.keys(patch),
+      changes,
       defaultPersona: next.defaultPersona,
       defaultModel: next.defaultModel,
     });
