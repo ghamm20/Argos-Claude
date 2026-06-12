@@ -11,8 +11,20 @@
 //
 // Storage choice (vs SQLite / chain DB): append-only JSONL is the simplest
 // tamper-evident store. fs.appendFile is POSIX-atomic for small writes (well
-// under PIPE_BUF). Single-operator + single Next.js process means realistic
-// concurrency is zero; multi-writer races accepted as v1.0 scope.
+// under PIPE_BUF).
+//
+// CONCURRENCY (corrected 2026-06-12, owner chain ruling): realistic
+// concurrency is NOT zero. A single Next.js process runs concurrent async
+// handlers, and two appendAudit() calls awaiting in the same tick (observed:
+// memory.written racing session.created/updated) both read the same tail and
+// both write the same index + prevHash — a chain FORK. The live deploy chain
+// carries three such forks (indices 62, 208, 262; same-millisecond sibling
+// pairs, all content-verified). appendAudit is therefore MUTEX-SERIALIZED
+// in-process below. Forked history is never re-chained — forks are documented
+// FORWARD via a "chain.fork_annotated" entry, and verifyChain() treats
+// annotated + content-verified forks as GREEN-with-noted-forks. Cross-process
+// races remain theoretically possible but the daemon-lifecycle doctrine
+// (one server process) keeps them out of scope.
 
 import { promises as fsp } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -41,6 +53,11 @@ export type AuditKind =
   // provenance-less fallback (legacy/copied vault) is recorded.
   | "vault.chunk_quarantined"
   | "vault.heal_unverified"
+  // Owner chain ruling (2026-06-12) — a forward annotation documenting one or
+  // more historical chain forks (duplicate index + prevHash from a concurrent-
+  // writer race). History is NEVER re-chained; the annotation is the durable
+  // record the verifier matches against. See verifyChain().
+  | "chain.fork_annotated"
   | "settings.changed"
   | "persona.switched"
   // Phase 5: voice I/O
@@ -265,9 +282,19 @@ export async function readChain(): Promise<AuditEntry[]> {
   return entries;
 }
 
+// In-process append mutex (owner chain ruling, 2026-06-12). Serializes the
+// read-tail → hash → write critical section so two concurrent handlers can
+// never both extend the same tail (the fork mechanism behind live indices
+// 62/208/262). A failed append must not poison the queue — the chain link
+// swallows, the caller still sees the rejection.
+let appendQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * Append a new audit entry. Computes index + prevHash + hash from the
  * current chain tail, persists to JSONL.
+ *
+ * MUTEX-SERIALIZED in-process: concurrent calls queue and run one at a
+ * time (see appendQueue above).
  *
  * v1.1: O(1) common-path via a stat-based tail cache. If the on-disk
  * file's mtime + size match what we cached last, we trust the cached
@@ -277,7 +304,19 @@ export async function readChain(): Promise<AuditEntry[]> {
  *
  * Returns the persisted entry (with `hash` populated).
  */
-export async function appendAudit(
+export function appendAudit(
+  kind: AuditKind | string,
+  payload: Record<string, unknown>,
+  opts: { sessionId?: string; ts?: number } = {}
+): Promise<AuditEntry> {
+  const run = appendQueue.then(() => appendAuditUnlocked(kind, payload, opts));
+  appendQueue = run.catch(() => {
+    /* keep the queue alive past a failed append */
+  });
+  return run;
+}
+
+async function appendAuditUnlocked(
   kind: AuditKind | string,
   payload: Record<string, unknown>,
   opts: { sessionId?: string; ts?: number } = {}
@@ -352,83 +391,189 @@ export async function appendAudit(
 
 // ----- verification -----
 
+/** A detected fork: two (or more) sibling entries sharing the same index and
+ *  the same prevHash — the signature of a concurrent-writer race. */
+export interface ChainFork {
+  /** entry.index shared by the sibling entries */
+  index: number;
+  /** file positions (0-based line numbers) of the sibling entries */
+  positions: number[];
+  /** hashes of every sibling branch tip, in file order */
+  branchHashes: string[];
+  /** whether a chain.fork_annotated entry documents this fork */
+  annotated: boolean;
+}
+
+export type ChainVerifyStatus = "GREEN" | "GREEN_WITH_NOTED_FORKS" | "FAIL";
+
 export interface ChainVerifyResult {
   ok: boolean;
+  /** GREEN = clean linear chain. GREEN_WITH_NOTED_FORKS = every entry
+   *  content-verified AND every fork documented by a chain.fork_annotated
+   *  entry (owner ruling 2026-06-12). FAIL = tampered content, an
+   *  unannotated break, or a non-fork linkage anomaly — lockdown-trigger
+   *  class. */
+  status: ChainVerifyStatus;
   totalEntries: number;
   brokenAtIndex: number | null;  // first index where verification failed
   brokenReason: string | null;
   firstHash: string | null;
   lastHash: string | null;
+  /** every detected fork (empty for a clean chain) */
+  forks: ChainFork[];
 }
 
 /**
- * Walk the chain from genesis to tail. Each entry's `prevHash` must
- * equal the previous entry's `hash`. Each entry's `hash` must equal
- * computeEntryHash(entryWithoutHash). Genesis entry's `prevHash` must
- * be "".
+ * Walk the chain from genesis to tail. Each entry's `hash` must equal
+ * computeEntryHash(entryWithoutHash) — a content-hash mismatch is ALWAYS a
+ * hard FAIL (tamper). Linkage: each entry's `prevHash` must equal the
+ * previous entry's `hash` and its index must increment — EXCEPT at a fork,
+ * where a sibling entry repeats the previous entry's index AND prevHash
+ * (two writers raced the same tail), and the entry after the fork group may
+ * chain from ANY sibling branch tip.
  *
- * Returns the first break point + the reason. `ok: true` means
- * every entry verified.
+ * Owner ruling (2026-06-12): a fork whose siblings all content-verify AND
+ * which is documented by a later `chain.fork_annotated` entry (payload
+ * .forks[] item matching index + the full branch-hash set) is tolerated —
+ * result ok:true, status GREEN_WITH_NOTED_FORKS. An UNANNOTATED fork, a
+ * content-hash mismatch, or any other linkage break stays a hard FAIL
+ * (lockdown-trigger class). History is never re-chained.
  */
 export async function verifyChain(): Promise<ChainVerifyResult> {
   const entries = await readChain();
   if (entries.length === 0) {
     return {
       ok: true,
+      status: "GREEN",
       totalEntries: 0,
       brokenAtIndex: null,
       brokenReason: null,
       firstHash: null,
       lastHash: null,
+      forks: [],
     };
   }
 
-  let prevHash = "";
+  const fail = (i: number, reason: string): ChainVerifyResult => ({
+    ok: false,
+    status: "FAIL",
+    totalEntries: entries.length,
+    brokenAtIndex: i,
+    brokenReason: reason,
+    firstHash: entries[0].hash,
+    lastHash: entries[entries.length - 1].hash,
+    forks: [],
+  });
+
+  // Pass 1 — content integrity. Every entry's own hash must recompute.
+  // Tamper anywhere is a hard FAIL regardless of annotations.
   for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (e.index !== i) {
-      return {
-        ok: false,
-        totalEntries: entries.length,
-        brokenAtIndex: i,
-        brokenReason: `index mismatch: file position ${i} but entry.index = ${e.index}`,
-        firstHash: entries[0].hash,
-        lastHash: entries[entries.length - 1].hash,
-      };
-    }
-    if (e.prevHash !== prevHash) {
-      return {
-        ok: false,
-        totalEntries: entries.length,
-        brokenAtIndex: i,
-        brokenReason: `prevHash mismatch at index ${i}: expected ${prevHash || "<genesis>"} but entry.prevHash = ${e.prevHash || "<empty>"}`,
-        firstHash: entries[0].hash,
-        lastHash: entries[entries.length - 1].hash,
-      };
-    }
-    // Recompute and verify the entry's own hash.
-    const { hash: storedHash, ...rest } = e;
+    const { hash: storedHash, ...rest } = entries[i];
     const expected = computeEntryHash(rest);
     if (expected !== storedHash) {
+      return fail(
+        i,
+        `hash mismatch at position ${i} (index ${entries[i].index}): stored ${storedHash} but recomputed ${expected} — payload tampered`
+      );
+    }
+  }
+
+  // Collect fork annotations (any position — annotations always land AFTER
+  // the forks they document, but matching is by content, not order).
+  const annotatedForks: Array<{ index: number; branchHashes: string[] }> = [];
+  for (const e of entries) {
+    if (e.kind !== "chain.fork_annotated") continue;
+    const list = (e.payload as { forks?: unknown }).forks;
+    if (!Array.isArray(list)) continue;
+    for (const f of list) {
+      const idx = (f as { index?: unknown }).index;
+      const hashes = (f as { branchHashes?: unknown }).branchHashes;
+      if (typeof idx === "number" && Array.isArray(hashes)) {
+        annotatedForks.push({
+          index: idx,
+          branchHashes: hashes.filter((h): h is string => typeof h === "string"),
+        });
+      }
+    }
+  }
+  const sameSet = (a: string[], b: string[]) =>
+    a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
+
+  // Pass 2 — linkage walk with fork tolerance.
+  if (entries[0].prevHash !== "" || entries[0].index !== 0) {
+    return fail(0, `genesis entry must have index 0 and empty prevHash`);
+  }
+  const forks: ChainFork[] = [];
+  // Branch tips an entry may legally chain from. Normally one (the previous
+  // entry's hash); immediately after a fork group, every sibling tip.
+  let tips = new Set<string>([entries[0].hash]);
+  let prev = entries[0];
+  for (let i = 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.prevHash === prev.prevHash && e.index === prev.index) {
+      // Fork sibling: raced the same tail as `prev`. Extend (or open) the
+      // fork group at this index.
+      const open = forks.find(
+        (f) => f.index === e.index && f.positions.includes(i - 1)
+      );
+      if (open) {
+        open.positions.push(i);
+        open.branchHashes.push(e.hash);
+      } else {
+        forks.push({
+          index: e.index,
+          positions: [i - 1, i],
+          branchHashes: [prev.hash, e.hash],
+          annotated: false,
+        });
+      }
+      tips.add(e.hash);
+      prev = e;
+      continue;
+    }
+    if (tips.has(e.prevHash) && (e.index === prev.index + 1 || e.index === i)) {
+      // Normal continuation — from the single tip, or from any sibling
+      // branch tip right after a fork group. `e.index === i` tolerates the
+      // post-fork index RE-SYNC: a fork makes file position run ahead of
+      // entry.index; a writer that rebuilt its tail via readChain() assigns
+      // index = file position, skipping one index value per prior fork
+      // (live chain: 67, 219, 283 are bookkeeping holes, not deletions —
+      // the unbroken prevHash linkage proves no entry was removed).
+      tips = new Set([e.hash]);
+      prev = e;
+      continue;
+    }
+    return fail(
+      i,
+      `prevHash mismatch at position ${i} (index ${e.index}): expected one of [${[...tips].map((h) => h.slice(0, 12)).join(", ")}] but entry.prevHash = ${(e.prevHash || "<empty>").slice(0, 12)}`
+    );
+  }
+
+  // Pass 3 — every detected fork must be annotated (index + full branch set).
+  for (const f of forks) {
+    f.annotated = annotatedForks.some(
+      (a) => a.index === f.index && sameSet(a.branchHashes, f.branchHashes)
+    );
+    if (!f.annotated) {
       return {
-        ok: false,
-        totalEntries: entries.length,
-        brokenAtIndex: i,
-        brokenReason: `hash mismatch at index ${i}: stored ${storedHash} but recomputed ${expected} — payload tampered`,
-        firstHash: entries[0].hash,
-        lastHash: entries[entries.length - 1].hash,
+        ...fail(
+          f.index,
+          `UNANNOTATED chain fork at index ${f.index} (positions ${f.positions.join("/")}) — lockdown-trigger class; append a chain.fork_annotated entry documenting it or treat as tamper`
+        ),
+        forks,
       };
     }
-    prevHash = storedHash;
   }
 
   return {
     ok: true,
+    status: forks.length > 0 ? "GREEN_WITH_NOTED_FORKS" : "GREEN",
     totalEntries: entries.length,
     brokenAtIndex: null,
     brokenReason: null,
     firstHash: entries[0].hash,
-    lastHash: prevHash,
+    lastHash: prev.hash,
+    forks,
   };
 }
 

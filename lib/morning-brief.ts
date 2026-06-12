@@ -77,8 +77,16 @@ export async function buildVerdictBlock(
   // Chain verification — recomputed at brief time, never asserted from memory.
   try {
     const audit = await verifyChain();
+    // Owner chain ruling (2026-06-12): annotated + content-verified forks are
+    // GREEN-with-noted-forks, stated explicitly. Unannotated break or tamper
+    // stays RED (lockdown-trigger class) via audit.ok === false.
+    const verdictText = audit.ok
+      ? audit.status === "GREEN_WITH_NOTED_FORKS"
+        ? `PASS — GREEN with ${audit.forks.length} noted fork(s) at index ${audit.forks.map((f) => f.index).join("/")}`
+        : "PASS"
+      : `FAIL at index ${audit.brokenAtIndex} (${audit.brokenReason})`;
     lines.push(
-      `- ${audit.ok ? "GREEN " : "RED   "} audit chain: ${audit.totalEntries} entries, verify ${audit.ok ? "PASS" : `FAIL at index ${audit.brokenAtIndex} (${audit.brokenReason})`}  [audit:state/audit/chain.jsonl]`
+      `- ${audit.ok ? "GREEN " : "RED   "} audit chain: ${audit.totalEntries} entries, verify ${verdictText}  [audit:state/audit/chain.jsonl]`
     );
   } catch (e) {
     lines.push(`- RED    audit chain: verify threw — ${(e as Error).message}  [audit:state/audit/chain.jsonl]`);

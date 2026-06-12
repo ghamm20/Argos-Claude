@@ -65,53 +65,110 @@ function computeEntryHash(entryWithoutHash) {
     .digest("hex");
 }
 
+// Fork tolerance (owner chain ruling, 2026-06-12 — MUST match lib/audit.ts
+// verifyChain): a fork = consecutive sibling entries sharing index+prevHash
+// (concurrent-writer race). Content-hash mismatch anywhere = hard FAIL.
+// A fork documented by a later chain.fork_annotated entry (matching index +
+// full branch-hash set) is tolerated → GREEN_WITH_NOTED_FORKS. An
+// unannotated fork stays a hard FAIL (lockdown-trigger class). Post-fork
+// index re-sync (entry.index == file position) is tolerated when the
+// prevHash linkage is intact.
 function verifyChainFile(filePath) {
   if (!existsSync(filePath)) {
     console.log(`  [ok ] chain file does not exist — empty/genesis case (0 entries)`);
-    return { ok: true, totalEntries: 0 };
+    return { ok: true, totalEntries: 0, status: "GREEN" };
   }
   const raw = readFileSync(filePath, "utf8");
   const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  let prevHash = "";
+  const entries = [];
   for (let i = 0; i < lines.length; i++) {
-    let entry;
     try {
-      entry = JSON.parse(lines[i]);
+      entries.push(JSON.parse(lines[i]));
     } catch (e) {
       console.log(`  [FAIL] line ${i + 1}: malformed JSON — ${e.message}`);
       return { ok: false, brokenAtIndex: i, brokenReason: "malformed JSON" };
     }
-    if (entry.index !== i) {
-      console.log(`  [FAIL] index ${i}: entry.index = ${entry.index}`);
-      return { ok: false, brokenAtIndex: i, brokenReason: "index mismatch" };
-    }
-    if (entry.prevHash !== prevHash) {
-      console.log(
-        `  [FAIL] index ${i}: prevHash mismatch (expected ${
-          prevHash || "<genesis>"
-        }, got ${entry.prevHash || "<empty>"})`
-      );
-      return { ok: false, brokenAtIndex: i, brokenReason: "prevHash mismatch" };
-    }
-    const { hash: stored, ...rest } = entry;
+  }
+  if (entries.length === 0) {
+    console.log(`  [ok ] 0 entries — empty chain`);
+    return { ok: true, totalEntries: 0, status: "GREEN" };
+  }
+
+  // Pass 1 — content integrity (tamper anywhere = hard FAIL).
+  for (let i = 0; i < entries.length; i++) {
+    const { hash: stored, ...rest } = entries[i];
     const recomputed = computeEntryHash(rest);
     if (recomputed !== stored) {
-      console.log(
-        `  [FAIL] index ${i}: hash mismatch — payload tampered`
-      );
+      console.log(`  [FAIL] position ${i} (index ${entries[i].index}): hash mismatch — payload tampered`);
       console.log(`         stored:     ${stored}`);
       console.log(`         recomputed: ${recomputed}`);
       return { ok: false, brokenAtIndex: i, brokenReason: "hash mismatch (tamper)" };
     }
-    prevHash = stored;
   }
+
+  // Fork annotations.
+  const annotated = [];
+  for (const e of entries) {
+    if (e.kind !== "chain.fork_annotated") continue;
+    for (const f of Array.isArray(e.payload?.forks) ? e.payload.forks : []) {
+      if (typeof f?.index === "number" && Array.isArray(f?.branchHashes)) {
+        annotated.push({ index: f.index, branchHashes: f.branchHashes });
+      }
+    }
+  }
+  const sameSet = (a, b) =>
+    a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
+
+  // Pass 2 — linkage with fork tolerance.
+  if (entries[0].prevHash !== "" || entries[0].index !== 0) {
+    console.log(`  [FAIL] genesis entry must have index 0 and empty prevHash`);
+    return { ok: false, brokenAtIndex: 0, brokenReason: "bad genesis" };
+  }
+  const forks = [];
+  let tips = new Set([entries[0].hash]);
+  let prev = entries[0];
+  for (let i = 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.prevHash === prev.prevHash && e.index === prev.index) {
+      const open = forks.find((f) => f.index === e.index && f.positions.includes(i - 1));
+      if (open) {
+        open.positions.push(i);
+        open.branchHashes.push(e.hash);
+      } else {
+        forks.push({ index: e.index, positions: [i - 1, i], branchHashes: [prev.hash, e.hash] });
+      }
+      tips.add(e.hash);
+      prev = e;
+      continue;
+    }
+    if (tips.has(e.prevHash) && (e.index === prev.index + 1 || e.index === i)) {
+      tips = new Set([e.hash]);
+      prev = e;
+      continue;
+    }
+    console.log(
+      `  [FAIL] position ${i} (index ${e.index}): prevHash mismatch (expected one of [${[...tips].map((h) => h.slice(0, 12)).join(", ")}], got ${(e.prevHash || "<empty>").slice(0, 12)})`
+    );
+    return { ok: false, brokenAtIndex: i, brokenReason: "prevHash mismatch" };
+  }
+
+  // Pass 3 — every fork must be annotated.
+  for (const f of forks) {
+    const isAnnotated = annotated.some((a) => a.index === f.index && sameSet(a.branchHashes, f.branchHashes));
+    if (!isAnnotated) {
+      console.log(
+        `  [FAIL] UNANNOTATED chain fork at index ${f.index} (positions ${f.positions.join("/")}) — lockdown-trigger class`
+      );
+      return { ok: false, brokenAtIndex: f.index, brokenReason: "unannotated fork" };
+    }
+    console.log(`  [fork] index ${f.index} (positions ${f.positions.join("/")}) — annotated, content-verified, tolerated`);
+  }
+
+  const status = forks.length > 0 ? "GREEN_WITH_NOTED_FORKS" : "GREEN";
   console.log(
-    `  [ok ] ${lines.length} entries verified — chain intact, last hash ${prevHash.slice(
-      0,
-      16
-    )}…`
+    `  [ok ] ${entries.length} entries verified — ${status === "GREEN" ? "chain intact" : `chain intact with ${forks.length} noted fork(s)`}, last hash ${prev.hash.slice(0, 16)}…`
   );
-  return { ok: true, totalEntries: lines.length, lastHash: prevHash };
+  return { ok: true, totalEntries: entries.length, lastHash: prev.hash, status, forks };
 }
 
 function verifyBundle(bundlePath) {
@@ -165,7 +222,11 @@ if (argMap.bundle) {
 console.log("");
 const allOk = chainResult.ok && bundleResult.ok;
 if (allOk) {
-  console.log("VERIFY: PASS");
+  console.log(
+    chainResult.status === "GREEN_WITH_NOTED_FORKS"
+      ? `VERIFY: PASS (GREEN with ${chainResult.forks.length} noted fork(s))`
+      : "VERIFY: PASS"
+  );
   process.exit(0);
 } else {
   console.log("VERIFY: FAIL");
