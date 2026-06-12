@@ -68,3 +68,6 @@ tools/voice/bart-reference/*.flac
 
 # Asset staging drop zone (source PDFs / audio; never committed)
 _intake/
+
+# isolated production dist dir (NEXT_DIST_DIR, build/serve contention fix 2026-06-12)
+.next-prod/
