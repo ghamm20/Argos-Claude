@@ -273,10 +273,13 @@ async function copyTree(src, dst, opts = {}) {
 }
 
 // -------------------------- locate sources --------------------------
-const NEXT_DIR = path.join(ROOT, ".next");
+// NEXT_DIST_DIR (2026-06-12): gate builds use an isolated dist dir when a
+// parallel `next dev` owns .next (see next.config.mjs). The deploy DEST is
+// always app/.next — the deployed server runs with NEXT_DIST_DIR unset.
+const NEXT_DIR = path.join(ROOT, process.env.NEXT_DIST_DIR || ".next");
 if (!existsSync(NEXT_DIR)) {
   die(
-    'Missing .next/ — run "npm run build" before migrating.\n  Production payload requires the built bundle.'
+    `Missing ${process.env.NEXT_DIST_DIR || ".next"}/ — run "npm run build" before migrating.\n  Production payload requires the built bundle.`
   );
 }
 const NODE_MODULES = path.join(ROOT, "node_modules");
