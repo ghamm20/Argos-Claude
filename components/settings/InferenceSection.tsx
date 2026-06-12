@@ -11,10 +11,19 @@
 //   - useReboundModels           Juniper + Bobby → local gemma-4
 //
 // The Nous path routes to ONE model only: nvidia/nemotron-3-ultra:free (free
-// tier). Selecting "API" with no key configured silently falls back to Local
-// (the chat route's documented behavior) — surfaced as a hint here.
+// tier).
+//
+// 2026-06-12 owner directive — THE SWITCH JUST WORKS:
+//   - Flipping to API IS the operator's consent to Nous egress (Nous
+//     endpoints only). No hidden second setting.
+//   - The flip is session-authed: posture patches attach the operator token
+//     and the route 401s without one (when a PIN is configured + required).
+//   - Failures are VISIBLE, never silent: API selected with no key (or any
+//     cloud failure) answers locally and the HUD badge says
+//     "cloud failed: <reason> — answered locally".
 
 import { useCallback, useEffect, useState } from "react";
+import { getSessionToken } from "@/lib/auth-client";
 import { Cloud, Cpu, Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 
 type Backend = "local" | "nous";
@@ -78,9 +87,16 @@ export function InferenceSection() {
       setBusy(true);
       setNotice(null);
       try {
+        // The backend flip is session-authed (2026-06-12 directive): attach
+        // the operator token so a PIN-unlocked operator can flip the switch
+        // and nobody else can.
+        const token = getSessionToken();
         const r = await fetch("/api/settings", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify(body),
         });
         if (!r.ok) {
@@ -148,9 +164,10 @@ export function InferenceSection() {
       </div>
       <p className="mt-1 text-[12px] text-neutral-500 leading-relaxed">
         Route a persona&apos;s chat to the local Ollama daemon or the Nous Research
-        API (<span className="font-mono">{NOUS_MODEL}</span>, free tier). USB-native:
-        the API is network-<span className="text-neutral-400">optional</span> — selecting
-        API with no key falls back to Local silently.
+        API (<span className="font-mono">{NOUS_MODEL}</span>, free tier). Flipping to
+        API is your consent to Nous egress (Nous endpoints only) — flipping back to
+        Local closes it. If a cloud call fails for any reason, the turn answers
+        locally and the HUD badge says so — never silently.
       </p>
 
       {/* Global backend */}
@@ -332,7 +349,9 @@ export function InferenceSection() {
         </div>
         {nousActive && !keyStatus.configured && (
           <div className="mt-2 text-[11px] text-amber-400/90">
-            An API route is selected but no key is set — those personas fall back to Local.
+            An API route is selected but no key is set — those turns will answer
+            locally and the HUD badge will read &quot;cloud failed: nous_key_missing&quot;.
+            Set a key to make the switch real.
           </div>
         )}
       </div>

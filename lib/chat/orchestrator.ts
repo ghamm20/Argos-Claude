@@ -825,14 +825,19 @@ export async function handleChat(req: NextRequest): Promise<Response> {
     }),
   ];
 
-  // ---- Inference backend switch (v2.4.2 Phase A) ----
+  // ---- Inference backend switch (v2.4.2 Phase A; honesty tightened
+  // 2026-06-12, owner directive) ----
   // Resolve WHERE this turn runs. Default (requestedBackend === "local") leaves
   // the Ollama path below byte-for-byte unchanged. On the "nous" path we make a
-  // single NON-STREAMED POST to nvidia/nemotron-3-ultra:free; ANY failure (no
-  // key, non-2xx, timeout, empty) falls back to local SILENTLY and records the
-  // literal reason — the operator never sees an error. Vision turns are always
-  // local (the multimodal model is local-only). The answered backend + EXACT
-  // model are logged at stream close; never a generic "nous" label.
+  // NON-STREAMED POST to nvidia/nemotron-3-ultra:free (one bounded retry on
+  // transient failures); ANY failure (no key, non-2xx, timeout, empty,
+  // reasoning-only) still answers locally so the operator is never left
+  // without a reply — but the failure is SURFACED, never silent: the literal
+  // reason rides the leading backend frame (HUD badge "cloud failed: <reason>
+  // — answered locally"), the response headers, and the chat.inference audit
+  // entry. Vision turns are always local (the multimodal model is local-only).
+  // The answered backend + EXACT model are logged at stream close; never a
+  // generic "nous" label, and never a local answer dressed as cloud.
   const inferenceStart = Date.now();
   let answeredBackend: "local" | "nous" = "local";
   let answeredModel = effectiveModel;
@@ -1102,13 +1107,18 @@ export async function handleChat(req: NextRequest): Promise<Response> {
   };
 
   // v2.4.2 Phase A — leading frame announcing WHICH backend + EXACT model
-  // answered this turn, plus any silent fallback reason. Drives a HUD row and
-  // lets smokes assert the backend without parsing the whole stream.
+  // answered this turn, plus any fallback reason (SURFACED, not silent — the
+  // HUD renders "cloud failed: <reason> — answered locally" from it). Drives
+  // the HUD badge and lets smokes assert the backend without parsing the
+  // whole stream.
   const backendEvent = {
     type: "backend" as const,
     backend: answeredBackend,
     model: answeredModel,
     fallbackReason,
+    // 2026-06-12 owner directive — the badge must distinguish "operator chose
+    // API and the cloud failed" from a plain local turn.
+    requestedBackend,
   };
 
   // v2.4.2 Phase A — read from the Ollama stream OR a synthetic stream that
@@ -1538,6 +1548,12 @@ export async function handleChat(req: NextRequest): Promise<Response> {
             completion_tokens: auditCompletion,
             total_tokens: auditTotal,
             fallback_reason: fallbackReason,
+            // 2026-06-12 — adjudicable switch state: what the operator's
+            // settings requested, vs `backend` (what actually answered).
+            requested_backend: requestedBackend,
+            ...(nousResult && nousResult.attempts > 1
+              ? { nous_attempts: nousResult.attempts }
+              : {}),
             // Phase 9 — provenance: Oculus map-pane queries are attributed here
             // so the single ARGOS audit chain proves the proxy fusion.
             ...(oculusOrigin ? { origin: "oculus", oculusOrigin } : {}),

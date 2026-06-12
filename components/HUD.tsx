@@ -124,6 +124,11 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     running: string | null;
     completedToday: number;
   } | null>(null);
+  // 2026-06-12 — live backend switch state (Settings truth, polled).
+  const [backendSetting, setBackendSetting] = useState<{
+    global: "local" | "nous";
+    overrides: number;
+  } | null>(null);
   // Self-Evolving Loop Suite — loops snapshot for the HUD LOOPS row.
   const [loops, setLoops] = useState<{
     total: number;
@@ -241,6 +246,31 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
     void fetchLoops();
     const loopsPoll = setInterval(() => void fetchLoops(), 8000);
 
+    // 2026-06-12 owner directive — live backend SWITCH state (what the
+    // operator's settings request right now, before/independent of any turn).
+    // The per-turn truth (what actually answered) is lastInference.
+    const fetchBackend = async () => {
+      try {
+        const r = await fetch("/api/settings", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as {
+          inferenceBackend?: string;
+          perPersonaBackend?: Record<string, string>;
+        };
+        const overrides = Object.values(j.perPersonaBackend ?? {}).filter(
+          (v) => v === "nous" || v === "local"
+        ).length;
+        setBackendSetting({
+          global: j.inferenceBackend === "nous" ? "nous" : "local",
+          overrides,
+        });
+      } catch {
+        /* offline; keep prior */
+      }
+    };
+    void fetchBackend();
+    const backendPoll = setInterval(() => void fetchBackend(), 8000);
+
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancel = true;
@@ -248,6 +278,7 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
       clearInterval(countPoll);
       clearInterval(tasksPoll);
       clearInterval(loopsPoll);
+      clearInterval(backendPoll);
     };
   }, [setVaultCounts]);
 
@@ -380,15 +411,47 @@ export function HUD({ argosRoot, version, startedAt }: HUDProps) {
               : "persona binding (no turn yet this session)"
           }
         />
+        {/* Live SWITCH state — what Settings request right now (polled),
+            independent of any turn. The per-turn rows below are what actually
+            answered. (2026-06-12 owner directive: one switch, honest state.) */}
+        {backendSetting && (
+          <Row
+            label="Switch"
+            value={
+              (backendSetting.global === "nous" ? "API (Nous)" : "Local") +
+              (backendSetting.overrides > 0
+                ? ` · ${backendSetting.overrides} override${backendSetting.overrides === 1 ? "" : "s"}`
+                : "")
+            }
+            accent={backendSetting.global === "nous" ? "#38bdf8" : undefined}
+            title="Configured inference backend (Settings → Inference). Per-persona overrides counted when set explicitly."
+          />
+        )}
+        {/* Per-turn HONEST badge: "nemotron" when the cloud actually answered;
+            "cloud failed — answered locally" when the operator requested API
+            and the call failed for any reason. Never pretends. */}
         {lastInference?.backend === "nous" && (
-          <Row label="Backend" value="API (Nous)" accent="#38bdf8" />
+          <Row
+            label="Backend"
+            value="nemotron · cloud answered"
+            accent="#38bdf8"
+            title={`Answered by ${lastInference.model} via Nous (chat.inference audit carries the exact id).`}
+          />
         )}
         {lastInference?.fallbackReason && (
           <Row
-            label="Fallback"
+            label="Backend"
+            value={`cloud failed — answered locally`}
+            accent="#f87171"
+            title={`cloud failed: ${lastInference.fallbackReason} — this turn was answered by the LOCAL model (${lastInference.model}). From the chat.inference audit; never silent.`}
+          />
+        )}
+        {lastInference?.fallbackReason && (
+          <Row
+            label="Reason"
             value={lastInference.fallbackReason}
             accent="#f59e0b"
-            title="The requested backend fell back; this is the honest reason (from the chat.inference audit)."
+            title="The literal failure reason recorded in the chat.inference audit entry."
           />
         )}
         {/* Phase 2-RB: visible swap state. The store sets these during

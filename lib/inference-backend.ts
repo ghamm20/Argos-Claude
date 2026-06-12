@@ -13,16 +13,40 @@
 //                    local gemma-4 (already resident for Bart/Sage — no new
 //                    VRAM). This is NOT Nemotron and NOT a backend change.
 //
-// HONESTY DOCTRINE (Phase A):
+// HONESTY DOCTRINE (Phase A; tightened 2026-06-12, owner directive — "the
+// switch just works", no silent impersonation):
 //   - The ONLY cloud model wired is NOUS_MODEL below. Never the paid 550b
 //     sibling (nvidia/nemotron-3-ultra-550b-a55b) or any ~anthropic / ~google
 //     / ~openai proxy (those are billed per token).
 //   - callNous returns the EXACT model the API echoed back; the caller logs
 //     that literal string, never a generic "nous" label.
-//   - Any failure (missing key, non-2xx, timeout, empty body) THROWS so the
-//     caller can fall back to local silently and record the reason. We never
-//     fabricate a response or a backend label.
+//   - Any failure (missing key, non-2xx, timeout, empty/reasoning-only body)
+//     THROWS. The caller still answers locally so the operator is never left
+//     without a reply, but the failure is SURFACED — fallback reason in the
+//     backend frame, HUD badge ("cloud failed: <reason> — answered locally"),
+//     and the chat.inference audit entry. We never fabricate a response or a
+//     backend label, and we never pretend a local answer came from the cloud.
 //   - No new npm deps: native fetch only.
+//
+// EMPTY-CONTENT ROOT CAUSE (2026-06-12 diagnosis, _diag_nous-shape*.json):
+//   nemotron-3-ultra is a REASONING model — every response carries a separate
+//   message.reasoning field (13/13 live trials, 92–312 chars) alongside
+//   message.content, and max_tokens budgets BOTH. ARGOS forwarded Bart's
+//   brief-register cap (250) straight through, so a long-reasoning turn could
+//   exhaust the budget before any visible content → HTTP 200 with empty
+//   content ("nous returned empty content", 4 failures on 2026-06-11). The
+//   endpoint also throws intermittent 500s (observed live, 1/13) and slow
+//   turns near the old 30s abort (observed 19.2s on trivial prompts; the
+//   2026-06-11 abort ×1). Fixes:
+//     1. max_tokens FLOOR (NOUS_MIN_MAX_TOKENS) so reasoning can never starve
+//        the visible answer; the local num_predict cap is a local concept.
+//     2. Reasoning-aware parse: content empty + reasoning present is named
+//        precisely ("reasoning-only response"), never the generic "empty".
+//        Reasoning text is NEVER presented as the answer (it is not the
+//        assistant's voice).
+//     3. One bounded retry on transient failures (5xx / empty / reasoning-
+//        only) within a total budget that leaves the local fallback room
+//        under the orchestrator's 60s first-token wall.
 
 import type {
   PersistedSettings,
@@ -45,8 +69,19 @@ export const REBOUND_MODEL = "aratan/gemma-4-E4B-q8-it-heretic:latest";
 /** Personas the rebind flag moves to REBOUND_MODEL. Bart/Sage already run it. */
 const REBOUND_PERSONAS = new Set<string>(["juniper", "bobby"]);
 
-/** Per-call abort budget for the Nous request (directive: 30s). */
+/** Per-attempt abort budget for one Nous request (directive: 30s). */
 const NOUS_TIMEOUT_MS = 30_000;
+
+/** Total Nous budget across attempts. Must stay comfortably under the
+ *  orchestrator's 60s first-token wall so a final local fallback still has
+ *  time to produce its first token. */
+const NOUS_TOTAL_BUDGET_MS = 45_000;
+
+/** Floor for max_tokens on the Nous path. Nemotron's reasoning tokens come
+ *  out of the same budget as the visible answer; forwarding a small local
+ *  num_predict cap (Bart brief = 250) verbatim starved content entirely on
+ *  long-reasoning turns (the 2026-06-11 empty-content failures). */
+export const NOUS_MIN_MAX_TOKENS = 1024;
 
 export type InferenceBackend = "local" | "nous";
 
@@ -109,21 +144,28 @@ export interface NousResult {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  /** How many attempts the call took (1 = first try; 2 = one retry). */
+  attempts: number;
 }
 
-/**
- * Call the Nous chat-completions API (non-streamed, single POST) and return
- * the normalized result. THROWS on any failure so the caller falls back to
- * local. The API key is sent in the Authorization header and NEVER logged or
- * returned. Native fetch, 30s abort.
- */
-export async function callNous(opts: {
-  apiKey: string;
-  messages: Array<{ role: string; content: string }>;
-  maxTokens?: number | null;
-}): Promise<NousResult> {
+/** A failure worth ONE retry: transient server error or a reasoning-only/
+ *  empty body (provider-side nondeterminism observed live 2026-06-12). A
+ *  4xx (bad key, bad request) or an abort (budget spent) is NOT retried. */
+function isRetryableNousError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /^nous 5\d\d:/.test(msg) || /reasoning-only|empty content/.test(msg);
+}
+
+async function callNousOnce(
+  opts: {
+    apiKey: string;
+    messages: Array<{ role: string; content: string }>;
+    maxTokens?: number | null;
+  },
+  timeoutMs: number
+): Promise<Omit<NousResult, "attempts">> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NOUS_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(NOUS_CHAT_URL, {
       method: "POST",
@@ -140,7 +182,11 @@ export async function callNous(opts: {
           role: m.role,
           content: m.content,
         })),
-        ...(opts.maxTokens != null ? { max_tokens: opts.maxTokens } : {}),
+        // Floor the cap: reasoning + content share this budget (see header).
+        // null/undefined stays uncapped.
+        ...(opts.maxTokens != null
+          ? { max_tokens: Math.max(opts.maxTokens, NOUS_MIN_MAX_TOKENS) }
+          : {}),
         stream: false,
       }),
       signal: controller.signal,
@@ -151,16 +197,32 @@ export async function callNous(opts: {
     }
     const json = (await res.json()) as {
       model?: string;
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{
+        finish_reason?: string;
+        message?: {
+          content?: string;
+          reasoning?: string;
+          reasoning_content?: string;
+        };
+      }>;
       usage?: {
         prompt_tokens?: number;
         completion_tokens?: number;
         total_tokens?: number;
       };
     };
-    const content = json.choices?.[0]?.message?.content ?? "";
+    const msg = json.choices?.[0]?.message;
+    const content = msg?.content ?? "";
     if (!content.trim()) {
-      throw new Error("nous returned empty content");
+      // Name the failure precisely. Reasoning text is NEVER substituted for
+      // the answer — it is chain-of-thought, not the assistant's voice.
+      const reasoning = msg?.reasoning_content ?? msg?.reasoning ?? "";
+      const finish = json.choices?.[0]?.finish_reason ?? "unknown";
+      throw new Error(
+        reasoning.trim()
+          ? `nous returned reasoning-only response (${reasoning.length}ch reasoning, finish=${finish}) — content empty`
+          : `nous returned empty content (finish=${finish})`
+      );
     }
     return {
       content,
@@ -172,4 +234,33 @@ export async function callNous(opts: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Call the Nous chat-completions API (non-streamed POST) and return the
+ * normalized result. THROWS on any failure so the caller answers locally and
+ * SURFACES the reason (badge + audit — never a silent impersonation). The
+ * API key is sent in the Authorization header and NEVER logged or returned.
+ * Native fetch. One bounded retry on transient failures (5xx, empty,
+ * reasoning-only) within NOUS_TOTAL_BUDGET_MS.
+ */
+export async function callNous(opts: {
+  apiKey: string;
+  messages: Array<{ role: string; content: string }>;
+  maxTokens?: number | null;
+}): Promise<NousResult> {
+  const started = Date.now();
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const remaining = NOUS_TOTAL_BUDGET_MS - (Date.now() - started);
+    if (remaining < 5_000) break; // not enough budget for a meaningful attempt
+    try {
+      const r = await callNousOnce(opts, Math.min(NOUS_TIMEOUT_MS, remaining));
+      return { ...r, attempts: attempt };
+    } catch (e) {
+      lastErr = e;
+      if (!isRetryableNousError(e)) break;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
