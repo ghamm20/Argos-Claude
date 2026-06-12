@@ -299,12 +299,46 @@ if not defined OCULUS_ROOT      set "OCULUS_ROOT=C:\AI\OCULUSBOUND\Oculus-osint-
 if not defined SUPERAGI_ROOT    set "SUPERAGI_ROOT=F:\AI\SuperAGI"
 if not defined LOOKINGGLASS_ROOT set "LOOKINGGLASS_ROOT=E:\AgenticLookingGlass"
 
+REM Gate C durable fix (2026-06-12 directive): a normal morning boot leaves
+REM Docker Desktop stopped, and the old behavior here silently skipped ALL
+REM tool auto-start AND bypassed the [OCULUS] health verdict below — a dead
+REM map pane with no printed cause, two mornings running. The launcher now
+REM OWNS the dependency: start Docker Desktop if the engine is down, wait up
+REM to 180s, and fail HONESTLY (with an explicit [OCULUS] verdict) if it
+REM never comes up. Zero owner surgery on a normal boot.
 docker info >nul 2>&1
-if errorlevel 1 (
-    echo [TOOLS] Docker Desktop not running. Skipping tool auto-start.
-    echo [TOOLS] Tools available via Tools Dock once Docker is up; or run start.bat manually.
+if not errorlevel 1 goto :docker_ready
+
+echo [TOOLS] Docker engine not running - starting Docker Desktop...
+set "DOCKER_EXE=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+if exist "%DOCKER_EXE%" goto :docker_start
+set "DOCKER_EXE=%LOCALAPPDATA%\Docker\Docker Desktop.exe"
+if exist "%DOCKER_EXE%" goto :docker_start
+echo [TOOLS] *** Docker Desktop NOT FOUND *** (looked in "%ProgramFiles%\Docker\Docker" and "%LOCALAPPDATA%\Docker").
+echo [TOOLS] Install Docker Desktop or start the engine manually, then run tools\oculus\start.bat.
+echo [OCULUS] *** NOT HEALTHY *** - map pane will be blank (no Docker engine).
+goto :skip_tools
+
+:docker_start
+start "" "%DOCKER_EXE%"
+echo [TOOLS] Docker Desktop launched - waiting for the engine (up to 180s)...
+set /a DKTRIES=0
+:wait_docker
+set /a DKTRIES+=1
+docker info >nul 2>&1
+if not errorlevel 1 (
+    echo [TOOLS] Docker engine READY.
+    goto :docker_ready
+)
+if %DKTRIES% GEQ 36 (
+    echo [TOOLS] *** Docker engine NOT READY after 180s *** - tool auto-start aborted.
+    echo [OCULUS] *** NOT HEALTHY *** - map pane will be blank. Start Docker Desktop manually, then run tools\oculus\start.bat.
     goto :skip_tools
 )
+timeout /t 5 /nobreak >NUL
+goto :wait_docker
+
+:docker_ready
 
 REM  cmd /c spawn pattern mirrors the OLLAMA/NEXT spawns above:
 REM  triple-quote escaping ("" inside the outer "...") tolerates paths

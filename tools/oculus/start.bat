@@ -21,12 +21,37 @@ if not exist "%OCULUS_DIR%" (
     exit /b 1
 )
 
-REM --- Verify Docker is running ---
+REM --- Verify Docker is running; start Docker Desktop if not (Gate C
+REM durable fix, 2026-06-12). Mirrors the launcher's logic so a MANUAL
+REM start.bat run is just as durable. ping-based sleeps only: this script
+REM runs with < NUL stdin from the launcher, where timeout.exe hard-fails.
 docker info >nul 2>&1
-if errorlevel 1 (
-    echo [OCULUS] ERROR: Docker Desktop is not running. Start Docker first.
+if not errorlevel 1 goto :docker_ok
+
+echo [OCULUS] Docker engine not running - starting Docker Desktop...
+set "DOCKER_EXE=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+if exist "!DOCKER_EXE!" goto :docker_spawn
+set "DOCKER_EXE=%LOCALAPPDATA%\Docker\Docker Desktop.exe"
+if exist "!DOCKER_EXE!" goto :docker_spawn
+echo [OCULUS] ERROR: Docker Desktop not found. Install it or start the engine, then re-run.
+exit /b 1
+
+:docker_spawn
+start "" "!DOCKER_EXE!"
+echo [OCULUS] Docker Desktop launched - waiting for the engine (up to 180s)...
+set /a dktries=0
+:docker_wait
+set /a dktries+=1
+docker info >nul 2>&1
+if not errorlevel 1 goto :docker_ok
+if !dktries! gtr 36 (
+    echo [OCULUS] ERROR: Docker engine NOT READY after 180s. Start Docker Desktop manually, then re-run.
     exit /b 1
 )
+ping -n 6 127.0.0.1 >nul
+goto :docker_wait
+
+:docker_ok
 
 REM --- Copy ARGOS-managed compose override if it doesn't exist ---
 REM 2026-06-11: the copy failure was swallowed by >nul and compose then died
